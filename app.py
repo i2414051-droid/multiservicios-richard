@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (Flask, render_template, request, redirect,
-                   url_for, session, jsonify, flash, send_file)
+                url_for, session, jsonify, flash, send_file)
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail, Message
@@ -401,9 +401,9 @@ def admin():
     total_proveedores = r2['total'] if r2 else 0
 
     return render_template('admin.html',
-                           productos=productos,
-                           pedidos_pendientes=pedidos_pendientes,
-                           total_proveedores=total_proveedores)
+                            productos=productos,
+                            pedidos_pendientes=pedidos_pendientes,
+                            total_proveedores=total_proveedores)
 
 # ─────────────────────────────────────────────
 # PRODUCTOS CRUD
@@ -492,10 +492,36 @@ def eliminar_producto(id):
 
 @app.route('/activar_producto/<int:id>')
 def activar_producto(id):
+
     cur = mysql.connection.cursor()
-    cur.execute("UPDATE productos SET estado='activo' WHERE id=%s", (id,))
+
+    # OBTENER STOCK DEL PRODUCTO
+    cur.execute(
+        "SELECT stock FROM productos WHERE id=%s",
+        (id,)
+    )
+
+    producto = cur.fetchone()
+
+    # SI HAY STOCK ACTIVO
+    if producto and producto[0] > 0:                                 #agregado automatizacion de producto
+
+        cur.execute(
+            "UPDATE productos SET estado='activo' WHERE id=%s",
+            (id,)
+        )
+
+    # SI NO HAY STOCK  OCULTO
+    else:
+
+        cur.execute(
+            "UPDATE productos SET estado='oculto' WHERE id=%s",
+            (id,)
+        )
+
     mysql.connection.commit()
     cur.close()
+
     return redirect('/admin')
 
 # ─────────────────────────────────────────────
@@ -533,7 +559,7 @@ def index():
     buscar   = request.args.get('buscar','')
     categoria = request.args.get('categoria','Todos')
     cur = mysql.connection.cursor()
-    sql = "SELECT * FROM productos WHERE nombre LIKE %s AND estado='activo'"
+    sql = "SELECT * FROM productos WHERE nombre LIKE %s AND estado='activo' AND stock > 0"      #modificado 27/07/26 para productos con stock 0 desaparezcan automáticamente de la tienda
     vals = [f'%{buscar}%']
     if categoria != 'Todos':
         sql += ' AND categoria=%s'
@@ -842,7 +868,7 @@ def proveedores():
     lista = cur.fetchall()
     cur.close()
     return render_template('proveedores.html', proveedores=lista,
-                           categorias=CATEGORIAS, buscar=buscar, cat_filtro=cat_filtro)
+                            categorias=CATEGORIAS, buscar=buscar, cat_filtro=cat_filtro)
 
 @app.route('/proveedores/editar/<int:id>', methods=['GET','POST'])
 def editar_proveedor(id):
@@ -866,7 +892,7 @@ def editar_proveedor(id):
     p = cur.fetchone()
     cur.close()
     return render_template('proveedores.html', editar=p, categorias=CATEGORIAS,
-                           proveedores=[], buscar='', cat_filtro='')
+                            proveedores=[], buscar='', cat_filtro='')
 
 @app.route('/proveedores/eliminar/<int:id>')
 def eliminar_proveedor(id):
