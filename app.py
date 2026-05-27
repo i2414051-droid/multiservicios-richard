@@ -496,10 +496,10 @@ def activar_producto(id):
     cur = mysql.connection.cursor()
 
     # OBTENER DATOS
-    cur.execute(
-        "SELECT stock, estado FROM productos WHERE id=%s",
-        (id,)
-    )
+    cur.execute("""
+    SELECT stock, estado
+    FROM productos
+    WHERE id = %s""", (id,))
 
     producto = cur.fetchone()
 
