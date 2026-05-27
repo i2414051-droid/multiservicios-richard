@@ -6,300 +6,150 @@
     <h2 class="mb-3">Panel Administrador</h2>
 
     <div class="d-flex gap-2 mb-4 flex-wrap">
-
-    <a href="/logout" class="btn btn-outline-danger">
-        <i class="bi bi-box-arrow-right"></i> Cerrar sesión
-    </a>
-
-    <a href="/historial-compras" class="btn btn-outline-info">
-        <i class="bi bi-receipt-cutoff"></i> Historial de Compras
-    </a>
-
-    <a href="/permisos" class="btn btn-outline-warning">
-        <i class="bi bi-shield-lock"></i> Permisos
-    </a>
-
+        <a href="/logout" class="btn btn-outline-danger">
+            <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+        </a>
+        <a href="/productos-para-pedir" class="btn btn-outline-danger position-relative">
+            <i class="bi bi-cart-dash"></i> Productos para Pedir
+            {% if pedidos_pendientes > 0 %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                {{ pedidos_pendientes }}
+            </span>
+            {% endif %}
+        </a>
+        <a href="/proveedores" class="btn btn-outline-info">
+            <i class="bi bi-truck"></i> Proveedores
+            {% if total_proveedores > 0 %}
+            <span class="badge bg-info text-dark ms-1">{{ total_proveedores }}</span>
+            {% endif %}
+        </a>
     </div>
 
-    <!-- ======================= -->
     <!-- FORMULARIO AGREGAR -->
-    <!-- ======================= -->
-
     <div class="card shadow-sm mb-4">
-        <div class="card-header bg-dark text-white">
-            Agregar Producto
-        </div>
-
+        <div class="card-header bg-dark text-white">Agregar Producto</div>
         <div class="card-body">
-
-            <form method="POST"
-                  action="/agregar_producto"
-                  enctype="multipart/form-data"
-                  class="row g-2 mb-4">
-
+            <form method="POST" action="/agregar_producto" enctype="multipart/form-data" class="row g-2 mb-4">
                 <div class="row">
-
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Nombre</label>
-
-                        <input name="nombre"
-                               class="form-control"
-                               required>
+                        <input name="nombre" class="form-control" required>
                     </div>
-
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Precio</label>
-
-                        <input type="number"
-                               step="0.01"
-                               name="precio"
-                               class="form-control"
-                               required>
+                        <input type="number" step="0.01" name="precio" class="form-control" required>
                     </div>
-
                     <div class="col-md-12 mb-3">
                         <label class="form-label">Descripción</label>
-
-                        <textarea name="descripcion"
-                                  class="form-control"
-                                  rows="3"
-                                  required></textarea>
+                        <textarea name="descripcion" class="form-control" rows="3" required></textarea>
                     </div>
-
-                    <div class="col-md-6 mb-3">
+                    <div class="col-md-4 mb-3">
                         <label class="form-label">Stock</label>
-
-                        <input type="number"
-                               name="stock"
-                               class="form-control"
-                               required>
+                        <input type="number" name="stock" class="form-control" required>
                     </div>
-
-                    <div class="col-md-6 mb-3">
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label">Categoría</label>
+                        <select name="categoria" class="form-control" required>
+                            {% for cat in ['Herramientas','Electricos','Accesorios','Repuestos','Otros'] %}
+                            <option value="{{ cat }}">{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 mb-3">
                         <label class="form-label">Imagen</label>
-
-                        <input type="file"
-                               name="imagen"
-                               class="form-control"
-                               accept="image/*"
-                               required>
+                        <input type="file" name="imagen" class="form-control" accept="image/*" required>
                     </div>
-
                 </div>
-
                 <button class="btn btn-success w-100">
-
-                    <i class="bi bi-plus-circle"></i>
-
-                    Agregar Producto
-
+                    <i class="bi bi-plus-circle"></i> Agregar Producto
                 </button>
-
             </form>
-
         </div>
     </div>
 
-    <!-- ======================= -->
+    <!-- LEYENDA STOCK -->
+    <div class="d-flex gap-3 mb-3 align-items-center flex-wrap">
+        <small class="text-muted fw-bold">Indicador de stock:</small>
+        <span class="badge bg-success">≥ 15 — Normal</span>
+        <span class="badge bg-warning text-dark">5–14 — Bajo</span>
+        <span class="badge bg-danger">&lt; 5 — Crítico</span>
+        <span class="badge bg-danger border border-white">≤ 1 — Auto-pedido 🔔</span>
+    </div>
+
     <!-- TABLA PRODUCTOS -->
-    <!-- ======================= -->
-
     <div class="card shadow-sm">
-
-        <div class="card-header bg-secondary text-white">
-            Lista de Productos
-        </div>
-
+        <div class="card-header bg-secondary text-white">Lista de Productos</div>
         <div class="card-body p-0">
-
             <table class="table table-hover table-bordered mb-0 text-center align-middle">
-
                 <thead class="table-dark">
-
                     <tr>
-
                         <th>ID</th>
-
                         <th>Imagen</th>
-
                         <th>Nombre</th>
-
-                        <th>Descripción</th>
-
+                        <th>Categoría</th>
                         <th>Precio</th>
-
                         <th>Stock</th>
-
                         <th>Estado</th>
-
                         <th>Acciones</th>
-
                     </tr>
-
                 </thead>
-
                 <tbody>
-
                     {% for p in productos %}
-
                     <tr class="{% if p.estado != 'activo' %}table-secondary opacity-50{% endif %}">
-
-                        <!-- ID -->
-
+                        <td>{{ p.id }}</td>
                         <td>
-
-                            {{ p.id }}
-
-                        </td>
-
-                        <!-- IMAGEN -->
-
-                        <td>
-
                             {% if p.imagen %}
-
-                                <img
-                                src="{{ url_for('static', filename=p.imagen) }}"
-                                width="60"
-                                class="rounded">
-
+                            <img src="{{ url_for('static', filename=p.imagen) }}" width="60" class="rounded">
                             {% else %}
-
-                                <img
-                                src="{{ url_for('static', filename='uploads/no-image.png') }}"
-                                width="60"
-                                class="rounded">
-
+                            <span class="text-muted">—</span>
                             {% endif %}
-
                         </td>
+                        <td>{{ p.nombre }}</td>
+                        <td><span class="badge bg-secondary">{{ p.categoria or '—' }}</span></td>
+                        <td>S/ {{ p.precio }}</td>
 
-                        <!-- NOMBRE -->
-
+                        <!-- STOCK CON COLORES -->
                         <td>
-
-                            {{ p.nombre }}
-
-                        </td>
-
-                        <!-- DESCRIPCIÓN -->
-
-                        <td>
-
-                            {{ p.descripcion }}
-
-                        </td>
-
-                        <!-- PRECIO -->
-
-                        <td>
-
-                            S/ {{ p.precio }}
-
-                        </td>
-
-                        <!-- STOCK -->
-
-                        <td>
-
-                            {% if p.stock > 0 %}
-
-                                <span class="badge bg-success">
-
-                                    {{ p.stock }}
-
-                                </span>
-
+                            {% if p.stock is not none %}
+                                {% if p.stock <= 1 %}
+                                    <span class="badge bg-danger" title="¡Auto-pedido generado!">
+                                        {{ p.stock }} 🔔
+                                    </span>
+                                {% elif p.stock < 5 %}
+                                    <span class="badge bg-danger">{{ p.stock }}</span>
+                                {% elif p.stock < 15 %}
+                                    <span class="badge bg-warning text-dark">{{ p.stock }}</span>
+                                {% else %}
+                                    <span class="badge bg-success">{{ p.stock }}</span>
+                                {% endif %}
                             {% else %}
-
-                                <span class="badge bg-danger">
-
-                                    Sin stock
-
-                                </span>
-
+                                <span class="badge bg-danger">Sin stock</span>
                             {% endif %}
-
                         </td>
 
-                        <!-- ESTADO -->
-
                         <td>
-
                             {% if p.estado == 'activo' %}
-
-                                <span class="badge bg-success">
-
-                                    Activo
-
-                                </span>
-
+                            <span class="badge bg-success">Activo</span>
                             {% else %}
-
-                                <span class="badge bg-secondary">
-
-                                    Oculto
-
-                                </span>
-
+                            <span class="badge bg-secondary">Oculto</span>
                             {% endif %}
-
                         </td>
-
-                        <!-- ACCIONES -->
-
                         <td>
-
-    <!-- EDITAR -->
-
-    <a href="/editar_producto/{{ p.id }}"
-       class="btn btn-warning btn-sm">
-
-       ✏
-
-    </a>
-
-
-    {% if p.estado == 'activo' %}
-
-    <!-- OCULTAR -->
-
-    <a href="/eliminar_producto/{{ p.id }}"
-       class="btn btn-secondary btn-sm"
-       onclick="return confirm('¿Ocultar producto?')">
-
-       👁
-
-    </a>
-
-    {% else %}
-
-    <!-- ACTIVAR -->
-
-    <a href="/activar_producto/{{ p.id }}"
-       class="btn btn-success btn-sm"
-       onclick="return confirm('¿Activar producto nuevamente?')">
-
-       ↺
-
-    </a>
-
-    {% endif %}
-
-</td>
-
+                            <a href="/editar_producto/{{ p.id }}" class="btn btn-warning btn-sm">✏</a>
+                            {% if p.estado == 'activo' %}
+                            <a href="/eliminar_producto/{{ p.id }}" class="btn btn-secondary btn-sm"
+                               onclick="return confirm('¿Ocultar producto?')">👁</a>
+                            {% else %}
+                            <a href="/activar_producto/{{ p.id }}" class="btn btn-success btn-sm"
+                               onclick="return confirm('¿Activar producto nuevamente?')">↺</a>
+                            {% endif %}
+                        </td>
                     </tr>
-
                     {% endfor %}
-
                 </tbody>
-
             </table>
-
         </div>
-
     </div>
 
 </div>
-
 {% endblock %}
