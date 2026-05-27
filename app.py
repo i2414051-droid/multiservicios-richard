@@ -493,43 +493,47 @@ def eliminar_producto(id):
 @app.route('/activar_producto/<int:id>')
 def activar_producto(id):
 
-    cur = mysql.connection.cursor()
+    try:
+        cur = mysql.connection.cursor()
 
-    cur.execute("""
-        SELECT stock, estado
-        FROM productos
-        WHERE id = %s
-    """, (id,))
-
-    producto = cur.fetchone()
-
-    if not producto:
-        cur.close()
-        return redirect('/admin')
-
-    stock, estado = producto
-
-    # SI NO HAY STOCK  SIEMPRE OCULTO
-    if stock <= 0:
+        # OBTENER PRODUCTO
         cur.execute("""
-            UPDATE productos
-            SET estado='oculto'
-            WHERE id=%s
+            SELECT stock, estado
+            FROM productos
+            WHERE id = %s
         """, (id,))
 
-    # SI HAY STOCK → ACTIVO (RESPETA OCULTO MANUAL)
-    else:
-        if estado != 'oculto':
+        producto = cur.fetchone()
+
+        if not producto:
+            return redirect('/admin')
+
+        stock, estado = producto
+
+        # SI NO HAY STOCK → SIEMPRE OCULTO
+        if stock <= 0:
+            cur.execute("""
+                UPDATE productos
+                SET estado='oculto'
+                WHERE id=%s
+            """, (id,))
+
+        else:
+            # SI HAY STOCK → ACTIVO
             cur.execute("""
                 UPDATE productos
                 SET estado='activo'
                 WHERE id=%s
             """, (id,))
 
-    mysql.connection.commit()
-    cur.close()
+        mysql.connection.commit()
+        cur.close()
 
-    return redirect('/admin')
+        return redirect('/admin')
+
+    except Exception as e:
+        print("ERROR ACTIVAR PRODUCTO:", e)
+        return str(e)
 
 # ─────────────────────────────────────────────
 # CONSULTAR DNI/RUC
