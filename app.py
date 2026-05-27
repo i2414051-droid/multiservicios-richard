@@ -506,16 +506,24 @@ def activar_producto(id):
         producto = cur.fetchone()
 
         if not producto:
+            cur.close()
             return redirect('/admin')
 
         stock, estado = producto
-        stock = int(stock) 
-        # SI NO HAY STOCK → SIEMPRE OCULTO
+
+        # 🔥 FIX SEGURO DE TIPO
+        try:
+            stock = int(stock)
+        except:
+            stock = 0
+
+        # SI NO HAY STOCK → OCULTO
         if stock <= 0:
             cur.execute("""
                 UPDATE productos
                 SET estado='oculto'
-                WHERE id=%s""", (id,))
+                WHERE id=%s
+            """, (id,))
 
         else:
             # SI HAY STOCK → ACTIVO
@@ -533,7 +541,6 @@ def activar_producto(id):
     except Exception as e:
         print("ERROR ACTIVAR PRODUCTO:", e)
         return str(e)
-
 # ─────────────────────────────────────────────
 # CONSULTAR DNI/RUC
 # ─────────────────────────────────────────────
