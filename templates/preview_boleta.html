@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Boleta de Venta</title>
+    <style>
+        body{
+            font-family: Arial, sans-serif;
+            width: 750px;
+            margin: auto;
+            color: #333;
+        }
+
+        .boleta-box{
+            border: 2px solid #000;
+            padding: 20px;
+        }
+
+        .header{
+            text-align:center;
+        }
+
+        .empresa{
+            font-size:22px;
+            font-weight:bold;
+        }
+
+        .ruc{
+            font-size:16px;
+            margin-top:5px;
+        }
+
+        .titulo{
+            font-size:18px;
+            font-weight:bold;
+            margin-top:10px;
+        }
+
+        .info{
+            margin-top:20px;
+            font-size:14px;
+        }
+
+        table{
+            width:100%;
+            border-collapse: collapse;
+            margin-top:20px;
+        }
+
+        th{
+            background:#f2f2f2;
+            border:1px solid #000;
+            padding:8px;
+        }
+
+        td{
+            border:1px solid #000;
+            padding:8px;
+            text-align:center;
+        }
+
+        .total-box{
+            text-align:right;
+            margin-top:15px;
+            font-size:18px;
+            font-weight:bold;
+        }
+
+        .footer{
+            margin-top:30px;
+            text-align:center;
+            font-size:13px;
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="boleta-box">
+
+    <div class="header">
+        <div class="empresa">MULTISERVICIOS RICHARD</div>
+        <!-- 🔥 CAMBIA AQUÍ TU RUC -->
+        <div class="ruc">RUC: 10450119429</div>
+        <div>Huancayo - Perú</div>
+        <div class="titulo">BOLETA DE VENTA ELECTRÓNICA</div>
+        <div>N° {{ venta_id }}</div>
+    </div>
+
+    <div class="info">
+        <p><strong>Cliente:</strong> {{ nombre }}</p>
+        <p><strong>DNI / RUC:</strong> {{ doc }}</p>
+    </div>
+
+    <table>
+        <tr>
+            <th>Producto</th>
+            <th>Cantidad</th>
+            <th>Precio</th>
+            <th>Subtotal</th>
+        </tr>
+
+        {% for p in productos %}
+        <tr>
+            <td>{{ p.nombre }}</td>
+            <td>{{ p.cantidad }}</td>
+            <td>S/ {{ "%.2f"|format(p.precio) }}</td>
+            <td>S/ {{ "%.2f"|format(p.cantidad * p.precio) }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div class="total-box">
+        TOTAL: S/ {{ "%.2f"|format(total) }}
+    </div>
+
+    <div class="footer">
+        Gracias por su compra 🙌 <br>
+        Representación impresa de la boleta electrónica
+    </div>
+
+</div>
+
+<br>
+
+<div style="text-align:center;">
+    <a href="/boleta_pdf/{{ venta_id }}" 
+       class="btn btn-outline-danger px-5 py-2 fw-bold shadow">
+
+        <i class="bi bi-filetype-pdf me-2"></i>
+        DESCARGAR BOLETA PDF
+    </a>
+</div>
+
+</body>
+</html>

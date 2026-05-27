@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+<meta charset="UTF-8">
+<title>Multiservicios Richard</title>
+
+<!-- Bootstrap -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+
+<!-- FUENTE -->
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<link rel="stylesheet"
+href="{{url_for('static',filename='css/estilos.css')}}">
+
+</head>
+
+
+<body class="fondo-principal">
+
+
+<!-- NAVBAR -->
+
+<nav class="navbar navbar-expand-lg navbar-custom">
+
+<div class="container-fluid px-4">
+
+
+<!-- LOGO -->
+
+<a class="navbar-brand d-flex align-items-center" href="/">
+
+<img
+src="{{url_for('static',filename='img/logo.png')}}"
+class="logo-navbar">
+
+<span class="nombre-logo">
+
+MULTISERVICIOS
+<br>
+
+<span style="font-size:30px">
+RICHARD
+</span>
+
+</span>
+
+</a>
+
+
+
+<!-- MENÚ -->
+
+<div class="menu">
+
+<a href="/" class="menu-item active">
+<i class="bi bi-house-fill"></i>
+Inicio
+</a>
+
+{% if session.get('rol') == 'admin' %}
+
+<a href="/admin" class="menu-item">
+<i class="bi bi-box-seam"></i>
+Productos
+</a>
+
+<a href="/historial-compras" class="menu-item">
+<i class="bi bi-clock-history"></i>
+Historial compras
+</a>
+
+<a href="/permisos" class="menu-item">
+<i class="bi bi-shield-lock"></i>
+Permisos
+</a>
+
+{% else %}
+
+<a href="/carrito" class="menu-item">
+<i class="bi bi-cart3"></i>
+Carrito
+</a>
+
+{% if session.get('correo') %}
+<a href="/historial" class="menu-item">
+<i class="bi bi-bag-check"></i>
+Mis compras
+</a>
+{% endif %}
+
+{% endif %}
+
+</div>
+
+
+
+<!-- USUARIO -->
+
+<div class="d-flex align-items-center">
+
+
+{% if session.get('correo') %}
+
+
+<div class="usuario-box me-3">
+
+<i class="bi bi-person-circle"></i>
+
+<div>
+
+{{session['correo']}}
+
+<br>
+
+<small>
+
+{{session['rol']}}
+
+</small>
+
+</div>
+
+</div>
+
+
+<a href="/logout"
+class="btn boton-personal">
+
+Salir
+
+</a>
+
+
+{% else %}
+
+
+<a href="/login"
+class="btn boton-personal">
+
+Login
+
+</a>
+
+{% endif %}
+
+
+
+<a href="/carrito"
+class="btn carrito-btn ms-3">
+
+<i class="bi bi-cart3"></i>
+
+{% if cantidad_carrito > 0 %}
+
+<span class="contador-carrito">
+
+{{cantidad_carrito}}
+
+</span>
+
+{% endif %}
+
+</a>
+
+
+</div>
+
+</div>
+
+</nav>
+
+
+
+<!-- FLASH -->
+
+<div class="container mt-3">
+
+{% with messages=get_flashed_messages(with_categories=true) %}
+{% if messages %}
+
+{% for category,message in messages %}
+
+<div class="alert alert-{{category}}
+alert-dismissible
+fade
+show
+mensaje-flash">
+
+{{message}}
+
+<button
+class="btn-close"
+data-bs-dismiss="alert">
+</button>
+
+</div>
+
+{% endfor %}
+
+{% endif %}
+{% endwith %}
+
+</div>
+
+
+
+<!-- CONTENIDO -->
+
+<div class="container mt-4">
+
+{% block content %}
+{% endblock %}
+
+</div>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+
+<script>
+
+setTimeout(()=>{
+
+document.querySelectorAll(".mensaje-flash")
+
+.forEach(e=>{
+
+e.style.transition=".5s"
+
+e.style.opacity="0"
+
+e.style.transform="translateY(-30px)"
+
+setTimeout(()=>{
+
+e.remove()
+
+},500)
+
+})
+
+},3000)
+
+</script>
+
+</body>
+</html>

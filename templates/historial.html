@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container mt-4">
+
+  <h2 class="mb-4">
+    <i class="bi bi-bag-check me-2"></i>Mis Compras
+  </h2>
+
+  {% if historial %}
+    {% for venta in historial %}
+    <div class="card mb-4 shadow-sm border-0" style="background:#1e1e2e;">
+
+      <!-- CABECERA -->
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
+           style="background:#2a2a3d; cursor:pointer;"
+           data-bs-toggle="collapse"
+           data-bs-target="#compra-{{ venta.id }}">
+        <div class="d-flex align-items-center gap-3">
+          <span class="badge bg-primary fs-6">Compra #{{ venta.id }}</span>
+          <span class="text-muted" style="font-size:.9rem;">
+            <i class="bi bi-calendar3 me-1"></i>{{ venta.fecha }}
+          </span>
+        </div>
+        <div class="d-flex align-items-center gap-3">
+          <span class="text-success fw-bold fs-6">
+            <i class="bi bi-cash-coin me-1"></i>S/ {{ "%.2f"|format(venta.total) }}
+          </span>
+          <i class="bi bi-chevron-down text-white"></i>
+        </div>
+      </div>
+
+      <!-- DETALLE -->
+      <div id="compra-{{ venta.id }}" class="collapse show">
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 text-center align-middle">
+              <thead style="background:#12122a;">
+                <tr>
+                  <th><i class="bi bi-hash"></i> ID</th>
+                  <th>Producto</th>
+                  <th>Descripción</th>
+                  <th>Cantidad</th>
+                  <th>Precio Unit.</th>
+                  <th>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in venta.productos %}
+                <tr>
+                  <td>
+                    <span class="badge bg-secondary">{{ p.producto_id }}</span>
+                  </td>
+                  <td class="text-start fw-semibold">{{ p.nombre }}</td>
+                  <td class="text-start text-muted" style="font-size:.85rem;max-width:200px;">
+                    {{ p.descripcion }}
+                  </td>
+                  <td>
+                    <span class="badge bg-info text-dark">{{ p.cantidad }}</span>
+                  </td>
+                  <td>S/ {{ "%.2f"|format(p.precio) }}</td>
+                  <td class="text-success fw-bold">
+                    S/ {{ "%.2f"|format(p.cantidad * p.precio) }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+              <tfoot>
+                <tr style="background:#2a2a3d;">
+                  <td colspan="5" class="text-end fw-bold text-white">TOTAL</td>
+                  <td class="text-success fw-bold fs-6">
+                    S/ {{ "%.2f"|format(venta.total) }}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    {% endfor %}
+
+  {% else %}
+    <div class="text-center py-5">
+      <i class="bi bi-bag-x display-4 text-muted"></i>
+      <p class="text-muted mt-3">Aún no tienes compras registradas.</p>
+      <a href="/" class="btn btn-primary mt-2">
+        <i class="bi bi-shop me-1"></i>Ir a la tienda
+      </a>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}

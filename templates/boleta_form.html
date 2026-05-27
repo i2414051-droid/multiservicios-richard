@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container mt-4">
+
+    <h3 class="text-center mb-4">Consulta DNI / RUC</h3>
+
+    <input type="hidden" id="venta_id" value="{{ venta_id }}">
+
+    <div class="mb-3">
+        <label>Tipo de documento</label>
+        <select id="tipo" class="form-control" onchange="cambiarTipo()">
+            <option value="dni">DNI</option>
+            <option value="ruc">RUC</option>
+        </select>
+    </div>
+
+    <div class="mb-3">
+        <label>Número</label>
+        <input type="text" id="numero" class="form-control">
+    </div>
+
+    <button onclick="consultar()" class="btn btn-success w-100 mb-4">
+        Consultar
+    </button>
+
+    <!-- 🔥 CAMPOS DNI -->
+    <div id="dni_campos">
+
+        <div class="mb-3">
+            <label>Nombres</label>
+            <input type="text" id="nombres" class="form-control" readonly>
+        </div>
+
+        <div class="mb-3">
+            <label>Apellido Paterno</label>
+            <input type="text" id="apellidoPaterno" class="form-control" readonly>
+        </div>
+
+        <div class="mb-3">
+            <label>Apellido Materno</label>
+            <input type="text" id="apellidoMaterno" class="form-control" readonly>
+        </div>
+
+    </div>
+
+    <!-- 🔥 CAMPO RUC -->
+    <div id="ruc_campos" style="display:none;">
+
+        <div class="mb-3">
+            <label>Razón Social</label>
+            <input type="text" id="razonSocial" class="form-control" readonly>
+        </div>
+
+    </div>
+
+    <!-- 👁 Vista previa -->
+    <button onclick="vistaPrevia()" class="btn btn-primary w-100">
+        Vista previa
+    </button>
+
+</div>
+
+<script>
+
+function cambiarTipo(){
+    let tipo = document.getElementById("tipo").value;
+
+    if(tipo === "dni"){
+        document.getElementById("dni_campos").style.display = "block";
+        document.getElementById("ruc_campos").style.display = "none";
+    } else {
+        document.getElementById("dni_campos").style.display = "none";
+        document.getElementById("ruc_campos").style.display = "block";
+    }
+}
+
+function consultar(){
+    let tipo = document.getElementById("tipo").value;
+    let numero = document.getElementById("numero").value;
+    let venta_id = document.getElementById("venta_id").value;
+
+    fetch(`/consultar/${tipo}/${numero}?venta_id=${venta_id}`)
+    .then(response => response.json())
+    .then(data => {
+
+        if(data.error){
+            alert(data.error);
+            return;
+        }
+
+        if(tipo === "dni"){
+            document.getElementById("nombres").value = data.nombres || "";
+            document.getElementById("apellidoPaterno").value = data.apellidoPaterno || "";
+            document.getElementById("apellidoMaterno").value = data.apellidoMaterno || "";
+        }
+
+        if(tipo === "ruc"){
+            document.getElementById("razonSocial").value = data.razonSocial || "";
+        }
+
+    })
+    .catch(error => {
+        alert("Error al consultar");
+    });
+}
+
+function vistaPrevia(){
+
+    let venta_id = document.getElementById("venta_id").value;
+    let tipo = document.getElementById("tipo").value;
+    let doc = document.getElementById("numero").value;
+    let nombreCompleto = "";
+
+    if(tipo === "dni"){
+        let n = document.getElementById("nombres").value;
+        let ap = document.getElementById("apellidoPaterno").value;
+        let am = document.getElementById("apellidoMaterno").value;
+
+        if(n === "" || ap === "" || am === ""){
+            alert("Primero debes consultar el DNI");
+            return;
+        }
+
+        nombreCompleto = n + " " + ap + " " + am;
+    }
+
+    if(tipo === "ruc"){
+        let rs = document.getElementById("razonSocial").value;
+
+        if(rs === ""){
+            alert("Primero debes consultar el RUC");
+            return;
+        }
+
+        nombreCompleto = rs;
+    }
+
+    window.location.href = `/preview_boleta?venta_id=${venta_id}&doc=${doc}&nombre=${nombreCompleto}`;
+}
+
+</script>
+
+{% endblock %}
