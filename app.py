@@ -495,11 +495,11 @@ def activar_producto(id):
 
     cur = mysql.connection.cursor()
 
-    # OBTENER DATOS
     cur.execute("""
-    SELECT stock, estado
-    FROM productos
-    WHERE id = %s""", (id,))
+        SELECT stock, estado
+        FROM productos
+        WHERE id = %s
+    """, (id,))
 
     producto = cur.fetchone()
 
@@ -509,26 +509,22 @@ def activar_producto(id):
 
     stock, estado = producto
 
-    # 1. SI STOCK = 0 OCULTO (AUTOMÁTICO)
+    # SI NO HAY STOCK  SIEMPRE OCULTO
     if stock <= 0:
-        cur.execute(
-            "UPDATE productos SET estado='oculto' WHERE id=%s",
-            (id,)
-        )
+        cur.execute("""
+            UPDATE productos
+            SET estado='oculto'
+            WHERE id=%s
+        """, (id,))
 
+    # SI HAY STOCK → ACTIVO (RESPETA OCULTO MANUAL)
     else:
-        # 2. SI STOCK > 0 PERO ESTÁ OCULTO MANUAL 
-        if estado == 'oculto':
-            cur.execute(
-                "UPDATE productos SET estado='oculto' WHERE id=%s",
-                (id,)
-            )
-        else:
-            # 3. ACTIVO NORMAL
-            cur.execute(
-                "UPDATE productos SET estado='activo' WHERE id=%s",
-                (id,)
-            )
+        if estado != 'oculto':
+            cur.execute("""
+                UPDATE productos
+                SET estado='activo'
+                WHERE id=%s
+            """, (id,))
 
     mysql.connection.commit()
     cur.close()
