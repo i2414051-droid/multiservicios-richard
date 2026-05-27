@@ -780,6 +780,30 @@ def historial():
     cur.close()
     return render_template('historial.html', historial=hist)
 
+# ─────────────────────────────────────────────
+# ELIMINAR HISTORIAL DE COMPRAS
+# ─────────────────────────────────────────────
+@app.route('/eliminar_historial')
+def eliminar_historial():
+
+    # SOLO ADMIN
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/')
+
+    cur = mysql.connection.cursor()
+
+    # ELIMINAR DETALLE DE VENTAS
+    cur.execute("DELETE FROM detalle_venta")
+
+    # ELIMINAR VENTAS
+    cur.execute("DELETE FROM ventas")
+
+    mysql.connection.commit()
+    cur.close()
+
+    return redirect('/historial-compras')
+
+
 @app.route('/historial-compras')
 def historial_compras():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -802,6 +826,48 @@ def historial_compras():
         historial.append({**v, 'productos': cur.fetchall()})
     cur.close()
     return render_template('historial_compras_admin.html', historial=historial, buscar=buscar)
+# ─────────────────────────────────────────────
+# ELIMINAR COMPRA DEL CLIENTE
+# ─────────────────────────────────────────────
+@app.route('/eliminar_compra/<int:id>')
+def eliminar_compra(id):
+
+    if 'user_id' not in session:
+        return redirect('/login')
+
+    user_id = session['user_id']
+
+    cur = mysql.connection.cursor()
+
+    # VERIFICAR QUE LA COMPRA PERTENECE AL USUARIO
+    cur.execute("""
+        SELECT id
+        FROM ventas
+        WHERE id=%s AND cliente_id=%s
+    """, (id, user_id))
+
+    venta = cur.fetchone()
+
+    if venta:
+
+        # ELIMINAR DETALLES
+        cur.execute(
+            "DELETE FROM detalle_venta WHERE venta_id=%s",
+            (id,)
+        )
+
+        # ELIMINAR VENTA
+        cur.execute(
+            "DELETE FROM ventas WHERE id=%s",
+            (id,)
+        )
+
+        mysql.connection.commit()
+
+    cur.close()
+
+    return redirect('/historial')
+
 
 # ─────────────────────────────────────────────
 # PERMISOS

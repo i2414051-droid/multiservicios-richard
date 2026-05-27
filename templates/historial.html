@@ -12,22 +12,23 @@
     <div class="card mb-4 shadow-sm border-0" style="background:#1e1e2e;">
 
       <!-- CABECERA -->
-      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
-           style="background:#2a2a3d; cursor:pointer;"
-           data-bs-toggle="collapse"
-           data-bs-target="#compra-{{ venta.id }}">
-        <div class="d-flex align-items-center gap-3">
-          <span class="badge bg-primary fs-6">Compra #{{ venta.id }}</span>
-          <span class="text-muted" style="font-size:.9rem;">
-            <i class="bi bi-calendar3 me-1"></i>{{ venta.fecha }}
-          </span>
-        </div>
-        <div class="d-flex align-items-center gap-3">
-          <span class="text-success fw-bold fs-6">
-            <i class="bi bi-cash-coin me-1"></i>S/ {{ "%.2f"|format(venta.total) }}
-          </span>
-          <i class="bi bi-chevron-down text-white"></i>
-        </div>
+      <div class="d-flex align-items-center gap-2">
+
+  <span class="text-success fw-bold fs-6">
+    <i class="bi bi-cash-coin me-1"></i>
+    S/ {{ "%.2f"|format(venta.total) }}
+  </span>
+
+  <!-- BOTON ELIMINAR -->
+  <a href="/eliminar_compra/{{ venta.id }}"
+    class="btn btn-sm btn-outline-danger"
+    onclick="return confirm('¿Eliminar esta compra del historial?')">
+    <i class="bi bi-trash"></i>
+  </a>
+
+  <i class="bi bi-chevron-down text-white"></i>
+
+</div>
       </div>
 
       <!-- DETALLE -->
