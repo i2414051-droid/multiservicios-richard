@@ -2,136 +2,111 @@
 {% block content %}
 
 <div class="container mt-4">
-
-    <div class="card shadow">
-
-        <div class="card-header bg-dark text-white">
-            <h3 class="mb-0">Editar Producto</h3>
-        </div>
-
-        <div class="card-body">
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-
-            <form method="POST" enctype="multipart/form-data">
-
-                <!-- NOMBRE -->
-                <div class="mb-3">
-                    <label class="form-label text-dark">Nombre</label>
-                    <input type="text"
-                           name="nombre"
-                           value="{{ producto.nombre }}"
-                           class="form-control text-dark"
-                           required>
-                </div>
-
-                <!-- DESCRIPCIÓN -->
-                <div class="mb-3">
-                    <label class="form-label text-dark">Descripción</label>
-                    <textarea name="descripcion"
-                              class="form-control text-dark"
-                              rows="4"
-                              required>{{ producto.descripcion }}</textarea>
-                </div>
-
-                <!-- PRECIO -->
-                <div class="mb-3">
-                    <label class="form-label text-dark">Precio</label>
-                    <input type="number"
-                           step="0.01"
-                           min="0"
-                           name="precio"
-                           value="{{ producto.precio }}"
-                           class="form-control text-dark"
-                           required
-                           oninvalid="this.setCustomValidity('El precio no puede ser negativo.')"
-                           oninput="this.setCustomValidity('')">
-                    <div class="form-text text-muted">Solo se permiten valores de 0 en adelante.</div>
-                </div>
-
-                <!-- STOCK -->
-                <div class="mb-3">
-                    <label class="form-label text-dark">Stock</label>
-                    <input type="number"
-                           min="0"
-                           name="stock"
-                           value="{{ producto.stock }}"
-                           class="form-control text-dark"
-                           required
-                           oninvalid="this.setCustomValidity('El stock no puede ser negativo.')"
-                           oninput="this.setCustomValidity('')">
-                    <div class="form-text text-muted">Solo se permiten valores de 0 en adelante.</div>
-                </div>
-
-                <!-- CATEGORÍA -->
-                <div class="mb-3">
-                    <label class="form-label text-dark">Categoría</label>
-                    <select name="categoria"
-                            class="form-control text-dark"
-                            required>
-                        <option value="Herramientas"
-                            {% if producto.categoria == 'Herramientas' %}selected{% endif %}>
-                            Herramientas
-                        </option>
-                        <option value="Electricos"
-                            {% if producto.categoria == 'Electricos' %}selected{% endif %}>
-                            Electricos
-                        </option>
-                        <option value="Accesorios"
-                            {% if producto.categoria == 'Accesorios' %}selected{% endif %}>
-                            Accesorios
-                        </option>
-                        <option value="Repuestos"
-                            {% if producto.categoria == 'Repuestos' %}selected{% endif %}>
-                            Repuestos
-                        </option>
-                    </select>
-                </div>
-
-                <!-- IMAGEN ACTUAL -->
-                <div class="mb-3">
-                    <label class="form-label text-dark">Imagen actual</label><br>
-                    {% if producto.imagen %}
-                        <img src="{{ url_for('static', filename=producto.imagen) }}"
-                             width="150"
-                             class="rounded shadow">
-                    {% else %}
-                        <span class="text-muted">Sin imagen</span>
-                    {% endif %}
-                </div>
-
-                <!-- CAMBIAR IMAGEN -->
-                <div class="mb-4">
-                    <label class="form-label text-dark">Cambiar imagen</label>
-                    <input type="file"
-                           name="imagen"
-                           class="form-control text-dark"
-                           accept="image/*">
-                </div>
-
-                <!-- BOTONES -->
-                <div class="d-flex gap-2">
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="bi bi-save"></i> Guardar cambios
-                    </button>
-                    <a href="/admin" class="btn btn-outline-secondary w-100">
-                        Cancelar
-                    </a>
-                </div>
-
-            </form>
-
-        </div>
+  <div class="card shadow">
+    <div class="card-header bg-dark text-white">
+      <h3 class="mb-0">Editar Producto</h3>
     </div>
+    <div class="card-body">
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endfor %}
+      {% endif %}
+      {% endwith %}
+
+      <form method="POST" enctype="multipart/form-data">
+
+        <!-- NOMBRE -->
+        <div class="mb-3">
+          <label class="form-label text-dark"><strong>Nombre</strong></label>
+          <input type="text" name="nombre"
+                 value="{{ producto.nombre }}"
+                 class="form-control text-dark"
+                 required>
+        </div>
+
+        <!-- DESCRIPCIÓN -->
+        <div class="mb-3">
+          <label class="form-label text-dark"><strong>Descripción</strong></label>
+          <textarea name="descripcion"
+                    class="form-control text-dark"
+                    rows="4"
+                    required>{{ producto.descripcion }}</textarea>
+        </div>
+
+        <!-- PRECIO -->
+        <div class="mb-3">
+          <label class="form-label text-dark"><strong>Precio</strong></label>
+          <input type="number" step="0.01" min="0"
+                 name="precio"
+                 value="{{ producto.precio }}"
+                 class="form-control text-dark"
+                 required
+                 oninvalid="this.setCustomValidity('El precio no puede ser negativo.')"
+                 oninput="this.setCustomValidity('')">
+          <div class="form-text text-muted">Solo se permiten valores de 0 en adelante.</div>
+        </div>
+
+        <!-- STOCK -->
+        <div class="mb-3">
+          <label class="form-label text-dark"><strong>Stock</strong></label>
+          <input type="number" min="0"
+                 name="stock"
+                 value="{{ producto.stock }}"
+                 class="form-control text-dark"
+                 required
+                 oninvalid="this.setCustomValidity('El stock no puede ser negativo.')"
+                 oninput="this.setCustomValidity('')">
+          <div class="form-text text-muted">Solo se permiten valores de 0 en adelante.</div>
+        </div>
+
+        <!-- CATEGORÍA -->
+        <div class="mb-3">
+          <label class="form-label text-dark"><strong>Categoría</strong></label>
+          <select name="categoria" class="form-control text-dark" required>
+            {% for cat in ['Herramientas','Electricos','Accesorios','Repuestos','Otros'] %}
+            <option value="{{ cat }}" {% if producto.categoria == cat %}selected{% endif %}>
+              {{ cat }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- IMAGEN ACTUAL -->
+        <div class="mb-3">
+          <label class="form-label text-dark"><strong>Imagen actual</strong></label><br>
+          {% if producto.imagen %}
+            <img src="{{ url_for('static', filename=producto.imagen) }}"
+                 width="150" class="rounded shadow">
+          {% else %}
+            <span class="text-muted">Sin imagen</span>
+          {% endif %}
+        </div>
+
+        <!-- CAMBIAR IMAGEN -->
+        <div class="mb-4">
+          <label class="form-label text-dark"><strong>Cambiar imagen</strong></label>
+          <input type="file" name="imagen"
+                 class="form-control text-dark"
+                 accept="image/*">
+        </div>
+
+        <!-- BOTONES -->
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-save"></i> Guardar cambios
+          </button>
+          <a href="/admin" class="btn btn-outline-secondary w-100">Cancelar</a>
+        </div>
+
+      </form>
+    </div>
+  </div>
 </div>
 
 {% endblock %}
