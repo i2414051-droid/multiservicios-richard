@@ -1,0 +1,192 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<!-- BANNER -->
+
+<div class="banner-principal">
+
+<div class="overlay-banner">
+
+<h5>BIENVENIDOS A</h5>
+
+<h1>MULTISERVICIOS RICHARD</h1>
+
+<p>
+Calidad, confianza y servicio que te mereces
+</p>
+
+
+<!-- BUSCADOR -->
+
+<form method="GET" action="/" class="buscador">
+
+<input
+type="text"
+name="buscar"
+placeholder="Buscar productos..."
+value="{{request.args.get('buscar','')}}">
+
+<button>
+
+<i class="bi bi-search"></i>
+
+Buscar
+
+</button>
+
+</form>
+
+</div>
+
+</div>
+
+
+<!-- CATEGORÍAS -->
+
+<div class="categorias">
+
+<a href="/?categoria=Todos" class="categoria-btn">
+<i class="bi bi-grid-fill"></i>
+Todos
+</a>
+
+<a href="/?categoria=Herramientas"
+class="categoria-btn">
+
+<i class="bi bi-wrench"></i>
+Herramientas
+
+</a>
+
+<a href="/?categoria=Electricos"
+class="categoria-btn">
+
+<i class="bi bi-lightning-charge-fill"></i>
+Eléctricos
+
+</a>
+
+<a href="/?categoria=Accesorios"
+class="categoria-btn">
+
+<i class="bi bi-box"></i>
+Accesorios
+
+</a>
+
+<a href="/?categoria=Repuestos"
+class="categoria-btn">
+
+<i class="bi bi-gear"></i>
+Repuestos
+
+</a>
+
+</div>
+
+
+<h3 class="titulo-seccion">
+
+Productos destacados
+
+</h3>
+
+
+
+<div class="row">
+
+{% for p in productos %}
+
+<div class="col-lg-3 col-md-6 mb-4">
+
+<div class="card producto-card h-100">
+
+<div class="stock-box">
+
+{% if p.stock >0 %}
+
+<span class="stock-ok">
+
+● Stock
+
+</span>
+
+{% else %}
+
+<span class="stock-no">
+
+● Sin stock
+
+</span>
+
+{% endif %}
+
+</div>
+
+
+{% if p.imagen %}
+
+<img
+src="{{ url_for('static',filename=p.imagen) }}"
+class="producto-img">
+
+{% endif %}
+
+
+<div class="card-body">
+
+<h5>
+
+{{p.nombre}}
+
+</h5>
+
+<p class="descripcion">
+
+{{p.descripcion}}
+
+</p>
+
+
+<div class="precio">
+
+S/. {{p.precio}}
+
+</div>
+
+
+{% if p.stock>0 %}
+
+<a href="/agregar/{{p.id}}"
+class="btn btn-agregar">
+
+<i class="bi bi-cart"></i>
+
+Agregar al carrito
+
+</a>
+
+{% else %}
+
+<button
+class="btn btn-secondary w-100"
+disabled>
+
+No disponible
+
+</button>
+
+{% endif %}
+
+</div>
+
+</div>
+
+</div>
+
+{% endfor %}
+
+</div>
+
+{% endblock %}

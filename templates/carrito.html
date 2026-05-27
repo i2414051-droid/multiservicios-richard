@@ -1,0 +1,189 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container mt-4">
+
+    <h2 class="mb-4">
+        <i class="bi bi-cart3"></i> Tu Carrito
+    </h2>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-dark text-white">
+            Productos agregados
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-bordered table-striped text-center align-middle mb-0" id="tabla-carrito">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Producto</th>
+                        <th>Precio</th>
+                        <th>Cantidad</th>
+                        <th>Total</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for p in productos %}
+                    <tr id="fila-{{ p.producto_id }}">
+                        <td>{{ p.nombre }}</td>
+                        <td>S/. {{ "%.2f"|format(p.precio|float) }}</td>
+                        <td>
+                            <div class="d-flex align-items-center justify-content-center gap-2">
+                                <button class="btn btn-sm btn-danger btn-cantidad"
+                                        data-id="{{ p.producto_id }}"
+                                        data-accion="reducir">-</button>
+                                <span id="cant-{{ p.producto_id }}" class="fw-bold px-1">{{ p.cantidad }}</span>
+                                <button class="btn btn-sm btn-success btn-cantidad"
+                                        data-id="{{ p.producto_id }}"
+                                        data-accion="aumentar">+</button>
+                            </div>
+                        </td>
+                        <td id="sub-{{ p.producto_id }}">
+                            S/. {{ "%.2f"|format((p.precio|float) * (p.cantidad|int)) }}
+                        </td>
+                        <td>
+                            <a href="/eliminar_carrito/{{ p.id }}"
+                               class="btn btn-danger btn-sm"
+                               onclick="return confirm('¿Eliminar producto del carrito?')">
+                                <i class="bi bi-trash"></i> Eliminar
+                            </a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TOTAL -->
+    <div class="card shadow-sm mt-4">
+        <div class="card-body d-flex justify-content-between align-items-center">
+            <h4 class="mb-0">Total a pagar</h4>
+            <h3 class="mb-0" id="total-carrito" style="color:#F09204;font-weight:bold;">
+                S/. {{ "%.2f"|format(total|float) }}
+            </h3>
+        </div>
+    </div>
+
+    <!-- MÉTODOS DE PAGO -->
+    <div class="card shadow-sm mt-4">
+        <div class="card-header bg-dark text-white">
+            <h5 class="mb-0"><i class="bi bi-credit-card-2-front me-2"></i>Métodos de Pago</h5>
+        </div>
+        <div class="card-body">
+
+            <div class="form-check border rounded p-3 mb-3 d-flex align-items-center">
+                <input class="form-check-input me-3 custom-radio" type="radio" name="metodo_pago" id="yape" checked>
+                <label class="form-check-label w-100 d-flex justify-content-between align-items-center" for="yape">
+                    <span class="d-flex align-items-center">
+                        <svg class="me-2 rounded-2" width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="40" height="40" fill="#742384"/>
+                            <path d="M28.1 11.2C27.3 10.3 25.9 10.3 25.1 11.2L20 16.4L14.9 11.2C14.1 10.3 12.7 10.3 11.9 11.2C11.1 12 11.1 13.4 11.9 14.2L17 19.3L11.9 24.5C11.1 25.3 11.1 26.7 11.9 27.5C12.3 27.9 12.8 28.1 13.4 28.1C13.9 28.1 14.5 27.9 14.9 27.5L20 22.3L25.1 27.5C25.5 27.9 26.1 28.1 26.6 28.1C27.2 28.1 27.7 27.9 28.1 27.5C28.9 26.7 28.9 25.3 28.1 24.5L23 19.3L28.1 14.2C28.9 13.4 28.9 12 28.1 11.2Z" fill="#00D2C4"/>
+                        </svg>
+                        <strong>Yape</strong>
+                    </span>
+                    <span class="badge border px-2 py-1" style="background-color:#FFF5E6;color:#F09204;border-color:#FFE0B3;">Recomendado</span>
+                </label>
+            </div>
+
+            <div class="form-check border rounded p-3 mb-3 d-flex align-items-center">
+                <input class="form-check-input me-3 custom-radio" type="radio" name="metodo_pago" id="plin">
+                <label class="form-check-label w-100 d-flex align-items-center" for="plin">
+                    <svg class="me-2 rounded-2" width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="40" height="40" fill="#00B4C5"/>
+                        <circle cx="20" cy="20" r="10" fill="none" stroke="white" stroke-width="3"/>
+                        <circle cx="20" cy="20" r="4" fill="white"/>
+                    </svg>
+                    <strong>Plin</strong>
+                </label>
+            </div>
+
+            <div class="form-check border rounded p-3 mb-3 d-flex align-items-center">
+                <input class="form-check-input me-3 custom-radio" type="radio" name="metodo_pago" id="tarjeta">
+                <label class="form-check-label w-100 d-flex align-items-center" for="tarjeta">
+                    <i class="bi bi-credit-card text-secondary fs-5 me-2"></i>
+                    <strong>Tarjeta de crédito / débito</strong>
+                    <span class="ms-auto text-secondary small">Visa / Mastercard</span>
+                </label>
+            </div>
+
+            <div class="form-check border rounded p-3 mb-3 d-flex align-items-center">
+                <input class="form-check-input me-3 custom-radio" type="radio" name="metodo_pago" id="transferencia">
+                <label class="form-check-label w-100 d-flex align-items-center" for="transferencia">
+                    <i class="bi bi-bank text-secondary fs-5 me-2"></i>
+                    <strong>Transferencia bancaria</strong>
+                </label>
+            </div>
+
+            <div class="form-check border rounded p-3 d-flex align-items-center">
+                <input class="form-check-input me-3 custom-radio" type="radio" name="metodo_pago" id="contraentrega">
+                <label class="form-check-label w-100 d-flex align-items-center" for="contraentrega">
+                    <i class="bi bi-truck text-secondary fs-5 me-2"></i>
+                    <strong>Pago contra entrega</strong>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-end mt-4">
+        <a href="/comprar" class="btn btn-lg shadow-sm text-white fw-bold custom-btn-buy">
+            <i class="bi bi-bag-check me-1"></i> Comprar ahora
+        </a>
+    </div>
+
+</div>
+
+<style>
+    .custom-btn-buy { background-color:#F09204; border-color:#F09204; transition:all .2s; }
+    .custom-btn-buy:hover { background-color:#D67F03; border-color:#D67F03; color:white; }
+    .custom-radio:checked { background-color:#F09204 !important; border-color:#F09204 !important; }
+    .custom-radio:focus { border-color:#F09204 !important; box-shadow:0 0 0 .25rem rgba(240,146,4,.25) !important; }
+    .btn-cantidad { min-width: 30px; }
+    .btn-cantidad:disabled { opacity: .5; }
+</style>
+
+<script>
+document.querySelectorAll('.btn-cantidad').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+
+        var id     = this.dataset.id;
+        var accion = this.dataset.accion;
+        var fila   = document.getElementById('fila-' + id);
+
+        // Deshabilitar ambos botones mientras espera
+        fila.querySelectorAll('.btn-cantidad').forEach(b => b.disabled = true);
+
+        fetch('/actualizar-cantidad/' + id, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accion: accion })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+
+            if (data.eliminado) {
+                // Quitar la fila completa con animación
+                fila.style.transition = 'opacity .3s';
+                fila.style.opacity = '0';
+                setTimeout(() => fila.remove(), 300);
+            } else {
+                // Actualizar cantidad y subtotal en la misma fila
+                document.getElementById('cant-' + id).textContent = data.cantidad;
+                document.getElementById('sub-' + id).textContent  = 'S/. ' + data.subtotal.toFixed(2);
+                // Re-habilitar botones
+                fila.querySelectorAll('.btn-cantidad').forEach(b => b.disabled = false);
+            }
+
+            // Actualizar total general
+            document.getElementById('total-carrito').textContent = 'S/. ' + data.total.toFixed(2);
+        })
+        .catch(function() {
+            // Si falla, re-habilitar botones
+            fila.querySelectorAll('.btn-cantidad').forEach(b => b.disabled = false);
+            alert('Error al actualizar. Intenta de nuevo.');
+        });
+    });
+});
+</script>
+
+{% endblock %}

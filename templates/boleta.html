@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<div class="container mt-4">
+
+<h3>🧾 Datos para la boleta</h3>
+
+<div id="alerta"></div>
+
+<select id="tipo" class="form-control mb-2">
+    <option value="dni">DNI</option>
+    <option value="ruc">RUC</option>
+</select>
+
+<input type="text" id="numero" class="form-control mb-2" placeholder="Número">
+
+<button class="btn btn-success mb-3" onclick="consultar()">Consultar</button>
+
+<input type="text" id="nombre" class="form-control mb-2" placeholder="Nombre / Razón social" readonly>
+
+<button class="btn btn-primary w-100" onclick="confirmarCompra()">
+    Confirmar compra
+</button>
+
+</div>
+
+<script>
+async function consultar() {
+
+    const numero = document.getElementById("numero").value;
+    const tipo = document.getElementById("tipo").value;
+
+    const res = await fetch(`/consultar/${tipo}/${numero}`);
+    const data = await res.json();
+
+    if (tipo === "dni") {
+        document.getElementById("nombre").value =
+            data.nombres + " " + data.apellidoPaterno + " " + data.apellidoMaterno;
+    }
+
+    if (tipo === "ruc") {
+        document.getElementById("nombre").value = data.razonSocial;
+    }
+}
+
+function confirmarCompra() {
+
+    const numero = document.getElementById("numero").value;
+    const nombre = document.getElementById("nombre").value;
+
+    window.location.href = `/procesar_compra?doc=${numero}&nombre=${nombre}`;
+}
+</script>
+
+{% endblock %}

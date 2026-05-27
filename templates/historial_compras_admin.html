@@ -1,0 +1,142 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container-fluid mt-4">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+    <h2 class="mb-0"><i class="bi bi-receipt-cutoff me-2"></i>Historial de Compras</h2>
+    <a href="/permisos" class="btn btn-outline-warning">
+      <i class="bi bi-shield-lock me-1"></i> Gestionar Permisos
+    </a>
+  </div>
+
+  <!-- BUSCADOR -->
+  <form method="GET" class="mb-4">
+    <div class="input-group">
+      <span class="input-group-text bg-dark text-white border-secondary">
+        <i class="bi bi-search"></i>
+      </span>
+      <input type="text"
+             name="buscar"
+             class="form-control bg-dark text-white border-secondary"
+             placeholder="Buscar por correo del cliente..."
+             value="{{ buscar }}">
+      <button class="btn btn-primary" type="submit">Buscar</button>
+      {% if buscar %}
+        <a href="/historial-compras" class="btn btn-outline-secondary">Limpiar</a>
+      {% endif %}
+    </div>
+  </form>
+
+  <!-- RESUMEN -->
+  <p class="text-muted mb-3">
+    <strong>{{ historial|length }}</strong> venta(s) encontrada(s)
+    {% if buscar %} para <em>"{{ buscar }}"</em>{% endif %}.
+  </p>
+
+  {% if historial %}
+    {% for venta in historial %}
+    <div class="card mb-3 shadow-sm border-0" style="background:#1e1e2e;">
+
+      <!-- CABECERA -->
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
+           style="background:#2a2a3d; cursor:pointer;"
+           data-bs-toggle="collapse"
+           data-bs-target="#venta-{{ venta.id }}">
+
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <span class="badge bg-primary fs-6">#{{ venta.id }}</span>
+          <span class="text-white">
+            <i class="bi bi-person-circle me-1 text-info"></i>
+            {{ venta.correo }}
+          </span>
+          {% if venta.titular %}
+          <span class="text-light" style="font-size:.85rem;">
+            <i class="bi bi-card-text me-1 text-warning"></i>
+            {{ venta.titular }}
+            {% if venta.documento %}({{ venta.documento }}){% endif %}
+          </span>
+          {% endif %}
+        </div>
+
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <span class="text-success fw-bold fs-6">
+            <i class="bi bi-cash-coin me-1"></i>S/ {{ "%.2f"|format(venta.total) }}
+          </span>
+          <span class="text-muted" style="font-size:.85rem;">
+            <i class="bi bi-calendar3 me-1"></i>{{ venta.fecha }}
+          </span>
+          <i class="bi bi-chevron-down text-white"></i>
+        </div>
+      </div>
+
+      <!-- DETALLE COLAPSABLE -->
+      <div id="venta-{{ venta.id }}" class="collapse">
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 text-center align-middle">
+              <thead style="background:#12122a;">
+                <tr>
+                  <th><i class="bi bi-hash"></i> ID Producto</th>
+                  <th>Nombre</th>
+                  <th>Descripción</th>
+                  <th>Cantidad</th>
+                  <th>Precio Unit.</th>
+                  <th>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in venta.productos %}
+                <tr>
+                  <td>
+                    <span class="badge bg-secondary">{{ p.producto_id }}</span>
+                  </td>
+                  <td class="text-start fw-semibold">{{ p.nombre }}</td>
+                  <td class="text-start text-muted" style="font-size:.85rem;max-width:220px;">
+                    {{ p.descripcion }}
+                  </td>
+                  <td>
+                    <span class="badge bg-info text-dark">{{ p.cantidad }}</span>
+                  </td>
+                  <td>S/ {{ "%.2f"|format(p.precio) }}</td>
+                  <td class="text-success fw-bold">
+                    S/ {{ "%.2f"|format(p.cantidad * p.precio) }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+              <tfoot>
+                <tr style="background:#2a2a3d;">
+                  <td colspan="5" class="text-end fw-bold text-white">TOTAL VENTA</td>
+                  <td class="text-success fw-bold fs-6">
+                    S/ {{ "%.2f"|format(venta.total) }}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    {% endfor %}
+
+  {% else %}
+    <div class="text-center py-5">
+      <i class="bi bi-inbox display-4 text-muted"></i>
+      <p class="text-muted mt-3">No se encontraron compras
+        {% if buscar %}para <em>"{{ buscar }}"</em>{% endif %}.
+      </p>
+    </div>
+  {% endif %}
+
+</div>
+
+<!-- Abrir la primera tarjeta por defecto -->
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var first = document.querySelector('.collapse');
+    if (first) new bootstrap.Collapse(first, { toggle: true });
+  });
+</script>
+{% endblock %}

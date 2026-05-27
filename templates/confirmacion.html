@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="card shadow-lg p-5 mx-auto bg-white text-dark text-center" style="max-width: 550px; border-radius: 15px; border: 1px solid #e0e0e0;">
+        
+        <h2 class="fw-bold text-muted small text-uppercase tracking-wide mb-3">MULTISERVICIOS RICHARD</h2>
+
+        <div class="mb-4">
+            <div class="display-4 text-primary mb-2">🔹</div> <h1 class="text-primary fw-bold">¡Pedido Confirmado!</h1>
+            <p class="text-secondary fs-5">Tu pago ha sido procesado correctamente.</p>
+        </div>
+
+        <hr style="border-top: 2px dashed #dee2e6; my-4;"> <div class="my-4">
+            <h4 class="fw-bold text-dark">Pedido N° <span class="text-primary">{{ id }}</span></h4>
+
+            <h5 class="mt-4 text-secondary">
+                Total pagado: 
+                <span class="text-dark fw-black fs-2 d-block mt-1">
+                    S/. {{ venta.total if venta.total is defined else venta[0] }}
+                </span>
+            </h5>
+
+            <p class="text-muted small mt-3">
+                <strong>Fecha:</strong> {{ venta.fecha if venta.fecha is defined else venta[1] }}
+            </p>
+        </div>
+
+        <hr style="border-top: 2px dashed #dee2e6; my-4;">
+
+        <div class="d-grid gap-2 mt-4">
+            <a href="/boleta/{{ id }}" class="btn btn-warning btn-lg fw-bold text-dark shadow-sm">
+                 Generar boleta
+            </a>
+            <a href="/" class="btn btn-outline-primary mt-2fw-bold">
+                Seguir comprando
+            </a>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
