@@ -406,44 +406,58 @@ def admin():
                             total_proveedores=total_proveedores)
 
 # ─────────────────────────────────────────────
-# PRODUCTOS CRUD
+# PRODUCTOS CRUD 
 # ─────────────────────────────────────────────
+
 @app.route('/agregar_producto', methods=['POST'])
 def agregar_producto():
+
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+
     nombre      = request.form['nombre']
     descripcion = request.form['descripcion']
     precio      = float(request.form['precio'])
     stock       = int(request.form['stock'])
     categoria   = request.form.get('categoria', 'Otros')
+
     if precio < 0:
         flash('No se permiten precios negativos', 'danger')
         return redirect('/admin')
+
     imagen = request.files.get('imagen')
     imagen_db = None
+
     if imagen and imagen.filename:
-        fn  = secure_filename(imagen.filename)
+        fn = secure_filename(imagen.filename)
         imagen.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
         imagen_db = 'uploads/' + fn
 
     cur = mysql.connection.cursor()
+
     cur.execute("""
-        INSERT INTO productos (nombre, descripcion, precio, stock, categoria, imagen)
-        VALUES (%s,%s,%s,%s,%s,%s)
+        INSERT INTO productos (nombre, descripcion, precio, stock, categoria, imagen, estado)
+        VALUES (%s,%s,%s,%s,%s,%s,'activo')
     """, (nombre, descripcion, precio, stock, categoria, imagen_db))
+
     mysql.connection.commit()
-    nuevo_id = cur.lastrowid
-    verificar_stock_bajo(cur, nuevo_id)
-    mysql.connection.commit()
+    cur.close()
+
     return redirect('/admin')
+
+
+# ─────────────────────────────────────────────
 
 @app.route('/editar_producto/<int:id>', methods=['GET','POST'])
 def editar_producto(id):
+
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+
     cur = mysql.connection.cursor()
+
     if request.method == 'POST':
+
         nombre      = request.form['nombre']
         descripcion = request.form['descripcion']
         precio      = float(request.form['precio'])
@@ -454,6 +468,7 @@ def editar_producto(id):
         if precio < 0:
             flash('No se permiten precios negativos.', 'danger')
             return redirect(f'/editar_producto/{id}')
+
         if stock < 0:
             flash('No se permiten valores negativos en el stock.', 'danger')
             return redirect(f'/editar_producto/{id}')
@@ -461,87 +476,73 @@ def editar_producto(id):
         if imagen and imagen.filename:
             fn = secure_filename(imagen.filename)
             imagen.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
+
             cur.execute("""
-                UPDATE productos SET nombre=%s, descripcion=%s, precio=%s,
-                stock=%s, categoria=%s, imagen=%s WHERE id=%s
+                UPDATE productos
+                SET nombre=%s, descripcion=%s, precio=%s,
+                    stock=%s, categoria=%s, imagen=%s
+                WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, 'uploads/'+fn, id))
+
         else:
             cur.execute("""
-                UPDATE productos SET nombre=%s, descripcion=%s, precio=%s,
-                stock=%s, categoria=%s WHERE id=%s
+                UPDATE productos
+                SET nombre=%s, descripcion=%s, precio=%s,
+                    stock=%s, categoria=%s
+                WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, id))
 
         mysql.connection.commit()
-        verificar_stock_bajo(cur, id)
-        mysql.connection.commit()
         cur.close()
+
         flash('Producto actualizado correctamente.', 'success')
         return redirect('/admin')
 
     cur.execute("SELECT * FROM productos WHERE id=%s", (id,))
     producto = cur.fetchone()
+
+    cur.close()
+
     return render_template('editar_producto.html', producto=producto, categorias=CATEGORIAS)
+
+
+# ─────────────────────────────────────────────
 
 @app.route('/eliminar_producto/<int:id>')
 def eliminar_producto(id):
+
     cur = mysql.connection.cursor()
-    cur.execute("UPDATE productos SET estado='inactivo' WHERE id=%s", (id,))
+
+    cur.execute("""
+        UPDATE productos
+        SET estado='inactivo'
+        WHERE id=%s
+    """, (id,))
+
     mysql.connection.commit()
     cur.close()
+
     return redirect('/admin')
+
+
+# ─────────────────────────────────────────────
 
 @app.route('/activar_producto/<int:id>')
 def activar_producto(id):
 
-    try:
-        cur = mysql.connection.cursor()
+    cur = mysql.connection.cursor()
 
-        # OBTENER PRODUCTO
-        cur.execute("""
-            SELECT stock, estado
-            FROM productos
-            WHERE id = %s
-        """, (id,))
+    # SOLO ACTIVAR (SIN LÓGICA COMPLEJA)
+    cur.execute("""
+        UPDATE productos
+        SET estado='activo'
+        WHERE id=%s
+    """, (id,))
 
-        producto = cur.fetchone()
+    mysql.connection.commit()
+    cur.close()
 
-        if not producto:
-            cur.close()
-            return redirect('/admin')
-
-        stock, estado = producto
-
-        # 🔥 FIX SEGURO DE TIPO
-        try:
-            stock = int(stock)
-        except:
-            stock = 0
-
-        # SI NO HAY STOCK → OCULTO
-        if stock <= 0:
-            cur.execute("""
-                UPDATE productos
-                SET estado='oculto'
-                WHERE id=%s
-            """, (id,))
-
-        else:
-            # SI HAY STOCK → ACTIVO
-            cur.execute("""
-                UPDATE productos
-                SET estado='activo'
-                WHERE id=%s
-            """, (id,))
-
-        mysql.connection.commit()
-        cur.close()
-
-        return redirect('/admin')
-
-    except Exception as e:
-        print("ERROR ACTIVAR PRODUCTO:", e)
-        return str(e)
-# ─────────────────────────────────────────────
+    return redirect('/admin')
 # CONSULTAR DNI/RUC
 # ─────────────────────────────────────────────
 @app.route('/consultar/<tipo>/<numero>')
