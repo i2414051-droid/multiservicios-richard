@@ -126,13 +126,13 @@
                                 <span class="badge bg-danger">Sin stock</span>
                             {% endif %}
                         </td>
-
-                        {% if p.stock > 0 %}
-                        <span class="badge bg-success">Activo</span>
-                        {% else %}                                          #cambiado 27/05/26 para estado visual sea automático:
-                        <span class="badge bg-secondary">Oculto</span>         
-                        {% endif %}
-
+                        <td>
+                            {% if p.stock > 0 %}
+                                <span class="badge bg-success">Activo</span>
+                            {% else %}                                          #cambiado 27/05/26 para estado visual sea automático:
+                                <span class="badge bg-secondary">Oculto</span>         
+                            {% endif %}
+                        <td>
                         <td>
                             <a href="/editar_producto/{{ p.id }}" class="btn btn-warning btn-sm">✏</a>
                             {% if p.estado == 'activo' %}
