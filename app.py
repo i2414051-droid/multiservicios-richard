@@ -509,14 +509,13 @@ def activar_producto(id):
             return redirect('/admin')
 
         stock, estado = producto
-
+        stock = int(stock) 
         # SI NO HAY STOCK → SIEMPRE OCULTO
         if stock <= 0:
             cur.execute("""
                 UPDATE productos
                 SET estado='oculto'
-                WHERE id=%s
-            """, (id,))
+                WHERE id=%s""", (id,))
 
         else:
             # SI HAY STOCK → ACTIVO
