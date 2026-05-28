@@ -47,7 +47,7 @@ app.config['MAIL_PASSWORD']       = os.environ.get('MAIL_PASSWORD', '')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', '')
 mail = Mail(app)
 
-TOKEN = os.environ.get('APIPERU_TOKEN','eyJlbWFpbCI6Impob3NzdWVicnlhbkBnbWFpbC5jb20ifQVvkKvQL_se-h31zZ87zXwBzH6lYy3wLb4pD0XCmhN5o')
+TOKEN = os.environ.get('eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Impob3NzdWVicnlhbkBnbWFpbC5jb20ifQ.VvkKvQL_se-h31zZ87zXwBzH6lYy3wLb4pD0XCmhN5o')
 
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
