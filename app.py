@@ -201,7 +201,7 @@ def verificar_stock_bajo(cur, producto_id):
     try:
         cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-        if not p or p['stock'] = 0:
+        if not p or p['stock'] == 0:
             return
         # ¿Ya existe pendiente?
         cur.execute("""
