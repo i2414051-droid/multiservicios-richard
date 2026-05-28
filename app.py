@@ -55,7 +55,7 @@ TOKEN = os.environ.get('APIPERU_TOKEN',
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
 # ─────────────────────────────────────────────
-# INIT TABLAS NUEVAS
+# INIT TABLAS NUEVAS mysql
 # ─────────────────────────────────────────────
 def init_db():
     try:
@@ -90,7 +90,6 @@ def init_db():
         print(f"[init_db] {e}")
 
 # ─────────────────────────────────────────────
-# HELPERS
 # ─────────────────────────────────────────────
 def obtener_ip():
     return request.remote_addr
@@ -198,11 +197,11 @@ def enviar_email_proveedor(proveedor, productos_lista):
         return False
 
 def verificar_stock_bajo(cur, producto_id):
-    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor."""
+    """Si stock = 0 auto-agrega a productos_para_pedir y notifica al proveedor."""
     try:
         cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-        if not p or p['stock'] > 1:
+        if not p or p['stock'] = 0:
             return
         # ¿Ya existe pendiente?
         cur.execute("""
@@ -663,16 +662,26 @@ def eliminar_carrito(id):
 # ─────────────────────────────────────────────
 @app.route('/comprar')
 def comprar():
+
+    print("SESSION COMPLETA:", session)
+
     if 'user_id' not in session:
         return redirect('/login')
+
     user_id = int(session['user_id'])
+
+    print("USER ID:", user_id)
+
     cur = mysql.connection.cursor()
-    if 'guest_id' in session:
-        cur.execute("UPDATE carrito SET usuario_id=%s WHERE usuario_id=%s", (user_id, session['guest_id']))
-        mysql.connection.commit()
+
     cur.execute("SELECT * FROM carrito WHERE usuario_id=%s", (user_id,))
-    if not cur.fetchall():
+    carrito = cur.fetchall()
+
+    print("CARRITO:", carrito)
+
+    if not carrito:
         return "Tu carrito está vacío"
+
     return redirect('/procesar_compra')
 
 @app.route('/procesar_compra')
