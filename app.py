@@ -542,29 +542,48 @@ def activar_producto(id):
     return redirect('/admin')
 # CONSULTAR DNI/RUC
 # ─────────────────────────────────────────────
-@app.route('/consultar/<tipo>/<numero>')
+@app.route("/consultar/<tipo>/<numero>")
 def consultar(tipo, numero):
-    venta_id = request.args.get('venta_id')
+
+    venta_id = request.args.get("venta_id")
+
     if not venta_id:
-        return jsonify({'error': 'venta_id no recibido'})
-    if tipo not in ['dni','ruc']:
-        return jsonify({'error': 'Tipo inválido'})
+        return jsonify({"error": "venta_id no recibido"})
+
+    if tipo not in ["dni", "ruc"]:
+        return jsonify({"error": "Tipo inválido"})
+
     url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
+
     try:
-        data = requests.get(url).json()
-        if 'error' in data:
+        response = requests.get(url)
+        data = response.json()
+
+        if "error" in data:
             return jsonify(data)
-        cur = mysql.connection.cursor()
-        if tipo == 'dni':
+
+        cursor = mysql.connection.cursor()
+
+        if tipo == "dni":
             nombre = f"{data.get('nombres','')} {data.get('apellidoPaterno','')} {data.get('apellidoMaterno','')}"
         else:
-            nombre = data.get('razonSocial','')
-        cur.execute("UPDATE ventas SET documento=%s, nombre=%s WHERE id=%s", (numero, nombre, venta_id))
+            nombre = data.get("razonSocial","")
+
+        cursor.execute("""
+            UPDATE ventas
+            SET documento = %s,
+                nombre = %s
+            WHERE id = %s
+        """, (numero, nombre, venta_id))
+
         mysql.connection.commit()
-        cur.close()
+        cursor.close()
+
         return jsonify(data)
+
     except Exception as e:
-        return jsonify({'error': str(e)})
+        print("ERROR:", e)
+        return jsonify({"error": str(e)})
 
 # ─────────────────────────────────────────────
 # TIENDA / CARRITO
