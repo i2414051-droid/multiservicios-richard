@@ -95,7 +95,7 @@ def obtener_ip():
     return request.remote_addr
 
 def obtener_usuario():
-return session.get('user_id')
+    return session['user_id']
 
 def generar_boleta_pdf(venta_id):
     """Genera PDF en memoria y lo devuelve como bytes."""
