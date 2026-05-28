@@ -199,7 +199,7 @@ def verificar_stock_bajo(cur, producto_id):
     try:
         cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-        if not p or p['stock'] > 1:
+        if not p or p['stock'] > 0:
             return
         # ¿Ya existe pendiente?
         cur.execute("""
@@ -438,6 +438,11 @@ def agregar_producto():
     """, (nombre, descripcion, precio, stock, categoria, imagen_db))
 
     mysql.connection.commit()
+
+    producto_id = cur.lastrowid
+
+    verificar_stock_bajo(cur, producto_id)
+
     cur.close()
 
     return redirect('/admin')
@@ -490,6 +495,7 @@ def editar_producto(id):
             """, (nombre, descripcion, precio, stock, categoria, id))
 
         mysql.connection.commit()
+        verificar_stock_bajo(cur, id)
         cur.close()
 
         flash('Producto actualizado correctamente.', 'success')
@@ -565,7 +571,22 @@ def consultar(tipo, numero):
         cursor = mysql.connection.cursor()
 
         if tipo == "dni":
-            nombre = f"{data.get('nombres','')} {data.get('apellidoPaterno','')} {data.get('apellidoMaterno','')}"
+
+            nombres = data.get('nombres', '')
+
+            apellido_paterno = (
+            data.get('apellidoPaterno')
+            or data.get('apellido_paterno')
+            or ''
+         )
+
+            apellido_materno = (
+            data.get('apellidoMaterno')
+            or data.get('apellido_materno')
+            or ''
+        )
+
+        nombre = f"{nombres} {apellido_paterno} {apellido_materno}".strip()
         else:
             nombre = data.get("razonSocial","")
 
@@ -642,7 +663,11 @@ def reducir_cantidad(id_producto):
     usuario = obtener_usuario()
     cur = mysql.connection.cursor()
     cur.execute("UPDATE carrito SET cantidad=cantidad-1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
-    cur.execute("DELETE FROM carrito WHERE cantidad<=0")
+    cur.execute("""
+    DELETE FROM carrito
+    WHERE cantidad<=0
+    AND usuario_id=%s
+""", (usuario,))
     mysql.connection.commit()
     return redirect('/carrito')
 
@@ -679,23 +704,49 @@ def eliminar_carrito(id):
 # ─────────────────────────────────────────────
 @app.route('/comprar')
 def comprar():
+
     if 'user_id' not in session:
         return redirect('/login')
-    user_id = int(session['user_id'])
+
+    user_id = str(session['user_id'])
+
     cur = mysql.connection.cursor()
+
+    # Migrar carrito invitado al usuario logueado
     if 'guest_id' in session:
-        cur.execute("UPDATE carrito SET usuario_id=%s WHERE usuario_id=%s", (user_id, session['guest_id']))
+
+        cur.execute("""
+            UPDATE carrito
+            SET usuario_id=%s
+            WHERE usuario_id=%s
+        """, (user_id, session['guest_id']))
+
         mysql.connection.commit()
-    cur.execute("SELECT * FROM carrito WHERE usuario_id=%s", (user_id,))
-    if not cur.fetchall():
-        return "Tu carrito está vacío"
+
+        session.pop('guest_id', None)
+
+    # Verificar carrito
+    cur.execute("""
+        SELECT id
+        FROM carrito
+        WHERE usuario_id=%s
+    """, (user_id,))
+
+    items = cur.fetchall()
+
+    cur.close()
+
+    if not items:
+        flash('Tu carrito está vacío.', 'warning')
+        return redirect('/carrito')
+
     return redirect('/procesar_compra')
 
 @app.route('/procesar_compra')
 def procesar_compra():
     if 'user_id' not in session:
         return redirect('/login')
-    user_id = int(session['user_id'])
+    user_id = str(session['user_id'])
     cur = mysql.connection.cursor()
 
     cur.execute("""
