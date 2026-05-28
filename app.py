@@ -587,29 +587,60 @@ def index():
 
 @app.route('/agregar/<int:id>')
 def agregar(id):
+
     usuario = obtener_usuario()
+    if not usuario:
+        return redirect('/login')
+
     cur = mysql.connection.cursor()
-    cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+
+    # Ver si el producto ya está en el carrito
+    cur.execute("""
+        SELECT * FROM carrito 
+        WHERE usuario_id=%s AND producto_id=%s
+    """, (usuario, id))
+
     item = cur.fetchone()
+
     if item:
-        cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        # Si existe, aumentar cantidad
+        cur.execute("""
+            UPDATE carrito 
+            SET cantidad = cantidad + 1
+            WHERE usuario_id=%s AND producto_id=%s
+        """, (usuario, id))
     else:
-        cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
+        # Si no existe, insertar nuevo
+        cur.execute("""
+            INSERT INTO carrito (usuario_id, producto_id, cantidad)
+            VALUES (%s, %s, 1)
+        """, (usuario, id))
+
     mysql.connection.commit()
+
     flash('Producto agregado al carrito', 'success')
     return redirect('/')
 
 @app.route('/carrito')
 def ver_carrito():
+
     usuario = obtener_usuario()
+    if not usuario:
+        return redirect('/login')
+
     cur = mysql.connection.cursor()
+
     cur.execute("""
         SELECT c.id, c.producto_id, p.nombre, p.precio, c.cantidad
-        FROM carrito c JOIN productos p ON c.producto_id=p.id
-        WHERE c.usuario_id=%s
+        FROM carrito c 
+        JOIN productos p ON c.producto_id = p.id
+        WHERE c.usuario_id = %s
     """, (usuario,))
+
     productos = cur.fetchall()
+
     total = sum(p['precio'] * p['cantidad'] for p in productos)
+
     return render_template('carrito.html', productos=productos, total=total)
 
 @app.route('/aumentar-cantidad/<int:id_producto>')
