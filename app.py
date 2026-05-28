@@ -95,7 +95,7 @@ def obtener_ip():
     return request.remote_addr
 
 def obtener_usuario():
-    return session['user_id']
+    return session.get('user_id')
 
 def generar_boleta_pdf(venta_id):
     """Genera PDF en memoria y lo devuelve como bytes."""
@@ -197,7 +197,7 @@ def verificar_stock_bajo(cur, producto_id):
     try:
         cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-        if not p or p['stock'] = 0:
+        if not p or p['stock'] == 0:
             return
         # ¿Ya existe pendiente?
         cur.execute("""
