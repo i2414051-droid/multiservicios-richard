@@ -748,8 +748,6 @@ def comprar():
         flash('Tu carrito está vacío.', 'warning')
         return redirect('/carrito')
 
-    return redirect('/procesar_compra')
-
 @app.route('/procesar_compra')
 def procesar_compra():
     if 'user_id' not in session:
