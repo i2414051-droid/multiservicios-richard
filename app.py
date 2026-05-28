@@ -559,6 +559,9 @@ def consultar(tipo, numero):
     if tipo not in ["dni", "ruc"]:
         return jsonify({"error": "Tipo inválido"})
 
+    # <-- AQUÍ agregas la línea para tomar la variable de entorno
+    TOKEN = os.environ.get('TOKEN_APISPERU')
+
     url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
 
     try:
