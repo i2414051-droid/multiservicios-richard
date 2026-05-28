@@ -55,7 +55,7 @@ TOKEN = os.environ.get('APIPERU_TOKEN',
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
 # ─────────────────────────────────────────────
-# INIT TABLAS NUEVAS mysql
+# INIT TABLAS NUEVAS
 # ─────────────────────────────────────────────
 def init_db():
     try:
@@ -90,12 +90,17 @@ def init_db():
         print(f"[init_db] {e}")
 
 # ─────────────────────────────────────────────
+# HELPERS
 # ─────────────────────────────────────────────
 def obtener_ip():
     return request.remote_addr
 
 def obtener_usuario():
-    return session.get('user_id')
+    if 'user_id' in session:
+        return session['user_id']
+    if 'guest_id' not in session:
+        session['guest_id'] = str(uuid.uuid4())
+    return session['guest_id']
 
 def generar_boleta_pdf(venta_id):
     """Genera PDF en memoria y lo devuelve como bytes."""
@@ -193,11 +198,11 @@ def enviar_email_proveedor(proveedor, productos_lista):
         return False
 
 def verificar_stock_bajo(cur, producto_id):
-    """Si stock = 0 auto-agrega a productos_para_pedir y notifica al proveedor."""
+    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor."""
     try:
         cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-        if not p or p['stock'] == 0:
+        if not p or p['stock'] > 1:
             return
         # ¿Ya existe pendiente?
         cur.execute("""
@@ -583,60 +588,29 @@ def index():
 
 @app.route('/agregar/<int:id>')
 def agregar(id):
-
     usuario = obtener_usuario()
-    if not usuario:
-        return redirect('/login')
-
     cur = mysql.connection.cursor()
-
-    # Ver si el producto ya está en el carrito
-    cur.execute("""
-        SELECT * FROM carrito 
-        WHERE usuario_id=%s AND producto_id=%s
-    """, (usuario, id))
-
+    cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
     item = cur.fetchone()
-
     if item:
-        # Si existe, aumentar cantidad
-        cur.execute("""
-            UPDATE carrito 
-            SET cantidad = cantidad + 1
-            WHERE usuario_id=%s AND producto_id=%s
-        """, (usuario, id))
+        cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
     else:
-        # Si no existe, insertar nuevo
-        cur.execute("""
-            INSERT INTO carrito (usuario_id, producto_id, cantidad)
-            VALUES (%s, %s, 1)
-        """, (usuario, id))
-
+        cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
     mysql.connection.commit()
-
     flash('Producto agregado al carrito', 'success')
     return redirect('/')
 
 @app.route('/carrito')
 def ver_carrito():
-
     usuario = obtener_usuario()
-    if not usuario:
-        return redirect('/login')
-
     cur = mysql.connection.cursor()
-
     cur.execute("""
         SELECT c.id, c.producto_id, p.nombre, p.precio, c.cantidad
-        FROM carrito c 
-        JOIN productos p ON c.producto_id = p.id
-        WHERE c.usuario_id = %s
+        FROM carrito c JOIN productos p ON c.producto_id=p.id
+        WHERE c.usuario_id=%s
     """, (usuario,))
-
     productos = cur.fetchall()
-
     total = sum(p['precio'] * p['cantidad'] for p in productos)
-
     return render_template('carrito.html', productos=productos, total=total)
 
 @app.route('/aumentar-cantidad/<int:id_producto>')
@@ -689,26 +663,16 @@ def eliminar_carrito(id):
 # ─────────────────────────────────────────────
 @app.route('/comprar')
 def comprar():
-
-    print("SESSION COMPLETA:", session)
-
     if 'user_id' not in session:
         return redirect('/login')
-
     user_id = int(session['user_id'])
-
-    print("USER ID:", user_id)
-
     cur = mysql.connection.cursor()
-
+    if 'guest_id' in session:
+        cur.execute("UPDATE carrito SET usuario_id=%s WHERE usuario_id=%s", (user_id, session['guest_id']))
+        mysql.connection.commit()
     cur.execute("SELECT * FROM carrito WHERE usuario_id=%s", (user_id,))
-    carrito = cur.fetchall()
-
-    print("CARRITO:", carrito)
-
-    if not carrito:
+    if not cur.fetchall():
         return "Tu carrito está vacío"
-
     return redirect('/procesar_compra')
 
 @app.route('/procesar_compra')
