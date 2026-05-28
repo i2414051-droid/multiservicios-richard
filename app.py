@@ -546,25 +546,70 @@ def activar_producto(id):
     cur.close()
 
     return redirect('/admin')
-if tipo == "dni":
+# CONSULTAR DNI/RUC
+# ─────────────────────────────────────────────
+@app.route("/consultar/<tipo>/<numero>")
+def consultar(tipo, numero):
 
-    nombres = data.get('nombres', '')
+    venta_id = request.args.get("venta_id")
 
-    apellido_paterno = (
-    data.get('apellidoPaterno')
-    or data.get('apellido_paterno')
-    or ''
- )
+    if not venta_id:
+        return jsonify({"error": "venta_id no recibido"})
 
-    apellido_materno = (
-    data.get('apellidoMaterno')
-    or data.get('apellido_materno')
-    or ''
-)
+    if tipo not in ["dni", "ruc"]:
+        return jsonify({"error": "Tipo inválido"})
 
-    nombre = f"{nombres} {apellido_paterno} {apellido_materno}".strip()
-else:
-    nombre = data.get("razonSocial","")
+    url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
+
+    try:
+
+        response = requests.get(url)
+        data = response.json()
+
+        if "error" in data:
+            return jsonify(data)
+
+        cursor = mysql.connection.cursor()
+
+        if tipo == "dni":
+
+            nombres = data.get('nombres', '')
+
+            apellido_paterno = (
+                data.get('apellidoPaterno')
+                or data.get('apellido_paterno')
+                or ''
+            )
+
+            apellido_materno = (
+                data.get('apellidoMaterno')
+                or data.get('apellido_materno')
+                or ''
+            )
+
+            nombre = f"{nombres} {apellido_paterno} {apellido_materno}".strip()
+
+        else:
+
+            nombre = data.get("razonSocial", "")
+
+        cursor.execute("""
+            UPDATE ventas
+            SET documento = %s,
+                nombre = %s
+            WHERE id = %s
+        """, (numero, nombre, venta_id))
+
+        mysql.connection.commit()
+        cursor.close()
+
+        return jsonify(data)
+
+    except Exception as e:
+
+        print("ERROR:", e)
+
+        return jsonify({"error": str(e)})
 
 # ─────────────────────────────────────────────
 # TIENDA / CARRITO
