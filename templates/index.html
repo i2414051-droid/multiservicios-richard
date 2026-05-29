@@ -102,26 +102,20 @@ Productos destacados
 
 <div class="card producto-card h-100">
 
-<div class="stock-box">
-
-{% if p.stock >0 %}
-
-<span class="stock-ok">
-
-● Stock
-
-</span>
-
-{% else %}
-
-<span class="stock-no">
-
-● Sin stock
-
-</span>
-
-{% endif %}
-
+<div class="stock-box d-flex justify-content-between align-items-center px-2 pt-2">
+  {% if p.stock is not none and p.stock > 0 %}
+    {% if p.stock <= 1 %}
+      <span class="badge bg-danger">{{ p.stock }} en stock 🔔</span>
+    {% elif p.stock < 5 %}
+      <span class="badge bg-danger">{{ p.stock }} en stock</span>
+    {% elif p.stock < 15 %}
+      <span class="badge bg-warning text-dark">{{ p.stock }} en stock</span>
+    {% else %}
+      <span class="badge bg-success">{{ p.stock }} en stock</span>
+    {% endif %}
+  {% else %}
+    <span class="badge bg-secondary">Sin stock</span>
+  {% endif %}
 </div>
 
 

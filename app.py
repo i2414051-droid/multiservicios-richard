@@ -95,9 +95,14 @@ def init_db():
                 total      DECIMAL(10,2),
                 documento  VARCHAR(20),
                 nombre     VARCHAR(200),
+                estado     VARCHAR(20) DEFAULT 'en espera',
                 fecha      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN estado VARCHAR(20) DEFAULT 'en espera'")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS detalle_venta (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -562,10 +567,23 @@ def eliminar_producto(id):
 
 @app.route('/activar_producto/<int:id>')
 def activar_producto(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
     cur = mysql.connection.cursor()
     cur.execute("UPDATE productos SET estado='activo' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
+    return redirect('/admin')
+
+@app.route('/eliminar_producto_definitivo/<int:id>')
+def eliminar_producto_definitivo(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("DELETE FROM productos WHERE id=%s", (id,))
+    mysql.connection.commit()
+    cur.close()
+    flash('Producto eliminado permanentemente.', 'success')
     return redirect('/admin')
 
 # ─────────────────────────────────────────────
@@ -616,6 +634,20 @@ def index():
 def agregar(id):
     usuario = obtener_usuario()
     cur = mysql.connection.cursor()
+    cur.execute("SELECT stock FROM productos WHERE id=%s", (id,))
+    prod = cur.fetchone()
+    if not prod:
+        flash('Producto no encontrado.', 'danger')
+        return redirect('/')
+    stock_disponible = prod['stock']
+    if stock_disponible <= 0:
+        flash('Producto sin stock disponible.', 'danger')
+        return redirect('/')
+    cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+    en_carrito = cur.fetchone()['total'] or 0
+    if en_carrito + 1 > stock_disponible:
+        flash(f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).', 'danger')
+        return redirect('/')
     cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
     item = cur.fetchone()
     if item:
@@ -837,8 +869,11 @@ def historial_compras():
         return redirect('/')
     buscar = request.args.get('buscar','')
     cur = mysql.connection.cursor()
+    cur.execute("SELECT SUM(total) AS gran_total FROM ventas")
+    res = cur.fetchone()
+    gran_total = res['gran_total'] or 0
     cur.execute("""
-        SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular
+        SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular, v.estado
         FROM ventas v JOIN usuarios u ON v.cliente_id=u.id
         WHERE u.correo LIKE %s ORDER BY v.fecha DESC
     """, (f'%{buscar}%',))
@@ -852,7 +887,45 @@ def historial_compras():
         """, (v['id'],))
         historial.append({**v, 'productos': cur.fetchall()})
     cur.close()
-    return render_template('historial_compras_admin.html', historial=historial, buscar=buscar)
+    return render_template('historial_compras_admin.html', historial=historial, buscar=buscar, gran_total=gran_total)
+
+@app.route('/historial-compras/estado/<int:venta_id>', methods=['POST'])
+def actualizar_estado_venta(venta_id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/')
+    estado = request.form.get('estado', 'en espera')
+    if estado not in ['entregado', 'en espera', 'cancelado']:
+        estado = 'en espera'
+    cur = mysql.connection.cursor()
+    cur.execute("UPDATE ventas SET estado=%s WHERE id=%s", (estado, venta_id))
+    mysql.connection.commit()
+    cur.close()
+    flash(f'Venta #{venta_id} actualizada a "{estado}".', 'success')
+    return redirect('/historial-compras')
+
+@app.route('/historial-compras/eliminar/<int:venta_id>')
+def eliminar_venta(venta_id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/')
+    cur = mysql.connection.cursor()
+    cur.execute("DELETE FROM detalle_venta WHERE venta_id=%s", (venta_id,))
+    cur.execute("DELETE FROM ventas WHERE id=%s", (venta_id,))
+    mysql.connection.commit()
+    cur.close()
+    flash(f'Venta #{venta_id} eliminada.', 'success')
+    return redirect('/historial-compras')
+
+@app.route('/historial-compras/limpiar')
+def limpiar_historial():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/')
+    cur = mysql.connection.cursor()
+    cur.execute("DELETE FROM detalle_venta")
+    cur.execute("DELETE FROM ventas")
+    mysql.connection.commit()
+    cur.close()
+    flash('Todo el historial de compras ha sido eliminado.', 'success')
+    return redirect('/historial-compras')
 
 # ─────────────────────────────────────────────
 # PERMISOS

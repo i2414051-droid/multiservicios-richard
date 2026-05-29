@@ -5,9 +5,73 @@
 
   <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
     <h2 class="mb-0"><i class="bi bi-receipt-cutoff me-2"></i>Historial de Compras</h2>
-    <a href="/permisos" class="btn btn-outline-warning">
-      <i class="bi bi-shield-lock me-1"></i> Gestionar Permisos
-    </a>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="/permisos" class="btn btn-outline-warning">
+        <i class="bi bi-shield-lock me-1"></i> Gestionar Permisos
+      </a>
+      <a href="/historial-compras/limpiar" class="btn btn-outline-danger"
+         onclick="return confirm('¿Eliminar TODO el historial de compras? Esta acción no se puede deshacer.')">
+        <i class="bi bi-trash me-1"></i> Limpiar historial
+      </a>
+    </div>
+  </div>
+
+  <!-- TABLA RESUMEN + TOTAL GENERAL -->
+  <div class="card shadow-sm border-0 mb-4" style="background:#1e1e2e;">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0 text-center align-middle">
+          <thead style="background:#12122a;">
+            <tr>
+              <th># Venta</th>
+              <th>Cliente</th>
+              <th>Total</th>
+              <th>Fecha</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for venta in historial %}
+            <tr>
+              <td><span class="badge bg-primary fs-6">#{{ venta.id }}</span></td>
+              <td class="text-start">
+                <span class="text-white">{{ venta.correo }}</span>
+                {% if venta.titular %}
+                <br><small class="text-muted">{{ venta.titular }}{% if venta.documento %} ({{ venta.documento }}){% endif %}</small>
+                {% endif %}
+              </td>
+              <td class="text-success fw-bold">S/ {{ "%.2f"|format(venta.total) }}</td>
+              <td class="text-muted" style="font-size:.85rem;">{{ venta.fecha }}</td>
+              <td>
+                <form method="POST" action="/historial-compras/estado/{{ venta.id }}" style="display:inline;">
+                  <select name="estado" class="form-select form-select-sm bg-dark text-white border-secondary"
+                          onchange="this.form.submit()">
+                    <option value="entregado" {% if venta.estado == 'entregado' %}selected{% endif %}>Entregado</option>
+                    <option value="en espera" {% if venta.estado == 'en espera' %}selected{% endif %}>En espera</option>
+                    <option value="cancelado" {% if venta.estado == 'cancelado' %}selected{% endif %}>Cancelado</option>
+                  </select>
+                </form>
+              </td>
+              <td>
+                <a href="/historial-compras/eliminar/{{ venta.id }}" class="btn btn-danger btn-sm"
+                   onclick="return confirm('¿Eliminar venta #{{ venta.id }}?')">
+                  <i class="bi bi-trash"></i>
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr style="background:#2a2a3d;">
+              <td colspan="2" class="text-end fw-bold text-white fs-5">TOTAL GENERAL</td>
+              <td class="text-success fw-bold fs-5">S/ {{ "%.2f"|format(gran_total) }}</td>
+              <td colspan="3"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
   </div>
 
   <!-- BUSCADOR -->
@@ -60,6 +124,12 @@
         </div>
 
         <div class="d-flex align-items-center gap-3 flex-wrap">
+          <span class="badge
+            {% if venta.estado == 'entregado' %}bg-success
+            {% elif venta.estado == 'cancelado' %}bg-danger
+            {% else %}bg-warning text-dark{% endif %}">
+            {{ venta.estado }}
+          </span>
           <span class="text-success fw-bold fs-6">
             <i class="bi bi-cash-coin me-1"></i>S/ {{ "%.2f"|format(venta.total) }}
           </span>
@@ -132,7 +202,6 @@
 
 </div>
 
-<!-- Abrir la primera tarjeta por defecto -->
 <script>
   document.addEventListener('DOMContentLoaded', function () {
     var first = document.querySelector('.collapse');
