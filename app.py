@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (Flask, render_template, request, redirect,
-                url_for, session, jsonify, flash, send_file)
+                   url_for, session, jsonify, flash, send_file)
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail, Message
@@ -47,7 +47,10 @@ app.config['MAIL_PASSWORD']       = os.environ.get('MAIL_PASSWORD', '')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', '')
 mail = Mail(app)
 
-TOKEN = os.environ.get('eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6Impob3NzdWVicnlhbkBnbWFpbC5jb20ifQ.VvkKvQL_se-h31zZ87zXwBzH6lYy3wLb4pD0XCmhN5o')
+TOKEN = os.environ.get('APIPERU_TOKEN',
+    'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.'
+    'eyJlbWFpbCI6Impob3NzdWVicnlhbkBnbWFpbC5jb20ifQ.'
+    'VvkKvQL_se-h31zZ87zXwBzH6lYy3wLb4pD0XCmhN5o')
 
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
@@ -199,7 +202,7 @@ def verificar_stock_bajo(cur, producto_id):
     try:
         cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-        if not p or p['stock'] > 0:
+        if not p or p['stock'] > 1:
             return
         # ¿Ya existe pendiente?
         cur.execute("""
@@ -398,68 +401,49 @@ def admin():
     total_proveedores = r2['total'] if r2 else 0
 
     return render_template('admin.html',
-                            productos=productos,
-                            pedidos_pendientes=pedidos_pendientes,
-                            total_proveedores=total_proveedores)
+                           productos=productos,
+                           pedidos_pendientes=pedidos_pendientes,
+                           total_proveedores=total_proveedores)
 
 # ─────────────────────────────────────────────
-# PRODUCTOS CRUD 
+# PRODUCTOS CRUD
 # ─────────────────────────────────────────────
-
 @app.route('/agregar_producto', methods=['POST'])
 def agregar_producto():
-
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-
     nombre      = request.form['nombre']
     descripcion = request.form['descripcion']
     precio      = float(request.form['precio'])
     stock       = int(request.form['stock'])
     categoria   = request.form.get('categoria', 'Otros')
-
     if precio < 0:
         flash('No se permiten precios negativos', 'danger')
         return redirect('/admin')
-
     imagen = request.files.get('imagen')
     imagen_db = None
-
     if imagen and imagen.filename:
-        fn = secure_filename(imagen.filename)
+        fn  = secure_filename(imagen.filename)
         imagen.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
         imagen_db = 'uploads/' + fn
 
     cur = mysql.connection.cursor()
-
     cur.execute("""
-        INSERT INTO productos (nombre, descripcion, precio, stock, categoria, imagen, estado)
-        VALUES (%s,%s,%s,%s,%s,%s,'activo')
+        INSERT INTO productos (nombre, descripcion, precio, stock, categoria, imagen)
+        VALUES (%s,%s,%s,%s,%s,%s)
     """, (nombre, descripcion, precio, stock, categoria, imagen_db))
-
     mysql.connection.commit()
-
-    producto_id = cur.lastrowid
-
-    verificar_stock_bajo(cur, producto_id)
-
-    cur.close()
-
+    nuevo_id = cur.lastrowid
+    verificar_stock_bajo(cur, nuevo_id)
+    mysql.connection.commit()
     return redirect('/admin')
-
-
-# ─────────────────────────────────────────────
 
 @app.route('/editar_producto/<int:id>', methods=['GET','POST'])
 def editar_producto(id):
-
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-
     cur = mysql.connection.cursor()
-
     if request.method == 'POST':
-
         nombre      = request.form['nombre']
         descripcion = request.form['descripcion']
         precio      = float(request.form['precio'])
@@ -470,7 +454,6 @@ def editar_producto(id):
         if precio < 0:
             flash('No se permiten precios negativos.', 'danger')
             return redirect(f'/editar_producto/{id}')
-
         if stock < 0:
             flash('No se permiten valores negativos en el stock.', 'danger')
             return redirect(f'/editar_producto/{id}')
@@ -478,134 +461,70 @@ def editar_producto(id):
         if imagen and imagen.filename:
             fn = secure_filename(imagen.filename)
             imagen.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
-
             cur.execute("""
-                UPDATE productos
-                SET nombre=%s, descripcion=%s, precio=%s,
-                    stock=%s, categoria=%s, imagen=%s
-                WHERE id=%s
+                UPDATE productos SET nombre=%s, descripcion=%s, precio=%s,
+                stock=%s, categoria=%s, imagen=%s WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, 'uploads/'+fn, id))
-
         else:
             cur.execute("""
-                UPDATE productos
-                SET nombre=%s, descripcion=%s, precio=%s,
-                    stock=%s, categoria=%s
-                WHERE id=%s
+                UPDATE productos SET nombre=%s, descripcion=%s, precio=%s,
+                stock=%s, categoria=%s WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, id))
 
         mysql.connection.commit()
         verificar_stock_bajo(cur, id)
+        mysql.connection.commit()
         cur.close()
-
         flash('Producto actualizado correctamente.', 'success')
         return redirect('/admin')
 
     cur.execute("SELECT * FROM productos WHERE id=%s", (id,))
     producto = cur.fetchone()
-
-    cur.close()
-
     return render_template('editar_producto.html', producto=producto, categorias=CATEGORIAS)
-
-
-# ─────────────────────────────────────────────
 
 @app.route('/eliminar_producto/<int:id>')
 def eliminar_producto(id):
-
     cur = mysql.connection.cursor()
-
-    cur.execute("""
-        UPDATE productos
-        SET estado='inactivo'
-        WHERE id=%s
-    """, (id,))
-
+    cur.execute("UPDATE productos SET estado='inactivo' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
-
     return redirect('/admin')
-
-
-# ─────────────────────────────────────────────
 
 @app.route('/activar_producto/<int:id>')
 def activar_producto(id):
-
     cur = mysql.connection.cursor()
-
-    # SOLO ACTIVAR (SIN LÓGICA COMPLEJA)
-    cur.execute("""
-        UPDATE productos
-        SET estado='activo'
-        WHERE id=%s
-    """, (id,))
-
+    cur.execute("UPDATE productos SET estado='activo' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
-
     return redirect('/admin')
+
+# ─────────────────────────────────────────────
 # CONSULTAR DNI/RUC
 # ─────────────────────────────────────────────
-@app.route("/consultar/<tipo>/<numero>")
+@app.route('/consultar/<tipo>/<numero>')
 def consultar(tipo, numero):
-
-    venta_id = request.args.get("venta_id")
-
+    venta_id = request.args.get('venta_id')
     if not venta_id:
-        return jsonify({"error": "venta_id no recibido"})
-
-    if tipo not in ["dni", "ruc"]:
-        return jsonify({"error": "Tipo inválido"})
-
+        return jsonify({'error': 'venta_id no recibido'})
+    if tipo not in ['dni','ruc']:
+        return jsonify({'error': 'Tipo inválido'})
     url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
-
     try:
-        response = requests.get(url)
-        data = response.json()
-
-        if "error" in data:
+        data = requests.get(url).json()
+        if 'error' in data:
             return jsonify(data)
-
-        cursor = mysql.connection.cursor()
-
-        # 👇 ESTE BLOQUE TIENE QUE ESTAR AQUÍ ADENTRO
-        if tipo == "dni":
-            nombres = data.get('nombres', '')
-
-            apellido_paterno = (
-                data.get('apellidoPaterno')
-                or data.get('apellido_paterno')
-                or ''
-            )
-
-            apellido_materno = (
-                data.get('apellidoMaterno')
-                or data.get('apellido_materno')
-                or ''
-            )
-
-            nombre = f"{nombres} {apellido_paterno} {apellido_materno}".strip()
-
+        cur = mysql.connection.cursor()
+        if tipo == 'dni':
+            nombre = f"{data.get('nombres','')} {data.get('apellidoPaterno','')} {data.get('apellidoMaterno','')}"
         else:
-            nombre = data.get("razonSocial", "")
-
-        cursor.execute("""
-            UPDATE ventas
-            SET documento = %s,
-                nombre = %s
-            WHERE id = %s
-        """, (numero, nombre, venta_id))
-
+            nombre = data.get('razonSocial','')
+        cur.execute("UPDATE ventas SET documento=%s, nombre=%s WHERE id=%s", (numero, nombre, venta_id))
         mysql.connection.commit()
-        cursor.close()
-
+        cur.close()
         return jsonify(data)
-
     except Exception as e:
-        print("ERROR:", e)
-        return jsonify({"error": str(e)})
+        return jsonify({'error': str(e)})
+
 # ─────────────────────────────────────────────
 # TIENDA / CARRITO
 # ─────────────────────────────────────────────
@@ -614,7 +533,7 @@ def index():
     buscar   = request.args.get('buscar','')
     categoria = request.args.get('categoria','Todos')
     cur = mysql.connection.cursor()
-    sql = "SELECT * FROM productos WHERE nombre LIKE %s AND estado='activo' AND stock > 0"      #modificado 27/07/26 para productos con stock 0 desaparezcan automáticamente de la tienda
+    sql = "SELECT * FROM productos WHERE nombre LIKE %s AND estado='activo'"
     vals = [f'%{buscar}%']
     if categoria != 'Todos':
         sql += ' AND categoria=%s'
@@ -663,11 +582,7 @@ def reducir_cantidad(id_producto):
     usuario = obtener_usuario()
     cur = mysql.connection.cursor()
     cur.execute("UPDATE carrito SET cantidad=cantidad-1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
-    cur.execute("""
-    DELETE FROM carrito
-    WHERE cantidad<=0
-    AND usuario_id=%s
-""", (usuario,))
+    cur.execute("DELETE FROM carrito WHERE cantidad<=0")
     mysql.connection.commit()
     return redirect('/carrito')
 
@@ -704,47 +619,23 @@ def eliminar_carrito(id):
 # ─────────────────────────────────────────────
 @app.route('/comprar')
 def comprar():
-
     if 'user_id' not in session:
         return redirect('/login')
-
-    user_id = str(session['user_id'])
-
+    user_id = int(session['user_id'])
     cur = mysql.connection.cursor()
-
-    # Migrar carrito invitado al usuario logueado
     if 'guest_id' in session:
-
-        cur.execute("""
-            UPDATE carrito
-            SET usuario_id=%s
-            WHERE usuario_id=%s
-        """, (user_id, session['guest_id']))
-
+        cur.execute("UPDATE carrito SET usuario_id=%s WHERE usuario_id=%s", (user_id, session['guest_id']))
         mysql.connection.commit()
-
-        session.pop('guest_id', None)
-
-    # Verificar carrito
-    cur.execute("""
-        SELECT id
-        FROM carrito
-        WHERE usuario_id=%s
-    """, (user_id,))
-
-    items = cur.fetchall()
-
-    cur.close()
-
-    if not items:
-        flash('Tu carrito está vacío.', 'warning')
-        return redirect('/carrito')
+    cur.execute("SELECT * FROM carrito WHERE usuario_id=%s", (user_id,))
+    if not cur.fetchall():
+        return "Tu carrito está vacío"
+    return redirect('/procesar_compra')
 
 @app.route('/procesar_compra')
 def procesar_compra():
     if 'user_id' not in session:
         return redirect('/login')
-    user_id = str(session['user_id'])
+    user_id = int(session['user_id'])
     cur = mysql.connection.cursor()
 
     cur.execute("""
@@ -863,30 +754,6 @@ def historial():
     cur.close()
     return render_template('historial.html', historial=hist)
 
-# ─────────────────────────────────────────────
-# ELIMINAR HISTORIAL DE COMPRAS
-# ─────────────────────────────────────────────
-@app.route('/eliminar_historial')
-def eliminar_historial():
-
-    # SOLO ADMIN
-    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
-        return redirect('/')
-
-    cur = mysql.connection.cursor()
-
-    # ELIMINAR DETALLE DE VENTAS
-    cur.execute("DELETE FROM detalle_venta")
-
-    # ELIMINAR VENTAS
-    cur.execute("DELETE FROM ventas")
-
-    mysql.connection.commit()
-    cur.close()
-
-    return redirect('/historial-compras')
-
-
 @app.route('/historial-compras')
 def historial_compras():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -909,48 +776,6 @@ def historial_compras():
         historial.append({**v, 'productos': cur.fetchall()})
     cur.close()
     return render_template('historial_compras_admin.html', historial=historial, buscar=buscar)
-# ─────────────────────────────────────────────
-# ELIMINAR COMPRA DEL CLIENTE
-# ─────────────────────────────────────────────
-@app.route('/eliminar_compra/<int:id>')
-def eliminar_compra(id):
-
-    if 'user_id' not in session:
-        return redirect('/login')
-
-    user_id = session['user_id']
-
-    cur = mysql.connection.cursor()
-
-    # VERIFICAR QUE LA COMPRA PERTENECE AL USUARIO
-    cur.execute("""
-        SELECT id
-        FROM ventas
-        WHERE id=%s AND cliente_id=%s
-    """, (id, user_id))
-
-    venta = cur.fetchone()
-
-    if venta:
-
-        # ELIMINAR DETALLES
-        cur.execute(
-            "DELETE FROM detalle_venta WHERE venta_id=%s",
-            (id,)
-        )
-
-        # ELIMINAR VENTA
-        cur.execute(
-            "DELETE FROM ventas WHERE id=%s",
-            (id,)
-        )
-
-        mysql.connection.commit()
-
-    cur.close()
-
-    return redirect('/historial')
-
 
 # ─────────────────────────────────────────────
 # PERMISOS
@@ -1017,7 +842,7 @@ def proveedores():
     lista = cur.fetchall()
     cur.close()
     return render_template('proveedores.html', proveedores=lista,
-                            categorias=CATEGORIAS, buscar=buscar, cat_filtro=cat_filtro)
+                           categorias=CATEGORIAS, buscar=buscar, cat_filtro=cat_filtro)
 
 @app.route('/proveedores/editar/<int:id>', methods=['GET','POST'])
 def editar_proveedor(id):
@@ -1041,7 +866,7 @@ def editar_proveedor(id):
     p = cur.fetchone()
     cur.close()
     return render_template('proveedores.html', editar=p, categorias=CATEGORIAS,
-                            proveedores=[], buscar='', cat_filtro='')
+                           proveedores=[], buscar='', cat_filtro='')
 
 @app.route('/proveedores/eliminar/<int:id>')
 def eliminar_proveedor(id):
