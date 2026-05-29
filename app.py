@@ -194,68 +194,41 @@ def enviar_email_proveedor(proveedor, productos_lista):
         print(f"[email_proveedor] {e}")
         return False
 
+
 def verificar_stock_bajo(cur, producto_id):
-    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor."""
     try:
-        cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
-        p = cur.fetchone()
-        if not p or p['stock'] > 0:
-            return
-        # ¿Ya existe pendiente?
         cur.execute("""
-            SELECT id FROM productos_para_pedir
-            WHERE producto_id=%s AND estado='pendiente'
+            SELECT nombre, stock, categoria, estado
+            FROM productos
+            WHERE id=%s
         """, (producto_id,))
-        if cur.fetchone():
+        p = cur.fetchone()
+
+        if not p:
             return
-        # Proveedor por categoría
-        cur.execute("""
-            SELECT id, nombre, celular, correo
-            FROM proveedores WHERE categoria=%s LIMIT 1
-        """, (p['categoria'],))
-        proveedor = cur.fetchone()
-        proveedor_id = proveedor['id'] if proveedor else None
 
-        cur.execute("""
-            INSERT INTO productos_para_pedir (producto_id, cantidad_pedido, proveedor_id)
-            VALUES (%s, 1, %s)
-        """, (producto_id, proveedor_id))
+        if int(p['stock']) <= 0:
+            cur.execute("""
+                UPDATE productos
+                SET estado='oculto'
+                WHERE id=%s
+            """, (producto_id,))
 
-        # Email al proveedor
-        if proveedor and proveedor.get('correo'):
-            enviar_email_proveedor(proveedor, [{
-                'nombre': p['nombre'],
-                'categoria': p['categoria'],
-                'cantidad_pedido': 1
-            }])
+            cur.execute("""
+                SELECT id FROM productos_para_pedir
+                WHERE producto_id=%s AND estado='pendiente'
+            """, (producto_id,))
+            existe = cur.fetchone()
+
+            if not existe:
+                cur.execute("""
+                    INSERT INTO productos_para_pedir
+                    (producto_id, cantidad_pedido, estado)
+                    VALUES (%s, %s, 'pendiente')
+                """, (producto_id, 1))
     except Exception as e:
-        print(f"[stock_bajo] {e}")
+        print("ERROR verificar_stock_bajo:", e)
 
-def whatsapp_url(celular, mensaje):
-    """Genera URL de WhatsApp con mensaje prefill."""
-    numero = ''.join(filter(str.isdigit, celular or ''))
-    if not numero.startswith('51'):
-        numero = '51' + numero
-    from urllib.parse import quote
-    return f"https://wa.me/{numero}?text={quote(mensaje)}"
-
-# ─────────────────────────────────────────────
-# CONTEXT PROCESSOR
-# ─────────────────────────────────────────────
-@app.context_processor
-def cantidad_carrito():
-    try:
-        usuario = obtener_usuario()
-        cur = mysql.connection.cursor()
-        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s", (usuario,))
-        res = cur.fetchone()
-        return dict(cantidad_carrito=res['total'] if res['total'] else 0)
-    except:
-        return dict(cantidad_carrito=0)
-
-# ─────────────────────────────────────────────
-# TEST / INIT
-# ─────────────────────────────────────────────
 @app.route('/test_db')
 def test_db():
     try:
@@ -699,12 +672,13 @@ def eliminar_carrito(id):
     mysql.connection.commit()
     return redirect('/carrito')
 
-# ─────────────────────────────────────────────
-# COMPRA
-# ─────────────────────────────────────────────
+# =========================
+# COMPRAR
+# =========================
 @app.route('/comprar')
 def comprar():
 
+    # VERIFICAR LOGIN
     if 'user_id' not in session:
         return redirect('/login')
 
@@ -712,7 +686,9 @@ def comprar():
 
     cur = mysql.connection.cursor()
 
-    # Migrar carrito invitado al usuario logueado
+    # =========================
+    # MIGRAR CARRITO INVITADO
+    # =========================
     if 'guest_id' in session:
 
         cur.execute("""
@@ -725,74 +701,283 @@ def comprar():
 
         session.pop('guest_id', None)
 
-    # Verificar carrito
+    # =========================
+    # OBTENER PRODUCTOS
+    # =========================
     cur.execute("""
-        SELECT id
-        FROM carrito
-        WHERE usuario_id=%s
+        SELECT
+            p.id,
+            p.nombre,
+            p.precio,
+            p.imagen,
+            c.cantidad
+        FROM carrito c
+        JOIN productos p
+            ON c.producto_id = p.id
+        WHERE c.usuario_id=%s
     """, (user_id,))
 
     items = cur.fetchall()
+
+    # =========================
+    # CARRITO VACÍO
+    # =========================
+    if not items:
+
+        cur.close()
+
+        flash('Tu carrito está vacío.', 'warning')
+
+        return redirect('/carrito')
+
+    # =========================
+    # CALCULAR TOTAL
+    # =========================
+    total = 0
+
+    for item in items:
+        total += float(item['precio']) * int(item['cantidad'])
 
     cur.close()
 
-    if not items:
-        flash('Tu carrito está vacío.', 'warning')
-        return redirect('/carrito')
+    # =========================
+    # MOSTRAR RESUMEN COMPRA
+    # =========================
+    return render_template(
+        'comprar.html',
+        items=items,
+        total=total
+    )
 
-@app.route('/procesar_compra')
-def procesar_compra():
-    if 'user_id' not in session:
-        return redirect('/login')
-    user_id = str(session['user_id'])
+
+# =========================
+# PEDIR PRODUCTO
+# =========================
+@app.route('/pedir_producto/<int:id>')
+def pedir_producto(id):
+
+    # SOLO ADMIN
+    if session.get('rol') != 'admin':
+        return redirect('/')
+
     cur = mysql.connection.cursor()
 
+    # VERIFICAR SI YA EXISTE
     cur.execute("""
-        SELECT p.id, p.nombre, p.precio, c.cantidad
-        FROM carrito c JOIN productos p ON c.producto_id=p.id
+        SELECT id
+        FROM productos_para_pedir
+        WHERE producto_id=%s
+        AND estado='pendiente'
+    """, (id,))
+
+    existe = cur.fetchone()
+
+    # INSERTAR SI NO EXISTE
+    if not existe:
+
+        cur.execute("""
+            INSERT INTO productos_para_pedir
+            (
+                producto_id,
+                cantidad_pedido,
+                estado
+            )
+            VALUES (%s,%s,%s)
+        """, (
+            id,
+            1,
+            'pendiente'
+        ))
+
+        mysql.connection.commit()
+
+    cur.close()
+
+    flash('Producto enviado para pedir.', 'success')
+
+    return redirect('/admin')
+
+
+# =========================
+# PROCESAR COMPRA
+# =========================
+@app.route('/procesar_compra')
+def procesar_compra():
+
+    # VERIFICAR LOGIN
+    if 'user_id' not in session:
+        return redirect('/login')
+
+    user_id = str(session['user_id'])
+
+    cur = mysql.connection.cursor()
+
+    # =========================
+    # OBTENER PRODUCTOS
+    # =========================
+    cur.execute("""
+        SELECT
+            p.id,
+            p.nombre,
+            p.precio,
+            c.cantidad
+        FROM carrito c
+        JOIN productos p
+            ON c.producto_id = p.id
         WHERE c.usuario_id=%s
     """, (user_id,))
+
     items = cur.fetchall()
+
+    # =========================
+    # CARRITO VACÍO
+    # =========================
     if not items:
-        return "Carrito vacío"
+
+        cur.close()
+
+        flash('Tu carrito está vacío.', 'warning')
+
+        return redirect('/carrito')
 
     total = 0
-    for item in items:
-        cur.execute("SELECT stock FROM productos WHERE id=%s", (item['id'],))
-        stock = cur.fetchone()['stock']
-        if stock < item['cantidad']:
-            return f"Stock insuficiente: {item['nombre']}"
-        total += item['precio'] * item['cantidad']
 
-    cur.execute("INSERT INTO ventas (cliente_id, total) VALUES(%s,%s)", (user_id, total))
+    # =========================
+    # VALIDAR STOCK
+    # =========================
+    for item in items:
+
+        cur.execute("""
+            SELECT stock
+            FROM productos
+            WHERE id=%s
+        """, (item['id'],))
+
+        producto = cur.fetchone()
+
+        # PRODUCTO NO EXISTE
+        if not producto:
+
+            cur.close()
+
+            flash(
+                f"Producto no encontrado: {item['nombre']}",
+                'danger'
+            )
+
+            return redirect('/carrito')
+
+        stock = int(producto['stock'])
+
+        # STOCK INSUFICIENTE
+        if stock < int(item['cantidad']):
+
+            cur.close()
+
+            flash(
+                f"Stock insuficiente para {item['nombre']}",
+                'danger'
+            )
+
+            return redirect('/carrito')
+
+        # SUMAR TOTAL
+        total += float(item['precio']) * int(item['cantidad'])
+
+    # =========================
+    # CREAR VENTA
+    # =========================
+    cur.execute("""
+        INSERT INTO ventas
+        (
+            cliente_id,
+            total
+        )
+        VALUES (%s,%s)
+    """, (
+        user_id,
+        total
+    ))
+
     venta_id = cur.lastrowid
 
+    # =========================
+    # GUARDAR DETALLE
+    # =========================
     for item in items:
-        cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
-                    (venta_id, item['id'], item['cantidad'], item['precio']))
-        cur.execute("UPDATE productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
-        # Verificar stock bajo después de cada compra
+
+        # INSERTAR DETALLE
+        cur.execute("""
+            INSERT INTO detalle_venta
+            (
+                venta_id,
+                producto_id,
+                cantidad,
+                precio
+            )
+            VALUES (%s,%s,%s,%s)
+        """, (
+            venta_id,
+            item['id'],
+            item['cantidad'],
+            item['precio']
+        ))
+
+        # DESCONTAR STOCK
+        cur.execute("""
+            UPDATE productos
+            SET stock = stock - %s
+            WHERE id = %s
+        """, (
+            item['cantidad'],
+            item['id']
+        ))
+
+        # =========================
+        # VERIFICAR STOCK BAJO
+        # =========================
         verificar_stock_bajo(cur, item['id'])
 
-    cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
+    # =========================
+    # VACIAR CARRITO
+    # =========================
+    cur.execute("""
+        DELETE FROM carrito
+        WHERE usuario_id=%s
+    """, (user_id,))
+
+    # =========================
+    # GUARDAR CAMBIOS
+    # =========================
     mysql.connection.commit()
 
-    # Auto-enviar boleta al cliente por email
-    correo_cliente = session.get('correo','')
-    if correo_cliente:
-        enviar_boleta_cliente(correo_cliente, venta_id)
+    cur.close()
 
+    # =========================
+    # ENVIAR BOLETA EMAIL
+    # =========================
+    try:
+
+        correo_cliente = session.get('correo', '')
+
+        if correo_cliente:
+            enviar_boleta_cliente(
+                correo_cliente,
+                venta_id
+            )
+
+    except Exception as e:
+
+        print("ERROR EMAIL:", e)
+
+    # =========================
+    # CONFIRMACIÓN
+    # =========================
     return redirect(f'/confirmacion/{venta_id}')
 
 # ─────────────────────────────────────────────
 # BOLETA
 # ─────────────────────────────────────────────
-@app.route('/boleta')
-def boleta():
-    if 'user_id' not in session:
-        return redirect('/login')
-    return render_template('boleta.html')
-
 @app.route('/boleta/<int:venta_id>')
 def boleta_form(venta_id):
     return render_template('boleta_form.html', venta_id=venta_id)
@@ -1173,6 +1358,7 @@ def enviar_email_a_proveedor(proveedor_id):
 # ─────────────────────────────────────────────
 # RUN
 # ─────────────────────────────────────────────
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
