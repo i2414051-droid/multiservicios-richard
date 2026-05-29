@@ -559,13 +559,9 @@ def consultar(tipo, numero):
     if tipo not in ["dni", "ruc"]:
         return jsonify({"error": "Tipo inválido"})
 
-    # <-- AQUÍ agregas la línea para tomar la variable de entorno
-    TOKEN = os.environ.get('TOKEN_APISPERU')
-
     url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
 
     try:
-
         response = requests.get(url)
         data = response.json()
 
@@ -574,8 +570,8 @@ def consultar(tipo, numero):
 
         cursor = mysql.connection.cursor()
 
+        # 👇 ESTE BLOQUE TIENE QUE ESTAR AQUÍ ADENTRO
         if tipo == "dni":
-
             nombres = data.get('nombres', '')
 
             apellido_paterno = (
@@ -593,7 +589,6 @@ def consultar(tipo, numero):
             nombre = f"{nombres} {apellido_paterno} {apellido_materno}".strip()
 
         else:
-
             nombre = data.get("razonSocial", "")
 
         cursor.execute("""
@@ -609,11 +604,8 @@ def consultar(tipo, numero):
         return jsonify(data)
 
     except Exception as e:
-
         print("ERROR:", e)
-
         return jsonify({"error": str(e)})
-
 # ─────────────────────────────────────────────
 # TIENDA / CARRITO
 # ─────────────────────────────────────────────
