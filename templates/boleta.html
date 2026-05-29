@@ -8,6 +8,8 @@
 
 <div id="alerta"></div>
 
+<input type="hidden" id="venta_id" value="{{ venta_id }}">
+
 <select id="tipo" class="form-control mb-2">
     <option value="dni">DNI</option>
     <option value="ruc">RUC</option>
@@ -27,29 +29,42 @@
 
 <script>
 async function consultar() {
-
     const numero = document.getElementById("numero").value;
     const tipo = document.getElementById("tipo").value;
+    const venta_id = document.getElementById("venta_id").value;
 
-    const res = await fetch(`/consultar/${tipo}/${numero}`);
-    const data = await res.json();
-
-    if (tipo === "dni") {
-        document.getElementById("nombre").value =
-            data.nombres + " " + data.apellidoPaterno + " " + data.apellidoMaterno;
+    if (!numero) {
+        alert("Ingresa un número de documento");
+        return;
     }
 
-    if (tipo === "ruc") {
-        document.getElementById("nombre").value = data.razonSocial;
+    try {
+        const res = await fetch(`/consultar/${tipo}/${numero}?venta_id=${venta_id}`);
+        const data = await res.json();
+
+        if (data.error) {
+            alert(data.error);
+            return;
+        }
+
+        if (tipo === "dni") {
+            const nombre = (data.nombres || "") + " " + (data.apellidoPaterno || "") + " " + (data.apellidoMaterno || "");
+            document.getElementById("nombre").value = nombre.trim() || "No encontrado";
+        }
+
+        if (tipo === "ruc") {
+            document.getElementById("nombre").value = data.razonSocial || "No encontrado";
+        }
+    } catch (e) {
+        alert("Error al consultar. Verifica tu conexión.");
     }
 }
 
 function confirmarCompra() {
-
     const numero = document.getElementById("numero").value;
     const nombre = document.getElementById("nombre").value;
 
-    window.location.href = `/procesar_compra?doc=${numero}&nombre=${nombre}`;
+    window.location.href = "/procesar_compra?doc=" + encodeURIComponent(numero) + "&nombre=" + encodeURIComponent(nombre);
 }
 </script>
 
