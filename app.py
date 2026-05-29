@@ -672,13 +672,12 @@ def eliminar_carrito(id):
     mysql.connection.commit()
     return redirect('/carrito')
 
-# =========================
-# COMPRAR
-# =========================
+# ─────────────────────────────────────────────
+# COMPRA
+# ─────────────────────────────────────────────
 @app.route('/comprar')
 def comprar():
 
-    # VERIFICAR LOGIN
     if 'user_id' not in session:
         return redirect('/login')
 
@@ -686,9 +685,7 @@ def comprar():
 
     cur = mysql.connection.cursor()
 
-    # =========================
-    # MIGRAR CARRITO INVITADO
-    # =========================
+    # Migrar carrito invitado al usuario logueado
     if 'guest_id' in session:
 
         cur.execute("""
@@ -701,68 +698,30 @@ def comprar():
 
         session.pop('guest_id', None)
 
-    # =========================
-    # OBTENER PRODUCTOS
-    # =========================
+    # Verificar carrito
     cur.execute("""
-        SELECT
-            p.id,
-            p.nombre,
-            p.precio,
-            p.imagen,
-            c.cantidad
-        FROM carrito c
-        JOIN productos p
-            ON c.producto_id = p.id
-        WHERE c.usuario_id=%s
+        SELECT id
+        FROM carrito
+        WHERE usuario_id=%s
     """, (user_id,))
 
     items = cur.fetchall()
 
-    # =========================
-    # CARRITO VACÍO
-    # =========================
-    if not items:
-
-        cur.close()
-
-        flash('Tu carrito está vacío.', 'warning')
-
-        return redirect('/carrito')
-
-    # =========================
-    # CALCULAR TOTAL
-    # =========================
-    total = 0
-
-    for item in items:
-        total += float(item['precio']) * int(item['cantidad'])
-
     cur.close()
 
-    # =========================
-    # MOSTRAR RESUMEN COMPRA
-    # =========================
-    return render_template(
-        'comprar.html',
-        items=items,
-        total=total
-    )
+    if not items:
+        flash('Tu carrito está vacío.', 'warning')
+        return redirect('/carrito')
 
 
-# =========================
-# PEDIR PRODUCTO
-# =========================
 @app.route('/pedir_producto/<int:id>')
 def pedir_producto(id):
 
-    # SOLO ADMIN
-    if session.get('rol') != 'admin':
-        return redirect('/')
+    if 'rol' not in session:
+        return redirect('/login')
 
     cur = mysql.connection.cursor()
 
-    # VERIFICAR SI YA EXISTE
     cur.execute("""
         SELECT id
         FROM productos_para_pedir
@@ -772,22 +731,13 @@ def pedir_producto(id):
 
     existe = cur.fetchone()
 
-    # INSERTAR SI NO EXISTE
     if not existe:
 
         cur.execute("""
             INSERT INTO productos_para_pedir
-            (
-                producto_id,
-                cantidad_pedido,
-                estado
-            )
-            VALUES (%s,%s,%s)
-        """, (
-            id,
-            1,
-            'pendiente'
-        ))
+            (producto_id, cantidad_pedido)
+            VALUES (%s, 1)
+        """, (id,))
 
         mysql.connection.commit()
 
@@ -798,186 +748,59 @@ def pedir_producto(id):
     return redirect('/admin')
 
 
-# =========================
-# PROCESAR COMPRA
-# =========================
 @app.route('/procesar_compra')
 def procesar_compra():
-
-    # VERIFICAR LOGIN
     if 'user_id' not in session:
         return redirect('/login')
-
     user_id = str(session['user_id'])
-
     cur = mysql.connection.cursor()
 
-    # =========================
-    # OBTENER PRODUCTOS
-    # =========================
     cur.execute("""
-        SELECT
-            p.id,
-            p.nombre,
-            p.precio,
-            c.cantidad
-        FROM carrito c
-        JOIN productos p
-            ON c.producto_id = p.id
+        SELECT p.id, p.nombre, p.precio, c.cantidad
+        FROM carrito c JOIN productos p ON c.producto_id=p.id
         WHERE c.usuario_id=%s
     """, (user_id,))
-
     items = cur.fetchall()
-
-    # =========================
-    # CARRITO VACÍO
-    # =========================
     if not items:
-
-        cur.close()
-
-        flash('Tu carrito está vacío.', 'warning')
-
-        return redirect('/carrito')
+        return "Carrito vacío"
 
     total = 0
-
-    # =========================
-    # VALIDAR STOCK
-    # =========================
     for item in items:
+        cur.execute("SELECT stock FROM productos WHERE id=%s", (item['id'],))
+        stock = cur.fetchone()['stock']
+        if stock < item['cantidad']:
+            return f"Stock insuficiente: {item['nombre']}"
+        total += item['precio'] * item['cantidad']
 
-        cur.execute("""
-            SELECT stock
-            FROM productos
-            WHERE id=%s
-        """, (item['id'],))
-
-        producto = cur.fetchone()
-
-        # PRODUCTO NO EXISTE
-        if not producto:
-
-            cur.close()
-
-            flash(
-                f"Producto no encontrado: {item['nombre']}",
-                'danger'
-            )
-
-            return redirect('/carrito')
-
-        stock = int(producto['stock'])
-
-        # STOCK INSUFICIENTE
-        if stock < int(item['cantidad']):
-
-            cur.close()
-
-            flash(
-                f"Stock insuficiente para {item['nombre']}",
-                'danger'
-            )
-
-            return redirect('/carrito')
-
-        # SUMAR TOTAL
-        total += float(item['precio']) * int(item['cantidad'])
-
-    # =========================
-    # CREAR VENTA
-    # =========================
-    cur.execute("""
-        INSERT INTO ventas
-        (
-            cliente_id,
-            total
-        )
-        VALUES (%s,%s)
-    """, (
-        user_id,
-        total
-    ))
-
+    cur.execute("INSERT INTO ventas (cliente_id, total) VALUES(%s,%s)", (user_id, total))
     venta_id = cur.lastrowid
 
-    # =========================
-    # GUARDAR DETALLE
-    # =========================
     for item in items:
-
-        # INSERTAR DETALLE
-        cur.execute("""
-            INSERT INTO detalle_venta
-            (
-                venta_id,
-                producto_id,
-                cantidad,
-                precio
-            )
-            VALUES (%s,%s,%s,%s)
-        """, (
-            venta_id,
-            item['id'],
-            item['cantidad'],
-            item['precio']
-        ))
-
-        # DESCONTAR STOCK
-        cur.execute("""
-            UPDATE productos
-            SET stock = stock - %s
-            WHERE id = %s
-        """, (
-            item['cantidad'],
-            item['id']
-        ))
-
-        # =========================
-        # VERIFICAR STOCK BAJO
-        # =========================
+        cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
+                    (venta_id, item['id'], item['cantidad'], item['precio']))
+        cur.execute("UPDATE productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
+        # Verificar stock bajo después de cada compra
         verificar_stock_bajo(cur, item['id'])
 
-    # =========================
-    # VACIAR CARRITO
-    # =========================
-    cur.execute("""
-        DELETE FROM carrito
-        WHERE usuario_id=%s
-    """, (user_id,))
-
-    # =========================
-    # GUARDAR CAMBIOS
-    # =========================
+    cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
     mysql.connection.commit()
 
-    cur.close()
+    # Auto-enviar boleta al cliente por email
+    correo_cliente = session.get('correo','')
+    if correo_cliente:
+        enviar_boleta_cliente(correo_cliente, venta_id)
 
-    # =========================
-    # ENVIAR BOLETA EMAIL
-    # =========================
-    try:
-
-        correo_cliente = session.get('correo', '')
-
-        if correo_cliente:
-            enviar_boleta_cliente(
-                correo_cliente,
-                venta_id
-            )
-
-    except Exception as e:
-
-        print("ERROR EMAIL:", e)
-
-    # =========================
-    # CONFIRMACIÓN
-    # =========================
     return redirect(f'/confirmacion/{venta_id}')
 
 # ─────────────────────────────────────────────
 # BOLETA
 # ─────────────────────────────────────────────
+@app.route('/boleta')
+def boleta():
+    if 'user_id' not in session:
+        return redirect('/login')
+    return render_template('boleta.html')
+
 @app.route('/boleta/<int:venta_id>')
 def boleta_form(venta_id):
     return render_template('boleta_form.html', venta_id=venta_id)
