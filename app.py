@@ -194,41 +194,68 @@ def enviar_email_proveedor(proveedor, productos_lista):
         print(f"[email_proveedor] {e}")
         return False
 
-
 def verificar_stock_bajo(cur, producto_id):
+    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor."""
     try:
-        cur.execute("""
-            SELECT nombre, stock, categoria, estado
-            FROM productos
-            WHERE id=%s
-        """, (producto_id,))
+        cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-
-        if not p:
+        if not p or p['stock'] > 0:
             return
+        # ¿Ya existe pendiente?
+        cur.execute("""
+            SELECT id FROM productos_para_pedir
+            WHERE producto_id=%s AND estado='pendiente'
+        """, (producto_id,))
+        if cur.fetchone():
+            return
+        # Proveedor por categoría
+        cur.execute("""
+            SELECT id, nombre, celular, correo
+            FROM proveedores WHERE categoria=%s LIMIT 1
+        """, (p['categoria'],))
+        proveedor = cur.fetchone()
+        proveedor_id = proveedor['id'] if proveedor else None
 
-        if int(p['stock']) <= 0:
-            cur.execute("""
-                UPDATE productos
-                SET estado='oculto'
-                WHERE id=%s
-            """, (producto_id,))
+        cur.execute("""
+            INSERT INTO productos_para_pedir (producto_id, cantidad_pedido, proveedor_id)
+            VALUES (%s, 1, %s)
+        """, (producto_id, proveedor_id))
 
-            cur.execute("""
-                SELECT id FROM productos_para_pedir
-                WHERE producto_id=%s AND estado='pendiente'
-            """, (producto_id,))
-            existe = cur.fetchone()
-
-            if not existe:
-                cur.execute("""
-                    INSERT INTO productos_para_pedir
-                    (producto_id, cantidad_pedido, estado)
-                    VALUES (%s, %s, 'pendiente')
-                """, (producto_id, 1))
+        # Email al proveedor
+        if proveedor and proveedor.get('correo'):
+            enviar_email_proveedor(proveedor, [{
+                'nombre': p['nombre'],
+                'categoria': p['categoria'],
+                'cantidad_pedido': 1
+            }])
     except Exception as e:
-        print("ERROR verificar_stock_bajo:", e)
+        print(f"[stock_bajo] {e}")
 
+def whatsapp_url(celular, mensaje):
+    """Genera URL de WhatsApp con mensaje prefill."""
+    numero = ''.join(filter(str.isdigit, celular or ''))
+    if not numero.startswith('51'):
+        numero = '51' + numero
+    from urllib.parse import quote
+    return f"https://wa.me/{numero}?text={quote(mensaje)}"
+
+# ─────────────────────────────────────────────
+# CONTEXT PROCESSOR
+# ─────────────────────────────────────────────
+@app.context_processor
+def cantidad_carrito():
+    try:
+        usuario = obtener_usuario()
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s", (usuario,))
+        res = cur.fetchone()
+        return dict(cantidad_carrito=res['total'] if res['total'] else 0)
+    except:
+        return dict(cantidad_carrito=0)
+
+# ─────────────────────────────────────────────
+# TEST / INIT
+# ─────────────────────────────────────────────
 @app.route('/test_db')
 def test_db():
     try:
@@ -712,41 +739,6 @@ def comprar():
     if not items:
         flash('Tu carrito está vacío.', 'warning')
         return redirect('/carrito')
-
-
-@app.route('/pedir_producto/<int:id>')
-def pedir_producto(id):
-
-    if 'rol' not in session:
-        return redirect('/login')
-
-    cur = mysql.connection.cursor()
-
-    cur.execute("""
-        SELECT id
-        FROM productos_para_pedir
-        WHERE producto_id=%s
-        AND estado='pendiente'
-    """, (id,))
-
-    existe = cur.fetchone()
-
-    if not existe:
-
-        cur.execute("""
-            INSERT INTO productos_para_pedir
-            (producto_id, cantidad_pedido)
-            VALUES (%s, 1)
-        """, (id,))
-
-        mysql.connection.commit()
-
-    cur.close()
-
-    flash('Producto enviado para pedir.', 'success')
-
-    return redirect('/admin')
-
 
 @app.route('/procesar_compra')
 def procesar_compra():
