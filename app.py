@@ -1181,31 +1181,6 @@ def enviar_email_a_proveedor(proveedor_id):
 # ─────────────────────────────────────────────
 # RUN
 # ─────────────────────────────────────────────
-
-@app.route('/pedir_producto/<int:id>')
-def pedir_producto(id):
-    if 'rol' not in session:
-        return redirect('/login')
-
-    cur = mysql.connection.cursor()
-
-    cur.execute("""
-        SELECT id FROM productos_para_pedir
-        WHERE producto_id=%s AND estado='pendiente'
-    """, (id,))
-    existe = cur.fetchone()
-
-    if not existe:
-        cur.execute("""
-            INSERT INTO productos_para_pedir
-            (producto_id, cantidad_pedido, estado)
-            VALUES (%s, %s, 'pendiente')
-        """, (id, 1))
-        mysql.connection.commit()
-
-    flash('Producto enviado para pedir', 'success')
-    return redirect('/admin')
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
