@@ -135,14 +135,18 @@
                             {% endif %}
                         </td>
                         <td>
-                            <a href="/editar_producto/{{ p.id }}" class="btn btn-warning btn-sm">✏</a>
+                            <div class="d-flex gap-1 justify-content-center flex-wrap">
+                            <a href="/editar_producto/{{ p.id }}" class="btn btn-warning btn-sm" title="Editar">✏</a>
                             {% if p.estado == 'activo' %}
                             <a href="/eliminar_producto/{{ p.id }}" class="btn btn-secondary btn-sm"
-                               onclick="return confirm('¿Ocultar producto?')">👁</a>
+                               onclick="return confirm('¿Ocultar producto?')" title="Ocultar">👁</a>
                             {% else %}
                             <a href="/activar_producto/{{ p.id }}" class="btn btn-success btn-sm"
-                               onclick="return confirm('¿Activar producto nuevamente?')">↺</a>
+                               onclick="return confirm('¿Activar producto nuevamente?')" title="Activar">↺</a>
                             {% endif %}
+                            <a href="/eliminar_producto_definitivo/{{ p.id }}" class="btn btn-danger btn-sm"
+                               onclick="return confirm('¿Eliminar permanentemente este producto? Esta acción no se puede deshacer.')" title="Eliminar">🗑</a>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
