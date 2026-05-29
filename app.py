@@ -195,39 +195,54 @@ def enviar_email_proveedor(proveedor, productos_lista):
         return False
 
 def verificar_stock_bajo(cur, producto_id):
-    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor."""
+    """Oculta productos sin stock y los envía automáticamente a productos_para_pedir."""
     try:
-        cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
-        p = cur.fetchone()
-        if not p or p['stock'] > 0:
-            return
-        # ¿Ya existe pendiente?
         cur.execute("""
-            SELECT id FROM productos_para_pedir
-            WHERE producto_id=%s AND estado='pendiente'
+            SELECT nombre, stock, categoria
+            FROM productos
+            WHERE id=%s
         """, (producto_id,))
-        if cur.fetchone():
+
+        p = cur.fetchone()
+
+        if not p:
             return
-        # Proveedor por categoría
-        cur.execute("""
-            SELECT id, nombre, celular, correo
-            FROM proveedores WHERE categoria=%s LIMIT 1
-        """, (p['categoria'],))
-        proveedor = cur.fetchone()
-        proveedor_id = proveedor['id'] if proveedor else None
 
-        cur.execute("""
-            INSERT INTO productos_para_pedir (producto_id, cantidad_pedido, proveedor_id)
-            VALUES (%s, 1, %s)
-        """, (producto_id, proveedor_id))
+        if p['stock'] <= 0:
 
-        # Email al proveedor
-        if proveedor and proveedor.get('correo'):
-            enviar_email_proveedor(proveedor, [{
-                'nombre': p['nombre'],
-                'categoria': p['categoria'],
-                'cantidad_pedido': 1
-            }])
+            cur.execute("""
+                UPDATE productos
+                SET estado='oculto'
+                WHERE id=%s
+            """, (producto_id,))
+
+            cur.execute("""
+                SELECT id
+                FROM productos_para_pedir
+                WHERE producto_id=%s
+                AND estado='pendiente'
+            """, (producto_id,))
+
+            existe = cur.fetchone()
+
+            if not existe:
+
+                cur.execute("""
+                    SELECT id
+                    FROM proveedores
+                    WHERE categoria=%s
+                    LIMIT 1
+                """, (p['categoria'],))
+
+                proveedor = cur.fetchone()
+                proveedor_id = proveedor['id'] if proveedor else None
+
+                cur.execute("""
+                    INSERT INTO productos_para_pedir
+                    (producto_id, cantidad_pedido, proveedor_id)
+                    VALUES (%s, %s, %s)
+                """, (producto_id, 1, proveedor_id))
+
     except Exception as e:
         print(f"[stock_bajo] {e}")
 
@@ -739,6 +754,41 @@ def comprar():
     if not items:
         flash('Tu carrito está vacío.', 'warning')
         return redirect('/carrito')
+
+
+@app.route('/pedir_producto/<int:id>')
+def pedir_producto(id):
+
+    if 'rol' not in session:
+        return redirect('/login')
+
+    cur = mysql.connection.cursor()
+
+    cur.execute("""
+        SELECT id
+        FROM productos_para_pedir
+        WHERE producto_id=%s
+        AND estado='pendiente'
+    """, (id,))
+
+    existe = cur.fetchone()
+
+    if not existe:
+
+        cur.execute("""
+            INSERT INTO productos_para_pedir
+            (producto_id, cantidad_pedido)
+            VALUES (%s, 1)
+        """, (id,))
+
+        mysql.connection.commit()
+
+    cur.close()
+
+    flash('Producto enviado para pedir.', 'success')
+
+    return redirect('/admin')
+
 
 @app.route('/procesar_compra')
 def procesar_compra():
