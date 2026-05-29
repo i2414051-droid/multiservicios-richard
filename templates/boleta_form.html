@@ -136,7 +136,7 @@ function vistaPrevia(){
         nombreCompleto = rs;
     }
 
-    window.location.href = `/preview_boleta?venta_id=${venta_id}&doc=${doc}&nombre=${nombreCompleto}`;
+    window.location.href = "/preview_boleta?venta_id=" + encodeURIComponent(venta_id) + "&doc=" + encodeURIComponent(doc) + "&nombre=" + encodeURIComponent(nombreCompleto);
 }
 
 </script>

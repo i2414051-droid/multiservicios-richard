@@ -1,4 +1,4 @@
-import os, uuid, io
+import os, uuid, io, threading
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -19,7 +19,7 @@ from reportlab.lib.units import inch
 # APP SETUP
 # ─────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'clave_secreta_richard_2024')
+app.secret_key = os.environ.get('SECRET_KEY', 'cambiar-esta-clave-segura')
 bcrypt = Bcrypt(app)
 
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
@@ -29,10 +29,10 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # ─────────────────────────────────────────────
 # MYSQL (env vars para Render)
 # ─────────────────────────────────────────────
-app.config['MYSQL_HOST']        = os.environ.get('MYSQL_HOST',     'mysql-proyecto.alwaysdata.net')
-app.config['MYSQL_USER']        = os.environ.get('MYSQL_USER',     'proyecto')
-app.config['MYSQL_PASSWORD']    = os.environ.get('MYSQL_PASSWORD', 'B12345678Jhoss')
-app.config['MYSQL_DB']          = os.environ.get('MYSQL_DB',       'proyecto_multiservicios_richard')
+app.config['MYSQL_HOST']        = os.environ.get('MYSQL_HOST', 'localhost')
+app.config['MYSQL_USER']        = os.environ.get('MYSQL_USER', 'root')
+app.config['MYSQL_PASSWORD']    = os.environ.get('MYSQL_PASSWORD', '')
+app.config['MYSQL_DB']          = os.environ.get('MYSQL_DB', 'proyecto_multiservicios_richard')
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 mysql = MySQL(app)
 
@@ -44,13 +44,10 @@ app.config['MAIL_PORT']           = int(os.environ.get('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS']        = True
 app.config['MAIL_USERNAME']       = os.environ.get('MAIL_USERNAME', '')
 app.config['MAIL_PASSWORD']       = os.environ.get('MAIL_PASSWORD', '')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME', '')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', '')
 mail = Mail(app)
 
-TOKEN = os.environ.get('APIPERU_TOKEN',
-    'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.'
-    'eyJlbWFpbCI6Impob3NzdWVicnlhbkBnbWFpbC5jb20ifQ.'
-    'VvkKvQL_se-h31zZ87zXwBzH6lYy3wLb4pD0XCmhN5o')
+TOKEN = os.environ.get('APIPERU_TOKEN', '')
 
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
@@ -60,6 +57,74 @@ CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 def init_db():
     try:
         cur = mysql.connection.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id       INT AUTO_INCREMENT PRIMARY KEY,
+                correo   VARCHAR(200) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                rol      VARCHAR(20) DEFAULT 'cliente',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS productos (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                nombre      VARCHAR(200) NOT NULL,
+                descripcion TEXT,
+                precio      DECIMAL(10,2) NOT NULL,
+                stock       INT DEFAULT 0,
+                categoria   VARCHAR(100),
+                imagen      VARCHAR(300),
+                estado      VARCHAR(20) DEFAULT 'activo',
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS carrito (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id  VARCHAR(200) NOT NULL,
+                producto_id INT NOT NULL,
+                cantidad    INT DEFAULT 1,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ventas (
+                id         INT AUTO_INCREMENT PRIMARY KEY,
+                cliente_id INT NOT NULL,
+                total      DECIMAL(10,2),
+                documento  VARCHAR(20),
+                nombre     VARCHAR(200),
+                fecha      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS detalle_venta (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                venta_id    INT NOT NULL,
+                producto_id INT NOT NULL,
+                cantidad    INT NOT NULL,
+                precio      DECIMAL(10,2) NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS bloqueos_ip (
+                id                  INT AUTO_INCREMENT PRIMARY KEY,
+                ip                  VARCHAR(50) NOT NULL,
+                usuarios_diferentes INT DEFAULT 1,
+                bloqueado_hasta     DATETIME,
+                created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS intentos_usuario (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                correo          VARCHAR(200) NOT NULL,
+                intentos        INT DEFAULT 1,
+                bloqueado_hasta DATETIME,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS proveedores (
                 id           INT AUTO_INCREMENT PRIMARY KEY,
@@ -198,11 +263,16 @@ def enviar_email_proveedor(proveedor, productos_lista):
         return False
 
 def verificar_stock_bajo(cur, producto_id):
-    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor."""
+    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor.
+       Si stock <= 0 oculta el producto (estado='inactivo')."""
     try:
         cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
-        if not p or p['stock'] > 1:
+        if not p:
+            return
+        if p['stock'] <= 0:
+            cur.execute("UPDATE productos SET estado='inactivo' WHERE id=%s", (producto_id,))
+        if p['stock'] > 1:
             return
         # ¿Ya existe pendiente?
         cur.execute("""
@@ -667,11 +737,12 @@ def procesar_compra():
 
     cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
     mysql.connection.commit()
+    cur.close()
 
-    # Auto-enviar boleta al cliente por email
+    # Auto-enviar boleta al cliente por email (en segundo plano para no bloquear)
     correo_cliente = session.get('correo','')
     if correo_cliente:
-        enviar_boleta_cliente(correo_cliente, venta_id)
+        threading.Thread(target=enviar_boleta_cliente, args=(correo_cliente, venta_id), daemon=True).start()
 
     return redirect(f'/confirmacion/{venta_id}')
 
@@ -682,7 +753,13 @@ def procesar_compra():
 def boleta():
     if 'user_id' not in session:
         return redirect('/login')
-    return render_template('boleta.html')
+    user_id = session['user_id']
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id FROM ventas WHERE cliente_id=%s ORDER BY fecha DESC LIMIT 1", (user_id,))
+    ultima = cur.fetchone()
+    cur.close()
+    venta_id = ultima['id'] if ultima else None
+    return render_template('boleta.html', venta_id=venta_id)
 
 @app.route('/boleta/<int:venta_id>')
 def boleta_form(venta_id):

@@ -9,7 +9,6 @@ itsdangerous==2.2.0
 click==8.4.1
 blinker==1.9.0
 mysqlclient==2.2.8
-mysql-connector-python==9.7.0
 reportlab==4.5.1
 requests==2.34.2
 Pillow==12.2.0
