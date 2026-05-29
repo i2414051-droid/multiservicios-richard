@@ -126,22 +126,22 @@
                                 <span class="badge bg-danger">Sin stock</span>
                             {% endif %}
                         </td>
+
                         <td>
-                            {% if p.stock > 0 %}
-                                <span class="badge bg-success">Activo</span>
-                            {% else %}                                          
-                                <span class="badge bg-secondary">Oculto</span>         
+                            {% if p.estado == 'activo' %}
+                            <span class="badge bg-success">Activo</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Oculto</span>
                             {% endif %}
                         </td>
-
                         <td>
                             <a href="/editar_producto/{{ p.id }}" class="btn btn-warning btn-sm">✏</a>
                             {% if p.estado == 'activo' %}
-                                <a href="/eliminar_producto/{{ p.id }}" class="btn btn-secondary btn-sm"
-                                onclick="return confirm('¿Ocultar producto?')">👁</a>
+                            <a href="/eliminar_producto/{{ p.id }}" class="btn btn-secondary btn-sm"
+                               onclick="return confirm('¿Ocultar producto?')">👁</a>
                             {% else %}
-                                <a href="/activar_producto/{{ p.id }}" class="btn btn-success btn-sm"
-                                onclick="return confirm('¿Activar producto nuevamente?')">↺</a>
+                            <a href="/activar_producto/{{ p.id }}" class="btn btn-success btn-sm"
+                               onclick="return confirm('¿Activar producto nuevamente?')">↺</a>
                             {% endif %}
                         </td>
                     </tr>
