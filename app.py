@@ -194,22 +194,20 @@ def enviar_email_proveedor(proveedor, productos_lista):
         print(f"[email_proveedor] {e}")
         return False
 
+
 def verificar_stock_bajo(cur, producto_id):
-    """Oculta productos sin stock y los envía automáticamente a productos_para_pedir."""
     try:
         cur.execute("""
-            SELECT nombre, stock, categoria
+            SELECT nombre, stock, categoria, estado
             FROM productos
             WHERE id=%s
         """, (producto_id,))
-
         p = cur.fetchone()
 
         if not p:
             return
 
-        if p['stock'] <= 0:
-
+        if int(p['stock']) <= 0:
             cur.execute("""
                 UPDATE productos
                 SET estado='oculto'
@@ -217,60 +215,20 @@ def verificar_stock_bajo(cur, producto_id):
             """, (producto_id,))
 
             cur.execute("""
-                SELECT id
-                FROM productos_para_pedir
-                WHERE producto_id=%s
-                AND estado='pendiente'
+                SELECT id FROM productos_para_pedir
+                WHERE producto_id=%s AND estado='pendiente'
             """, (producto_id,))
-
             existe = cur.fetchone()
 
             if not existe:
-
-                cur.execute("""
-                    SELECT id
-                    FROM proveedores
-                    WHERE categoria=%s
-                    LIMIT 1
-                """, (p['categoria'],))
-
-                proveedor = cur.fetchone()
-                proveedor_id = proveedor['id'] if proveedor else None
-
                 cur.execute("""
                     INSERT INTO productos_para_pedir
-                    (producto_id, cantidad_pedido, proveedor_id)
-                    VALUES (%s, %s, %s)
-                """, (producto_id, 1, proveedor_id))
-
+                    (producto_id, cantidad_pedido, estado)
+                    VALUES (%s, %s, 'pendiente')
+                """, (producto_id, 1))
     except Exception as e:
-        print(f"[stock_bajo] {e}")
+        print("ERROR verificar_stock_bajo:", e)
 
-def whatsapp_url(celular, mensaje):
-    """Genera URL de WhatsApp con mensaje prefill."""
-    numero = ''.join(filter(str.isdigit, celular or ''))
-    if not numero.startswith('51'):
-        numero = '51' + numero
-    from urllib.parse import quote
-    return f"https://wa.me/{numero}?text={quote(mensaje)}"
-
-# ─────────────────────────────────────────────
-# CONTEXT PROCESSOR
-# ─────────────────────────────────────────────
-@app.context_processor
-def cantidad_carrito():
-    try:
-        usuario = obtener_usuario()
-        cur = mysql.connection.cursor()
-        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s", (usuario,))
-        res = cur.fetchone()
-        return dict(cantidad_carrito=res['total'] if res['total'] else 0)
-    except:
-        return dict(cantidad_carrito=0)
-
-# ─────────────────────────────────────────────
-# TEST / INIT
-# ─────────────────────────────────────────────
 @app.route('/test_db')
 def test_db():
     try:
@@ -1223,6 +1181,31 @@ def enviar_email_a_proveedor(proveedor_id):
 # ─────────────────────────────────────────────
 # RUN
 # ─────────────────────────────────────────────
+
+@app.route('/pedir_producto/<int:id>')
+def pedir_producto(id):
+    if 'rol' not in session:
+        return redirect('/login')
+
+    cur = mysql.connection.cursor()
+
+    cur.execute("""
+        SELECT id FROM productos_para_pedir
+        WHERE producto_id=%s AND estado='pendiente'
+    """, (id,))
+    existe = cur.fetchone()
+
+    if not existe:
+        cur.execute("""
+            INSERT INTO productos_para_pedir
+            (producto_id, cantidad_pedido, estado)
+            VALUES (%s, %s, 'pendiente')
+        """, (id, 1))
+        mysql.connection.commit()
+
+    flash('Producto enviado para pedir', 'success')
+    return redirect('/admin')
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

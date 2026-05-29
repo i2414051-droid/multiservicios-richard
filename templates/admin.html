@@ -135,6 +135,9 @@
                         </td>
 
                         <td>
+                            {% if p.stock <= 0 or p.estado != 'activo' %}
+                            <a href="/pedir_producto/{{ p.id }}" class="btn btn-primary btn-sm">Pedir</a>
+                            {% endif %}
                             <a href="/editar_producto/{{ p.id }}" class="btn btn-warning btn-sm">✏</a>
                             {% if p.estado == 'activo' %}
                                 <a href="/eliminar_producto/{{ p.id }}" class="btn btn-secondary btn-sm"
