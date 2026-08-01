@@ -107,6 +107,7 @@
 <script>
 setTimeout(()=>{
   document.querySelectorAll(".mensaje-flash").forEach(e=>{
+    if (e.dataset.persistent) return;
     e.style.transition=".5s";
     e.style.opacity="0";
     e.style.transform="translateY(-30px)";

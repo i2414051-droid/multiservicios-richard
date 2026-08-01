@@ -140,9 +140,30 @@
     .custom-radio:focus { border-color:#F09204 !important; box-shadow:0 0 0 .25rem rgba(240,146,4,.25) !important; }
     .btn-cantidad { min-width: 30px; }
     .btn-cantidad:disabled { opacity: .5; }
+
+    @keyframes parpadeo {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .alert-parpadeo {
+      animation: parpadeo 0.9s infinite;
+    }
 </style>
 
 <script>
+document.addEventListener('DOMContentLoaded', function () {
+  var flash = document.querySelector('.mensaje-flash');
+  if (flash && flash.textContent.trim().includes('carrito está vacío')) {
+    flash.dataset.persistent = 'true';
+    flash.classList.add('alert-parpadeo');
+    setTimeout(function () {
+      flash.style.opacity = '0';
+      flash.style.transform = 'translateY(-30px)';
+      setTimeout(function () { flash.remove(); }, 500);
+    }, 5000);
+  }
+});
+
 document.querySelectorAll('.btn-cantidad').forEach(function(btn) {
     btn.addEventListener('click', function() {
 

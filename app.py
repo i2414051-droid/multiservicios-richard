@@ -730,7 +730,8 @@ def comprar():
         mysql.connection.commit()
     cur.execute("SELECT * FROM carrito WHERE usuario_id=%s", (user_id,))
     if not cur.fetchall():
-        return "Tu carrito está vacío"
+        flash('Su carrito está vacío', 'warning')
+        return redirect('/carrito')
     return redirect('/procesar_compra')
 
 @app.route('/procesar_compra')
