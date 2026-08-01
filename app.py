@@ -45,6 +45,7 @@ app.config['MAIL_USE_TLS']        = True
 app.config['MAIL_USERNAME']       = os.environ.get('MAIL_USERNAME', '')
 app.config['MAIL_PASSWORD']       = os.environ.get('MAIL_PASSWORD', '')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', '')
+app.config['MAIL_TIMEOUT'] = int(os.environ.get('MAIL_TIMEOUT', 10))
 mail = Mail(app)
 
 TOKEN = os.environ.get('APIPERU_TOKEN', '')
@@ -299,13 +300,18 @@ def verificar_stock_bajo(cur, producto_id):
             VALUES (%s, 1, %s)
         """, (producto_id, proveedor_id))
 
-        # Email al proveedor
+        # Email al proveedor (en segundo plano para no bloquear la compra)
         if proveedor and proveedor.get('correo'):
-            enviar_email_proveedor(proveedor, [{
+            proveedor_copy = dict(proveedor)
+            productos_info = [{
                 'nombre': p['nombre'],
                 'categoria': p['categoria'],
                 'cantidad_pedido': 1
-            }])
+            }]
+            def _enviar_proveedor():
+                with app.app_context():
+                    enviar_email_proveedor(proveedor_copy, productos_info)
+            threading.Thread(target=_enviar_proveedor, daemon=True).start()
     except Exception as e:
         print(f"[stock_bajo] {e}")
 
@@ -741,43 +747,53 @@ def procesar_compra():
     user_id = int(session['user_id'])
     cur = mysql.connection.cursor()
 
-    cur.execute("""
-        SELECT p.id, p.nombre, p.precio, c.cantidad
-        FROM carrito c JOIN productos p ON c.producto_id=p.id
-        WHERE c.usuario_id=%s
-    """, (user_id,))
-    items = cur.fetchall()
-    if not items:
-        return "Carrito vacío"
+    try:
+        cur.execute("""
+            SELECT p.id, p.nombre, p.precio, c.cantidad
+            FROM carrito c JOIN productos p ON c.producto_id=p.id
+            WHERE c.usuario_id=%s
+        """, (user_id,))
+        items = cur.fetchall()
+        if not items:
+            return redirect('/carrito')
 
-    total = 0
-    for item in items:
-        cur.execute("SELECT stock FROM productos WHERE id=%s", (item['id'],))
-        stock = cur.fetchone()['stock']
-        if stock < item['cantidad']:
-            return f"Stock insuficiente: {item['nombre']}"
-        total += item['precio'] * item['cantidad']
+        total = 0
+        for item in items:
+            cur.execute("SELECT stock FROM productos WHERE id=%s", (item['id'],))
+            row = cur.fetchone()
+            stock = row['stock'] if row else 0
+            if stock < item['cantidad']:
+                return f"Stock insuficiente: {item['nombre']}"
+            total += item['precio'] * item['cantidad']
 
-    cur.execute("INSERT INTO ventas (cliente_id, total) VALUES(%s,%s)", (user_id, total))
-    venta_id = cur.lastrowid
+        cur.execute("INSERT INTO ventas (cliente_id, total) VALUES(%s,%s)", (user_id, total))
+        venta_id = cur.lastrowid
 
-    for item in items:
-        cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
-                    (venta_id, item['id'], item['cantidad'], item['precio']))
-        cur.execute("UPDATE productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
-        # Verificar stock bajo después de cada compra
-        verificar_stock_bajo(cur, item['id'])
+        for item in items:
+            cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
+                        (venta_id, item['id'], item['cantidad'], item['precio']))
+            cur.execute("UPDATE productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
+            verificar_stock_bajo(cur, item['id'])
 
-    cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
-    mysql.connection.commit()
-    cur.close()
+        cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
+        mysql.connection.commit()
 
-    # Auto-enviar boleta al cliente por email (en segundo plano para no bloquear)
-    correo_cliente = session.get('correo','')
-    if correo_cliente:
-        threading.Thread(target=enviar_boleta_cliente, args=(correo_cliente, venta_id), daemon=True).start()
+        # Auto-enviar boleta al cliente por email (en segundo plano)
+        correo_cliente = session.get('correo','')
+        if correo_cliente:
+            def _enviar_boleta():
+                with app.app_context():
+                    enviar_boleta_cliente(correo_cliente, venta_id)
+            threading.Thread(target=_enviar_boleta, daemon=True).start()
 
-    return redirect(f'/confirmacion/{venta_id}')
+        return redirect(f'/confirmacion/{venta_id}')
+    except Exception as e:
+        mysql.connection.rollback()
+        print(f"[procesar_compra] {e}")
+        flash('Ocurrió un error al procesar tu compra. Inténtalo de nuevo.', 'danger')
+        return redirect('/carrito')
+    finally:
+        cur.close()
 
 # ─────────────────────────────────────────────
 # BOLETA
