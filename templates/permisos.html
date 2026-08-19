@@ -78,7 +78,7 @@
                 {% endif %}
               </td>
               <td>
-                {% if u.estado == 'activo' %}
+                {% if u.get('estado', 'activo') == 'activo' %}
                   <span class="badge fs-5" style="background:#28a745;color:#fff;">A</span>
                 {% else %}
                   <span class="badge fs-5" style="background:#dc3545;color:#fff;">I</span>

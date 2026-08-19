@@ -958,6 +958,15 @@ def permisos():
         return redirect('/login')
     es_superadmin = session.get('correo') == 'admin@mail.com'
     cur = mysql.connection.cursor()
+    # Compatibilidad: crea la columna 'estado' si aún no existe
+    try:
+        cur.execute("ALTER TABLE usuarios ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
+        mysql.connection.commit()
+    except Exception:
+        try:
+            mysql.connection.rollback()
+        except Exception:
+            pass
     if request.method == 'POST':
         if not es_superadmin:
             flash('Solo el administrador principal (admin@mail.com) puede cambiar roles.', 'danger')
