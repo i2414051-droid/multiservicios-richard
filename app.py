@@ -64,9 +64,14 @@ def init_db():
                 correo   VARCHAR(200) NOT NULL UNIQUE,
                 password VARCHAR(255) NOT NULL,
                 rol      VARCHAR(20) DEFAULT 'cliente',
+                estado   VARCHAR(20) DEFAULT 'activo',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS productos (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -951,8 +956,13 @@ def limpiar_historial():
 def permisos():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    es_superadmin = session.get('correo') == 'admin@mail.com'
     cur = mysql.connection.cursor()
     if request.method == 'POST':
+        if not es_superadmin:
+            flash('Solo el administrador principal (admin@mail.com) puede cambiar roles.', 'danger')
+            cur.close()
+            return redirect('/permisos')
         user_id   = request.form.get('user_id')
         nuevo_rol = request.form.get('rol')
         if nuevo_rol in ['admin','cliente']:
@@ -965,12 +975,13 @@ def permisos():
         return redirect('/permisos')
     buscar = request.args.get('buscar','')
     cur.execute("""
-        SELECT id, correo, rol FROM usuarios WHERE correo LIKE %s
+        SELECT id, correo, rol, estado FROM usuarios WHERE correo LIKE %s
         ORDER BY CASE rol WHEN 'admin' THEN 0 WHEN 'administrador' THEN 1 ELSE 2 END, correo ASC
     """, (f'%{buscar}%',))
     usuarios = cur.fetchall()
     cur.close()
-    return render_template('permisos.html', usuarios=usuarios, buscar=buscar)
+    return render_template('permisos.html', usuarios=usuarios, buscar=buscar,
+                           es_superadmin=es_superadmin)
 
 # ─────────────────────────────────────────────
 # PROVEEDORES
