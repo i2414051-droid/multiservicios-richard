@@ -85,6 +85,10 @@ def init_db():
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            cur.execute("ALTER TABLE productos ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS carrito (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -94,6 +98,10 @@ def init_db():
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            cur.execute("ALTER TABLE carrito ADD COLUMN cantidad INT DEFAULT 1")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS ventas (
                 id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -105,6 +113,14 @@ def init_db():
                 fecha      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN documento VARCHAR(20)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN nombre VARCHAR(200)")
+        except Exception:
+            pass
         try:
             cur.execute("ALTER TABLE ventas ADD COLUMN estado VARCHAR(20) DEFAULT 'en espera'")
         except Exception:
@@ -1181,6 +1197,32 @@ def enviar_email_a_proveedor(proveedor_id):
     else:
         flash('Error al enviar email. Verifica la configuración SMTP.', 'danger')
     return redirect('/productos-para-pedir')
+
+# ─────────────────────────────────────────────
+# ERROR HANDLER (loguea el error exacto)
+# ─────────────────────────────────────────────
+import logging
+from werkzeug.exceptions import HTTPException
+logging.basicConfig(level=logging.ERROR)
+
+@app.errorhandler(Exception)
+def manejar_error(e):
+    if isinstance(e, HTTPException):
+        return e
+    try:
+        app.logger.error('Error no controlado', exc_info=e)
+    except Exception:
+        pass
+    return "Ocurrió un error interno. Revisa los logs.", 500
+
+# ─────────────────────────────────────────────
+# INIT DB AL ARRANCAR (crea/migra tablas faltantes)
+# ─────────────────────────────────────────────
+try:
+    with app.app_context():
+        init_db()
+except Exception as e:
+    print(f"[startup init_db] {e}")
 
 # ─────────────────────────────────────────────
 # RUN
