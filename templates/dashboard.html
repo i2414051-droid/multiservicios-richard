@@ -1,0 +1,187 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+
+    <h2 class="mb-4"><i class="bi bi-speedometer2"></i> Dashboard</h2>
+
+    <!-- KPI CARDS -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3 col-6">
+            <div class="card-kpi">
+                <i class="bi bi-cash-coin"></i>
+                <div class="kpi-valor">S/ {{ '%.2f'|format(ventas_hoy.monto) }}</div>
+                <div class="kpi-label">Ventas de hoy ({{ ventas_hoy.cantidad }})</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="card-kpi">
+                <i class="bi bi-graph-up-arrow"></i>
+                <div class="kpi-valor">S/ {{ '%.2f'|format(ventas_mes.monto) }}</div>
+                <div class="kpi-label">Ventas del mes ({{ ventas_mes.cantidad }})</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="card-kpi">
+                <i class="bi bi-box-seam"></i>
+                <div class="kpi-valor">{{ total_productos }}</div>
+                <div class="kpi-label">Productos activos</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="card-kpi kpi-alerta">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <div class="kpi-valor">{{ stock_critico }}</div>
+                <div class="kpi-label">Stock crítico (&lt;5)</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3 col-6">
+            <div class="card-kpi">
+                <i class="bi bi-cart-dash"></i>
+                <div class="kpi-valor">{{ pedidos_pendientes }}</div>
+                <div class="kpi-label">Pedidos por reponer</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="card-kpi">
+                <i class="bi bi-graph-down"></i>
+                <div class="kpi-valor">{{ stock_bajo }}</div>
+                <div class="kpi-label">Stock bajo (5-14)</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="card-kpi">
+                <i class="bi bi-truck"></i>
+                <div class="kpi-valor">{{ total_proveedores }}</div>
+                <div class="kpi-label">Proveedores</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="card-kpi">
+                <i class="bi bi-people-fill"></i>
+                <div class="kpi-valor">{{ total_clientes }}</div>
+                <div class="kpi-label">Clientes registrados</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACCESOS RAPIDOS -->
+    <div class="d-flex gap-2 mb-4 flex-wrap">
+        <a href="/admin" class="btn btn-outline-warning"><i class="bi bi-box-seam"></i> Gestionar productos</a>
+        <a href="/historial-compras" class="btn btn-outline-light"><i class="bi bi-clock-history"></i> Historial de compras</a>
+        <a href="/proveedores" class="btn btn-outline-info"><i class="bi bi-truck"></i> Proveedores</a>
+        <a href="/productos-para-pedir" class="btn btn-outline-danger position-relative">
+            <i class="bi bi-cart-dash"></i> Productos para pedir
+            {% if pedidos_pendientes > 0 %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">{{ pedidos_pendientes }}</span>
+            {% endif %}
+        </a>
+        <a href="/permisos" class="btn btn-outline-secondary"><i class="bi bi-shield-lock"></i> Permisos</a>
+    </div>
+
+    <div class="row g-4">
+        <!-- GRAFICO -->
+        <div class="col-lg-7">
+            <div class="card-panel">
+                <h5 class="mb-3"><i class="bi bi-bar-chart-line"></i> Ventas — últimos 7 días</h5>
+                <canvas id="graficoVentas" height="220"></canvas>
+            </div>
+        </div>
+
+        <!-- STOCK CRITICO -->
+        <div class="col-lg-5">
+            <div class="card-panel h-100">
+                <h5 class="mb-3"><i class="bi bi-exclamation-triangle"></i> Productos con menor stock</h5>
+                {% if productos_criticos %}
+                <table class="table table-dark table-borderless table-sm mb-0">
+                    <thead><tr><th>Producto</th><th>Categoría</th><th class="text-end">Stock</th></tr></thead>
+                    <tbody>
+                        {% for p in productos_criticos %}
+                        <tr>
+                            <td>{{ p.nombre }}</td>
+                            <td><span class="badge bg-secondary">{{ p.categoria or '—' }}</span></td>
+                            <td class="text-end">
+                                {% if p.stock <= 1 %}
+                                <span class="badge bg-danger">{{ p.stock }} 🔔</span>
+                                {% elif p.stock < 5 %}
+                                <span class="badge bg-danger">{{ p.stock }}</span>
+                                {% else %}
+                                <span class="badge bg-warning text-dark">{{ p.stock }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted mb-0">No hay productos registrados todavía.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ULTIMAS VENTAS -->
+    <div class="card-panel mt-4">
+        <h5 class="mb-3"><i class="bi bi-receipt"></i> Últimas ventas</h5>
+        {% if ultimas_ventas %}
+        <div class="table-responsive">
+        <table class="table table-dark table-hover table-sm align-middle mb-0">
+            <thead><tr><th>#</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Estado</th></tr></thead>
+            <tbody>
+                {% for v in ultimas_ventas %}
+                <tr>
+                    <td>{{ v.id }}</td>
+                    <td>{{ v.correo }}</td>
+                    <td>{{ v.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>S/ {{ '%.2f'|format(v.total) }}</td>
+                    <td>
+                        {% if v.estado == 'entregado' %}
+                        <span class="badge bg-success">Entregado</span>
+                        {% elif v.estado == 'cancelado' %}
+                        <span class="badge bg-danger">Cancelado</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">En espera</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        <a href="/historial-compras" class="btn btn-sm btn-outline-warning mt-3">Ver historial completo</a>
+        {% else %}
+        <p class="text-muted mb-0">Todavía no se han registrado ventas.</p>
+        {% endif %}
+    </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+const ctx = document.getElementById('graficoVentas');
+new Chart(ctx, {
+    type: 'bar',
+    data: {
+        labels: {{ labels_grafico|tojson }},
+        datasets: [{
+            label: 'Ventas (S/)',
+            data: {{ datos_grafico|tojson }},
+            backgroundColor: 'rgba(243,156,18,0.7)',
+            borderColor: '#f39c12',
+            borderWidth: 1,
+            borderRadius: 6
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { color: '#ccc' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            y: { ticks: { color: '#ccc' }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+        }
+    }
+});
+</script>
+{% endblock %}
