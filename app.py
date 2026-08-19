@@ -203,11 +203,9 @@ def login():
 
             flash('Bienvenido', 'success')
 
-            if session['rol'] in ['admin', 'administrador']:
-                return redirect('/admin')
-
-            return redirect('/')
-
+            if session['rol'] in ['admin','administrador']:
+                init_db()
+                return redirect('/admin/dashboard')
         # ======================================
         # LOGIN INCORRECTO
         # ======================================
