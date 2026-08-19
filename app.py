@@ -36,6 +36,9 @@ app.config['MYSQL_DB']          = os.environ.get('MYSQL_DB', 'proyecto_multiserv
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 mysql = MySQL(app)
 
+# Segunda base de datos (Gestión de Almacén): productos, proveedores y para pedir
+ALMACEN_DB = os.environ.get('MYSQL_DB_ALMACEN', 'gestion_de_almacen')
+
 # ─────────────────────────────────────────────
 # FLASK-MAIL (env vars para Render)
 # ─────────────────────────────────────────────
@@ -58,6 +61,8 @@ CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 def init_db():
     try:
         cur = mysql.connection.cursor()
+
+        # ── Base de datos principal: usuarios, ventas, carrito, etc.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS usuarios (
                 id       INT AUTO_INCREMENT PRIMARY KEY,
@@ -70,23 +75,6 @@ def init_db():
         """)
         try:
             cur.execute("ALTER TABLE usuarios ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
-        except Exception:
-            pass
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS productos (
-                id          INT AUTO_INCREMENT PRIMARY KEY,
-                nombre      VARCHAR(200) NOT NULL,
-                descripcion TEXT,
-                precio      DECIMAL(10,2) NOT NULL,
-                stock       INT DEFAULT 0,
-                categoria   VARCHAR(100),
-                imagen      VARCHAR(300),
-                estado      VARCHAR(20) DEFAULT 'activo',
-                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        try:
-            cur.execute("ALTER TABLE productos ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
         except Exception:
             pass
         cur.execute("""
@@ -152,8 +140,31 @@ def init_db():
                 created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS proveedores (
+
+        # ── Base de datos de Gestión de Almacén: productos, proveedores, para pedir
+        try:
+            cur.execute(f"CREATE DATABASE IF NOT EXISTS {ALMACEN_DB} CHARACTER SET utf8mb4")
+        except Exception:
+            pass
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.productos (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                nombre      VARCHAR(200) NOT NULL,
+                descripcion TEXT,
+                precio      DECIMAL(10,2) NOT NULL,
+                stock       INT DEFAULT 0,
+                categoria   VARCHAR(100),
+                imagen      VARCHAR(300),
+                estado      VARCHAR(20) DEFAULT 'activo',
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        try:
+            cur.execute(f"ALTER TABLE {ALMACEN_DB}.productos ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
+        except Exception:
+            pass
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.proveedores (
                 id           INT AUTO_INCREMENT PRIMARY KEY,
                 nombre       VARCHAR(200) NOT NULL,
                 celular      VARCHAR(30),
@@ -166,8 +177,8 @@ def init_db():
                 created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS productos_para_pedir (
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.productos_para_pedir (
                 id              INT AUTO_INCREMENT PRIMARY KEY,
                 producto_id     INT NOT NULL,
                 cantidad_pedido INT DEFAULT 1,
@@ -176,6 +187,20 @@ def init_db():
                 fecha           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Migración única: si la tabla de almacén está vacía pero existe en la BD
+        # principal con datos, se copian para no perder nada.
+        for tabla in ['productos', 'proveedores', 'productos_para_pedir']:
+            try:
+                cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.{tabla}")
+                n_al = cur.fetchone()['n']
+                cur.execute(f"SELECT COUNT(*) AS n FROM {tabla}")
+                n_orig = cur.fetchone()['n']
+                if n_orig and not n_al:
+                    cur.execute(f"INSERT INTO {ALMACEN_DB}.{tabla} SELECT * FROM {tabla}")
+            except Exception:
+                pass
+
         mysql.connection.commit()
         cur.close()
     except Exception as e:
@@ -202,9 +227,9 @@ def generar_boleta_pdf(venta_id):
     if not venta:
         return None, None
 
-    cur.execute("""
+    cur.execute(f"""
         SELECT p.nombre, d.cantidad, d.precio
-        FROM detalle_venta d JOIN productos p ON d.producto_id=p.id
+        FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
         WHERE d.venta_id=%s
     """, (venta_id,))
     productos = cur.fetchall()
@@ -293,31 +318,31 @@ def verificar_stock_bajo(cur, producto_id):
     """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor.
        Si stock <= 0 oculta el producto (estado='inactivo')."""
     try:
-        cur.execute("SELECT nombre, stock, categoria FROM productos WHERE id=%s", (producto_id,))
+        cur.execute(f"SELECT nombre, stock, categoria FROM {ALMACEN_DB}.productos WHERE id=%s", (producto_id,))
         p = cur.fetchone()
         if not p:
             return
         if p['stock'] <= 0:
-            cur.execute("UPDATE productos SET estado='inactivo' WHERE id=%s", (producto_id,))
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='inactivo' WHERE id=%s", (producto_id,))
         if p['stock'] > 1:
             return
         # ¿Ya existe pendiente?
-        cur.execute("""
-            SELECT id FROM productos_para_pedir
+        cur.execute(f"""
+            SELECT id FROM {ALMACEN_DB}.productos_para_pedir
             WHERE producto_id=%s AND estado='pendiente'
         """, (producto_id,))
         if cur.fetchone():
             return
         # Proveedor por categoría
-        cur.execute("""
+        cur.execute(f"""
             SELECT id, nombre, celular, correo
-            FROM proveedores WHERE categoria=%s LIMIT 1
+            FROM {ALMACEN_DB}.proveedores WHERE categoria=%s LIMIT 1
         """, (p['categoria'],))
         proveedor = cur.fetchone()
         proveedor_id = proveedor['id'] if proveedor else None
 
-        cur.execute("""
-            INSERT INTO productos_para_pedir (producto_id, cantidad_pedido, proveedor_id)
+        cur.execute(f"""
+            INSERT INTO {ALMACEN_DB}.productos_para_pedir (producto_id, cantidad_pedido, proveedor_id)
             VALUES (%s, 1, %s)
         """, (producto_id, proveedor_id))
 
@@ -490,15 +515,15 @@ def admin():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return "Acceso denegado"
     cur = mysql.connection.cursor()
-    cur.execute("SELECT * FROM productos")
+    cur.execute(f"SELECT * FROM {ALMACEN_DB}.productos")
     productos = cur.fetchall()
 
     # Contadores para badges
-    cur.execute("SELECT COUNT(*) AS total FROM productos_para_pedir WHERE estado='pendiente'")
+    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos_para_pedir WHERE estado='pendiente'")
     r = cur.fetchone()
     pedidos_pendientes = r['total'] if r else 0
 
-    cur.execute("SELECT COUNT(*) AS total FROM proveedores")
+    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.proveedores")
     r2 = cur.fetchone()
     total_proveedores = r2['total'] if r2 else 0
 
@@ -530,8 +555,8 @@ def agregar_producto():
         imagen_db = 'uploads/' + fn
 
     cur = mysql.connection.cursor()
-    cur.execute("""
-        INSERT INTO productos (nombre, descripcion, precio, stock, categoria, imagen)
+    cur.execute(f"""
+        INSERT INTO {ALMACEN_DB}.productos (nombre, descripcion, precio, stock, categoria, imagen)
         VALUES (%s,%s,%s,%s,%s,%s)
     """, (nombre, descripcion, precio, stock, categoria, imagen_db))
     mysql.connection.commit()
@@ -563,13 +588,13 @@ def editar_producto(id):
         if imagen and imagen.filename:
             fn = secure_filename(imagen.filename)
             imagen.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
-            cur.execute("""
-                UPDATE productos SET nombre=%s, descripcion=%s, precio=%s,
+            cur.execute(f"""
+                UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
                 stock=%s, categoria=%s, imagen=%s WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, 'uploads/'+fn, id))
         else:
-            cur.execute("""
-                UPDATE productos SET nombre=%s, descripcion=%s, precio=%s,
+            cur.execute(f"""
+                UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
                 stock=%s, categoria=%s WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, id))
 
@@ -580,14 +605,14 @@ def editar_producto(id):
         flash('Producto actualizado correctamente.', 'success')
         return redirect('/admin')
 
-    cur.execute("SELECT * FROM productos WHERE id=%s", (id,))
+    cur.execute(f"SELECT * FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
     producto = cur.fetchone()
     return render_template('editar_producto.html', producto=producto, categorias=CATEGORIAS)
 
 @app.route('/eliminar_producto/<int:id>')
 def eliminar_producto(id):
     cur = mysql.connection.cursor()
-    cur.execute("UPDATE productos SET estado='inactivo' WHERE id=%s", (id,))
+    cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='inactivo' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     return redirect('/admin')
@@ -597,7 +622,7 @@ def activar_producto(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("UPDATE productos SET estado='activo' WHERE id=%s", (id,))
+    cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='activo' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     return redirect('/admin')
@@ -607,7 +632,7 @@ def eliminar_producto_definitivo(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("DELETE FROM productos WHERE id=%s", (id,))
+    cur.execute(f"DELETE FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     flash('Producto eliminado permanentemente.', 'success')
@@ -648,7 +673,7 @@ def index():
     buscar   = request.args.get('buscar','')
     categoria = request.args.get('categoria','Todos')
     cur = mysql.connection.cursor()
-    sql = "SELECT * FROM productos WHERE nombre LIKE %s AND estado='activo'"
+    sql = f"SELECT * FROM {ALMACEN_DB}.productos WHERE nombre LIKE %s AND estado='activo'"
     vals = [f'%{buscar}%']
     if categoria != 'Todos':
         sql += ' AND categoria=%s'
@@ -661,7 +686,7 @@ def index():
 def agregar(id):
     usuario = obtener_usuario()
     cur = mysql.connection.cursor()
-    cur.execute("SELECT stock FROM productos WHERE id=%s", (id,))
+    cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
     prod = cur.fetchone()
     if not prod:
         flash('Producto no encontrado.', 'danger')
@@ -689,9 +714,9 @@ def agregar(id):
 def ver_carrito():
     usuario = obtener_usuario()
     cur = mysql.connection.cursor()
-    cur.execute("""
+    cur.execute(f"""
         SELECT c.id, c.producto_id, p.nombre, p.precio, c.cantidad
-        FROM carrito c JOIN productos p ON c.producto_id=p.id
+        FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
         WHERE c.usuario_id=%s
     """, (usuario,))
     productos = cur.fetchall()
@@ -726,9 +751,9 @@ def actualizar_cantidad(id_producto):
         cur.execute("UPDATE carrito SET cantidad=cantidad-1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
         cur.execute("DELETE FROM carrito WHERE producto_id=%s AND usuario_id=%s AND cantidad<=0", (id_producto, usuario))
     mysql.connection.commit()
-    cur.execute("SELECT c.cantidad, p.precio FROM carrito c JOIN productos p ON c.producto_id=p.id WHERE c.producto_id=%s AND c.usuario_id=%s", (id_producto, usuario))
+    cur.execute(f"SELECT c.cantidad, p.precio FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id WHERE c.producto_id=%s AND c.usuario_id=%s", (id_producto, usuario))
     fila = cur.fetchone()
-    cur.execute("SELECT SUM(c.cantidad*p.precio) AS total FROM carrito c JOIN productos p ON c.producto_id=p.id WHERE c.usuario_id=%s", (usuario,))
+    cur.execute(f"SELECT SUM(c.cantidad*p.precio) AS total FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id WHERE c.usuario_id=%s", (usuario,))
     res = cur.fetchone()
     total = res['total'] if res['total'] else 0
     cur.close()
@@ -769,9 +794,9 @@ def procesar_compra():
     cur = mysql.connection.cursor()
 
     try:
-        cur.execute("""
+        cur.execute(f"""
             SELECT p.id, p.nombre, p.precio, c.cantidad
-            FROM carrito c JOIN productos p ON c.producto_id=p.id
+            FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
             WHERE c.usuario_id=%s
         """, (user_id,))
         items = cur.fetchall()
@@ -780,7 +805,7 @@ def procesar_compra():
 
         total = 0
         for item in items:
-            cur.execute("SELECT stock FROM productos WHERE id=%s", (item['id'],))
+            cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (item['id'],))
             row = cur.fetchone()
             stock = row['stock'] if row else 0
             if stock < item['cantidad']:
@@ -793,7 +818,7 @@ def procesar_compra():
         for item in items:
             cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
                         (venta_id, item['id'], item['cantidad'], item['precio']))
-            cur.execute("UPDATE productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
             verificar_stock_bajo(cur, item['id'])
 
         cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
@@ -841,9 +866,9 @@ def preview_boleta():
     doc      = request.args.get('doc')
     nombre   = request.args.get('nombre')
     cur = mysql.connection.cursor()
-    cur.execute("""
+    cur.execute(f"""
         SELECT p.nombre, d.cantidad, d.precio
-        FROM detalle_venta d JOIN productos p ON d.producto_id=p.id
+        FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
         WHERE d.venta_id=%s
     """, (venta_id,))
     productos = cur.fetchall()
@@ -892,9 +917,9 @@ def historial():
     ventas = cur.fetchall()
     hist = []
     for v in ventas:
-        cur.execute("""
+        cur.execute(f"""
             SELECT p.id AS producto_id, p.nombre, p.descripcion, d.cantidad, d.precio
-            FROM detalle_venta d JOIN productos p ON d.producto_id=p.id
+            FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
             WHERE d.venta_id=%s
         """, (v['id'],))
         hist.append({'id':v['id'],'total':v['total'],'fecha':v['fecha'],'productos':cur.fetchall()})
@@ -918,9 +943,9 @@ def historial_compras():
     ventas_raw = cur.fetchall()
     historial = []
     for v in ventas_raw:
-        cur.execute("""
+        cur.execute(f"""
             SELECT p.id AS producto_id, p.nombre, p.descripcion, d.cantidad, d.precio
-            FROM detalle_venta d JOIN productos p ON d.producto_id=p.id
+            FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
             WHERE d.venta_id=%s
         """, (v['id'],))
         historial.append({**v, 'productos': cur.fetchall()})
@@ -1025,8 +1050,8 @@ def proveedores():
         direccion = request.form.get('direccion','')
         categoria = request.form.get('categoria','')
         notas     = request.form.get('notas','')
-        cur.execute("""
-            INSERT INTO proveedores (nombre, celular, correo, dni, ruc, direccion, categoria, notas)
+        cur.execute(f"""
+            INSERT INTO {ALMACEN_DB}.proveedores (nombre, celular, correo, dni, ruc, direccion, categoria, notas)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
         """, (nombre, celular, correo, dni, ruc, direccion, categoria, notas))
         mysql.connection.commit()
@@ -1035,7 +1060,7 @@ def proveedores():
 
     buscar = request.args.get('buscar','')
     cat_filtro = request.args.get('categoria','')
-    sql = "SELECT * FROM proveedores WHERE nombre LIKE %s"
+    sql = f"SELECT * FROM {ALMACEN_DB}.proveedores WHERE nombre LIKE %s"
     vals = [f'%{buscar}%']
     if cat_filtro:
         sql += " AND categoria=%s"
@@ -1053,8 +1078,8 @@ def editar_proveedor(id):
         return redirect('/login')
     cur = mysql.connection.cursor()
     if request.method == 'POST':
-        cur.execute("""
-            UPDATE proveedores SET nombre=%s, celular=%s, correo=%s, dni=%s,
+        cur.execute(f"""
+            UPDATE {ALMACEN_DB}.proveedores SET nombre=%s, celular=%s, correo=%s, dni=%s,
             ruc=%s, direccion=%s, categoria=%s, notas=%s WHERE id=%s
         """, (
             request.form.get('nombre'), request.form.get('celular'),
@@ -1065,7 +1090,7 @@ def editar_proveedor(id):
         mysql.connection.commit()
         flash('Proveedor actualizado.', 'success')
         return redirect('/proveedores')
-    cur.execute("SELECT * FROM proveedores WHERE id=%s", (id,))
+    cur.execute(f"SELECT * FROM {ALMACEN_DB}.proveedores WHERE id=%s", (id,))
     p = cur.fetchone()
     cur.close()
     return render_template('proveedores.html', editar=p, categorias=CATEGORIAS,
@@ -1076,7 +1101,7 @@ def eliminar_proveedor(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("DELETE FROM proveedores WHERE id=%s", (id,))
+    cur.execute(f"DELETE FROM {ALMACEN_DB}.proveedores WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     flash('Proveedor eliminado.', 'success')
@@ -1090,15 +1115,15 @@ def productos_para_pedir():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("""
+    cur.execute(f"""
         SELECT pp.id, pp.cantidad_pedido, pp.fecha, pp.estado,
                p.nombre AS producto_nombre, p.stock AS stock_actual,
                p.categoria,
                pr.id AS proveedor_id, pr.nombre AS proveedor_nombre,
                pr.celular AS proveedor_celular, pr.correo AS proveedor_correo
-        FROM productos_para_pedir pp
-        JOIN productos p ON pp.producto_id=p.id
-        LEFT JOIN proveedores pr ON pp.proveedor_id=pr.id
+        FROM {ALMACEN_DB}.productos_para_pedir pp
+        JOIN {ALMACEN_DB}.productos p ON pp.producto_id=p.id
+        LEFT JOIN {ALMACEN_DB}.proveedores pr ON pp.proveedor_id=pr.id
         WHERE pp.estado='pendiente'
         ORDER BY pp.fecha DESC
     """)
@@ -1139,7 +1164,7 @@ def eliminar_pedido(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("UPDATE productos_para_pedir SET estado='cancelado' WHERE id=%s", (id,))
+    cur.execute(f"UPDATE {ALMACEN_DB}.productos_para_pedir SET estado='cancelado' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     flash('Pedido eliminado.', 'success')
@@ -1153,7 +1178,7 @@ def actualizar_pedido(id):
     if cantidad < 1:
         cantidad = 1
     cur = mysql.connection.cursor()
-    cur.execute("UPDATE productos_para_pedir SET cantidad_pedido=%s WHERE id=%s", (cantidad, id))
+    cur.execute(f"UPDATE {ALMACEN_DB}.productos_para_pedir SET cantidad_pedido=%s WHERE id=%s", (cantidad, id))
     mysql.connection.commit()
     cur.close()
     flash('Cantidad actualizada.', 'success')
@@ -1164,7 +1189,7 @@ def marcar_enviado(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("UPDATE productos_para_pedir SET estado='enviado' WHERE id=%s", (id,))
+    cur.execute(f"UPDATE {ALMACEN_DB}.productos_para_pedir SET estado='enviado' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     flash('Pedido marcado como enviado.', 'success')
@@ -1175,15 +1200,15 @@ def enviar_email_a_proveedor(proveedor_id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("SELECT * FROM proveedores WHERE id=%s", (proveedor_id,))
+    cur.execute(f"SELECT * FROM {ALMACEN_DB}.proveedores WHERE id=%s", (proveedor_id,))
     proveedor = cur.fetchone()
     if not proveedor:
         flash('Proveedor no encontrado.', 'danger')
         return redirect('/productos-para-pedir')
-    cur.execute("""
+    cur.execute(f"""
         SELECT p.nombre, p.categoria, pp.cantidad_pedido
-        FROM productos_para_pedir pp
-        JOIN productos p ON pp.producto_id=p.id
+        FROM {ALMACEN_DB}.productos_para_pedir pp
+        JOIN {ALMACEN_DB}.productos p ON pp.producto_id=p.id
         WHERE pp.proveedor_id=%s AND pp.estado='pendiente'
     """, (proveedor_id,))
     productos_lista = cur.fetchall()
