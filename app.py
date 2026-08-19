@@ -204,12 +204,11 @@ def login():
             flash('Bienvenido', 'success')
 
             if session['rol'] in ['admin','administrador']:
-                init_db()
                 return redirect('/admin/dashboard')
+            return redirect('/')
         # ======================================
         # LOGIN INCORRECTO
         # ======================================
-
         if bloqueo_usuario:
 
             intentos = bloqueo_usuario['intentos'] + 1
