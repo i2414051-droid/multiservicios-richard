@@ -1,4 +1,4 @@
-import os, uuid, io, threading
+import os, uuid, io, threading, secrets
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -19,8 +19,24 @@ from reportlab.lib.units import inch
 # APP SETUP
 # ─────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'cambiar-esta-clave-segura')
+app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32)
 bcrypt = Bcrypt(app)
+
+# ─────────────────────────────────────────────
+# CSRF PROTECTION
+# ─────────────────────────────────────────────
+def generate_csrf_token():
+    if '_csrf_token' not in session:
+        session['_csrf_token'] = secrets.token_hex(32)
+    return session['_csrf_token']
+
+app.jinja_env.globals['csrf_token'] = generate_csrf_token
+
+def validate_csrf():
+    token = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token')
+    if not token or token != session.get('_csrf_token'):
+        return False
+    return True
 
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -468,6 +484,8 @@ def cantidad_carrito():
 # ─────────────────────────────────────────────
 @app.route('/test_db')
 def test_db():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return "Acceso denegado", 403
     try:
         cur = mysql.connection.cursor()
         cur.execute("SHOW TABLES;")
@@ -576,11 +594,13 @@ def registro():
         password = request.form['password']
         confirmar = request.form['confirmar']
         if password != confirmar:
-            return "Contraseñas no coinciden"
+            flash('Las contraseñas no coinciden.', 'danger')
+            return redirect('/registro')
         cur = mysql.connection.cursor()
         cur.execute("SELECT * FROM usuarios WHERE correo=%s", (correo,))
         if cur.fetchone():
-            return "Usuario ya existe"
+            flash('Ya existe una cuenta con ese correo.', 'danger')
+            return redirect('/registro')
         h = bcrypt.generate_password_hash(password).decode('utf-8')
         cur.execute("INSERT INTO usuarios (correo, password, rol) VALUES (%s,%s,'cliente')", (correo, h))
         mysql.connection.commit()
@@ -675,10 +695,17 @@ def admin():
 def agregar_producto():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido. Intenta de nuevo.', 'danger')
+        return redirect('/admin')
     nombre      = request.form['nombre']
     descripcion = request.form['descripcion']
-    precio      = float(request.form['precio'])
-    stock       = int(request.form['stock'])
+    try:
+        precio      = float(request.form['precio'])
+        stock       = int(request.form['stock'])
+    except (ValueError, TypeError):
+        flash('Precio o stock con valor inválido.', 'danger')
+        return redirect('/admin')
     categoria   = request.form.get('categoria', 'Otros')
     if precio < 0:
         flash('No se permiten precios negativos', 'danger')
@@ -707,10 +734,17 @@ def editar_producto(id):
         return redirect('/login')
     cur = mysql.connection.cursor()
     if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect(f'/editar_producto/{id}')
         nombre      = request.form['nombre']
         descripcion = request.form['descripcion']
-        precio      = float(request.form['precio'])
-        stock       = int(request.form['stock'])
+        try:
+            precio      = float(request.form['precio'])
+            stock       = int(request.form['stock'])
+        except (ValueError, TypeError):
+            flash('Precio o stock con valor inválido.', 'danger')
+            return redirect(f'/editar_producto/{id}')
         categoria   = request.form['categoria']
         imagen      = request.files.get('imagen')
 
@@ -747,6 +781,8 @@ def editar_producto(id):
 
 @app.route('/eliminar_producto/<int:id>')
 def eliminar_producto(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
     cur = mysql.connection.cursor()
     cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='inactivo' WHERE id=%s", (id,))
     mysql.connection.commit()
@@ -779,6 +815,8 @@ def eliminar_producto_definitivo(id):
 # ─────────────────────────────────────────────
 @app.route('/consultar/<tipo>/<numero>')
 def consultar(tipo, numero):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return jsonify({'error': 'Acceso denegado'}), 403
     venta_id = request.args.get('venta_id')
     if not venta_id:
         return jsonify({'error': 'venta_id no recibido'})
@@ -881,14 +919,18 @@ def reducir_cantidad(id_producto):
     usuario = obtener_usuario()
     cur = mysql.connection.cursor()
     cur.execute("UPDATE carrito SET cantidad=cantidad-1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
-    cur.execute("DELETE FROM carrito WHERE cantidad<=0")
+    cur.execute("DELETE FROM carrito WHERE producto_id=%s AND usuario_id=%s AND cantidad<=0", (id_producto, usuario))
     mysql.connection.commit()
     return redirect('/carrito')
 
 @app.route('/actualizar-cantidad/<int:id_producto>', methods=['POST'])
 def actualizar_cantidad(id_producto):
     usuario = obtener_usuario()
+    if not request.is_json:
+        return jsonify({'error': 'Request debe ser JSON'}), 400
     accion  = request.json.get('accion')
+    if accion not in ('aumentar', 'reducir'):
+        return jsonify({'error': 'Acción inválida'}), 400
     cur = mysql.connection.cursor()
     if accion == 'aumentar':
         cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
@@ -954,7 +996,8 @@ def procesar_compra():
             row = cur.fetchone()
             stock = row['stock'] if row else 0
             if stock < item['cantidad']:
-                return f"Stock insuficiente: {item['nombre']}"
+                flash(f'Stock insuficiente para: {item["nombre"]}. Solo quedan {stock} unidad(es).', 'danger')
+                return redirect('/carrito')
             total += item['precio'] * item['cantidad']
 
         cur.execute("INSERT INTO ventas (cliente_id, total) VALUES(%s,%s)", (user_id, total))
@@ -1003,10 +1046,14 @@ def boleta():
 
 @app.route('/boleta/<int:venta_id>')
 def boleta_form(venta_id):
+    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+        return redirect('/login')
     return render_template('boleta_form.html', venta_id=venta_id)
 
 @app.route('/preview_boleta')
 def preview_boleta():
+    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+        return redirect('/login')
     venta_id = request.args.get('venta_id')
     doc      = request.args.get('doc')
     nombre   = request.args.get('nombre')
@@ -1023,6 +1070,8 @@ def preview_boleta():
 
 @app.route('/guardar_boleta')
 def guardar_boleta():
+    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+        return redirect('/login')
     venta_id = request.args.get('venta_id')
     doc      = request.args.get('doc')
     nombre   = request.args.get('nombre')
@@ -1044,6 +1093,8 @@ def boleta_pdf(venta_id):
 
 @app.route('/confirmacion/<int:id>')
 def confirmacion(id):
+    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+        return redirect('/login')
     cur = mysql.connection.cursor()
     cur.execute("SELECT total, fecha FROM ventas WHERE id=%s", (id,))
     venta = cur.fetchone()
@@ -1154,6 +1205,9 @@ def permisos():
         except Exception:
             pass
     if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/permisos')
         if not es_superadmin:
             flash('Solo el administrador principal (admin@mail.com) puede cambiar roles.', 'danger')
             cur.close()
@@ -1187,6 +1241,9 @@ def proveedores():
         return redirect('/login')
     cur = mysql.connection.cursor()
     if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/proveedores')
         nombre    = request.form.get('nombre','')
         celular   = request.form.get('celular','')
         correo    = request.form.get('correo','')
@@ -1223,6 +1280,9 @@ def editar_proveedor(id):
         return redirect('/login')
     cur = mysql.connection.cursor()
     if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect(f'/proveedores/editar/{id}')
         cur.execute(f"""
             UPDATE {ALMACEN_DB}.proveedores SET nombre=%s, celular=%s, correo=%s, dni=%s,
             ruc=%s, direccion=%s, categoria=%s, notas=%s WHERE id=%s
@@ -1319,7 +1379,10 @@ def eliminar_pedido(id):
 def actualizar_pedido(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    cantidad = int(request.form.get('cantidad', 1))
+    try:
+        cantidad = int(request.form.get('cantidad', 1))
+    except (ValueError, TypeError):
+        cantidad = 1
     if cantidad < 1:
         cantidad = 1
     cur = mysql.connection.cursor()
@@ -1400,6 +1463,9 @@ def registrar_ingreso():
     cur.close()
 
     if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/registrar-ingreso')
         proveedor_id = request.form.get('proveedor_id') or None
         notas = request.form.get('notas', '')
         producto_ids = request.form.getlist('producto_id[]')
@@ -1411,9 +1477,12 @@ def registrar_ingreso():
         ingreso_id = cur.lastrowid
 
         for i in range(len(producto_ids)):
-            pid = int(producto_ids[i])
-            cant = int(cantidades[i])
-            prec = float(precios[i]) if precios[i] else 0
+            try:
+                pid = int(producto_ids[i])
+                cant = int(cantidades[i])
+                prec = float(precios[i]) if precios[i] else 0
+            except (ValueError, IndexError):
+                continue
             if cant > 0:
                 cur.execute("INSERT INTO detalle_ingreso (ingreso_id, producto_id, cantidad, precio_compra) VALUES (%s,%s,%s,%s)",
                             (ingreso_id, pid, cant, prec))
@@ -1462,13 +1531,22 @@ def eliminar_ingreso(id):
     cur = mysql.connection.cursor()
     cur.execute("SELECT producto_id, cantidad FROM detalle_ingreso WHERE ingreso_id=%s", (id,))
     items = cur.fetchall()
+    revertidos = 0
     for item in items:
-        cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['producto_id']))
+        cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (item['producto_id'],))
+        prod = cur.fetchone()
+        stock_actual = prod['stock'] if prod else 0
+        if stock_actual >= item['cantidad']:
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['producto_id']))
+            revertidos += 1
+        else:
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=0 WHERE id=%s", (item['producto_id'],))
+            revertidos += 1
     cur.execute("DELETE FROM detalle_ingreso WHERE ingreso_id=%s", (id,))
     cur.execute("DELETE FROM ingresos WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
-    flash('Ingreso eliminado y stock revertido.', 'success')
+    flash(f'Ingreso eliminado y stock revertido ({revertidos} productos).', 'success')
     return redirect('/ingresos')
 
 # ─────────────────────────────────────────────
@@ -1613,18 +1691,43 @@ def registrar_salida():
     cur.close()
 
     if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/registrar-salida')
         venta_id = request.form.get('venta_id') or None
         notas = request.form.get('notas', '')
         producto_ids = request.form.getlist('producto_id[]')
         cantidades = request.form.getlist('cantidad[]')
 
         cur = mysql.connection.cursor()
+        errores = []
+        for i in range(len(producto_ids)):
+            try:
+                pid = int(producto_ids[i])
+                cant = int(cantidades[i])
+            except (ValueError, IndexError):
+                continue
+            if cant > 0:
+                cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (pid,))
+                prod = cur.fetchone()
+                stock_actual = prod['stock'] if prod else 0
+                if stock_actual < cant:
+                    nombre_prod = prod.get('nombre', f'ID {pid}') if prod else f'ID {pid}'
+                    errores.append(f'{nombre_prod}: stock insuficiente (hay {stock_actual}, necesitas {cant})')
+        if errores:
+            flash('No se puede registrar la salida: ' + '; '.join(errores), 'danger')
+            cur.close()
+            return redirect('/registrar-salida')
+
         cur.execute("INSERT INTO salidas (venta_id, notas) VALUES (%s, %s)", (venta_id, notas))
         salida_id = cur.lastrowid
 
         for i in range(len(producto_ids)):
-            pid = int(producto_ids[i])
-            cant = int(cantidades[i])
+            try:
+                pid = int(producto_ids[i])
+                cant = int(cantidades[i])
+            except (ValueError, IndexError):
+                continue
             if cant > 0:
                 cur.execute("INSERT INTO detalle_salida (salida_id, producto_id, cantidad) VALUES (%s,%s,%s)",
                             (salida_id, pid, cant))
@@ -1751,8 +1854,11 @@ def agregar_productos_entrega(entrega_id):
         return redirect('/entregas')
     cur.execute("DELETE FROM entrega_productos WHERE entrega_id=%s", (entrega_id,))
     for i in range(len(producto_ids)):
-        pid = int(producto_ids[i])
-        cant = int(cantidades[i]) if cantidades[i] else 1
+        try:
+            pid = int(producto_ids[i])
+            cant = int(cantidades[i]) if cantidades[i] else 1
+        except (ValueError, IndexError):
+            continue
         if cant > 0:
             cur.execute("INSERT INTO entrega_productos (entrega_id, producto_id, cantidad) VALUES (%s,%s,%s)",
                         (entrega_id, pid, cant))
@@ -1782,6 +1888,9 @@ def asignar_entrega(venta_id):
     direcciones = cur.fetchall()
 
     if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect(f'/entregas/asignar/{venta_id}')
         direccion = request.form.get('direccion_envio', '')
         fecha_est = request.form.get('fecha_estimada') or None
         notas = request.form.get('notas', '')
@@ -1791,8 +1900,11 @@ def asignar_entrega(venta_id):
         producto_ids = request.form.getlist('producto_id[]')
         cantidades = request.form.getlist('cantidad[]')
         for i in range(len(producto_ids)):
-            pid = int(producto_ids[i])
-            cant = int(cantidades[i]) if cantidades[i] else 1
+            try:
+                pid = int(producto_ids[i])
+                cant = int(cantidades[i]) if cantidades[i] else 1
+            except (ValueError, IndexError):
+                continue
             if cant > 0:
                 cur.execute("INSERT INTO entrega_productos (entrega_id, producto_id, cantidad) VALUES (%s,%s,%s)",
                             (entrega_id, pid, cant))

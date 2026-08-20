@@ -9,6 +9,7 @@
         <h3 class="text-center mb-3">🔐 Login Admin</h3>
 
         <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
             <!-- CAMPO CORREO -->
             <input type="email"

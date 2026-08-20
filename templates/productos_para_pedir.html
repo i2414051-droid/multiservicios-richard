@@ -79,6 +79,7 @@
               <td>
                 <form method="POST" action="/productos-para-pedir/actualizar/{{ ped.id }}"
                       class="d-flex align-items-center justify-content-center gap-2">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                   <input type="number" name="cantidad" value="{{ ped.cantidad_pedido }}"
                          min="1" class="form-control form-control-sm bg-dark text-white border-secondary"
                          style="width:80px">

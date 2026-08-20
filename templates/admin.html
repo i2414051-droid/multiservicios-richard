@@ -30,6 +30,7 @@
         <div class="card-header bg-dark text-white">Agregar Producto</div>
         <div class="card-body">
             <form method="POST" action="/agregar_producto" enctype="multipart/form-data" class="row g-2 mb-4">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Nombre</label>

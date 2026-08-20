@@ -46,6 +46,7 @@
               <td class="text-muted" style="font-size:.85rem;">{{ venta.fecha }}</td>
               <td>
                 <form method="POST" action="/historial-compras/estado/{{ venta.id }}" style="display:inline;">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                   <select name="estado" class="form-select form-select-sm bg-dark text-white border-secondary"
                           onchange="this.form.submit()">
                     <option value="entregado" {% if venta.estado == 'entregado' %}selected{% endif %}>Entregado</option>

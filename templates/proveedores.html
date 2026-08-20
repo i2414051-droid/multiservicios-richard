@@ -21,6 +21,7 @@
     </div>
     <div class="card-body">
       <form method="POST" action="{% if editar %}/proveedores/editar/{{ editar.id }}{% else %}/proveedores{% endif %}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="row g-3">
           <div class="col-md-6">
             <label class="form-label text-white">Nombre completo *</label>

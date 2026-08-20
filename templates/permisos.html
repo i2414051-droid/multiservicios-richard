@@ -95,6 +95,7 @@
                     <form method="POST" action="/permisos"
                           onsubmit="return confirm('¿Cambiar el rol de este usuario?')"
                           class="d-inline">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                       <input type="hidden" name="user_id" value="{{ u.id }}">
                       {% if u.rol in ['admin', 'administrador'] %}
                         <input type="hidden" name="rol" value="cliente">

@@ -37,6 +37,7 @@
       <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
         <div class="card-body">
           <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <div class="mb-3">
               <label class="form-label" style="color:#f39c12;font-weight:600">Dirección de envío</label>
               <input type="text" class="form-control bg-dark text-white border-0" id="direccion" name="direccion_envio"
