@@ -192,6 +192,25 @@ def init_db():
                 cantidad    INT NOT NULL
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entrega_productos (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                entrega_id  INT NOT NULL,
+                producto_id INT NOT NULL,
+                cantidad    INT NOT NULL DEFAULT 1
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS direcciones (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id      VARCHAR(100) NOT NULL,
+                direccion       VARCHAR(300) NOT NULL,
+                distrito        VARCHAR(150),
+                referencia      VARCHAR(300),
+                predeterminada  TINYINT DEFAULT 0,
+                created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
         mysql.connection.commit()
         print("[init_db] Tablas de la BD principal creadas/verificadas OK")
@@ -1677,6 +1696,223 @@ def manejar_error(e):
     except Exception:
         pass
     return "Ocurrió un error interno. Revisa los logs.", 500
+
+# ─────────────────────────────────────────────
+# PRO08: VERIFICAR INVENTARIO POR CANTIDAD
+# ─────────────────────────────────────────────
+@app.route('/verificar-inventario')
+def verificar_inventario():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    filtro = request.args.get('filtro', 'todos')
+    cur = mysql.connection.cursor()
+    sql = f"SELECT id, nombre, stock, precio, categoria, imagen, estado FROM {ALMACEN_DB}.productos WHERE 1=1"
+    if filtro == 'sin_stock':
+        sql += " AND stock=0 AND estado='activo'"
+    elif filtro == 'critico':
+        sql += " AND stock BETWEEN 1 AND 3 AND estado='activo'"
+    elif filtro == 'bajo':
+        sql += " AND stock BETWEEN 4 AND 10 AND estado='activo'"
+    elif filtro == 'normal':
+        sql += " AND stock > 10 AND estado='activo'"
+    elif filtro == 'inactivos':
+        sql += " AND estado='inactivo'"
+    sql += " ORDER BY stock ASC"
+    cur.execute(sql)
+    productos = cur.fetchall()
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock=0")
+    sin_stock = cur.fetchone()['n']
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock BETWEEN 1 AND 3")
+    critico = cur.fetchone()['n']
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock BETWEEN 4 AND 10")
+    bajo = cur.fetchone()['n']
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock > 10")
+    normal = cur.fetchone()['n']
+    cur.close()
+    return render_template('verificar_inventario.html',
+                           productos=productos, filtro=filtro,
+                           sin_stock=sin_stock, critico=critico, bajo=bajo, normal=normal)
+
+# ─────────────────────────────────────────────
+# PRO20: AGREGAR PRODUCTOS PARA ENVÍO Y ENTREGA
+# ─────────────────────────────────────────────
+@app.route('/entregas/agregar-productos/<int:entrega_id>', methods=['POST'])
+def agregar_productos_entrega(entrega_id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    producto_ids = request.form.getlist('producto_id[]')
+    cantidades = request.form.getlist('cantidad[]')
+    cur.execute("SELECT venta_id FROM seguimiento_entregas WHERE id=%s", (entrega_id,))
+    enc = cur.fetchone()
+    if not enc:
+        cur.close()
+        flash('Entrega no encontrada.', 'danger')
+        return redirect('/entregas')
+    cur.execute("DELETE FROM entrega_productos WHERE entrega_id=%s", (entrega_id,))
+    for i in range(len(producto_ids)):
+        pid = int(producto_ids[i])
+        cant = int(cantidades[i]) if cantidades[i] else 1
+        if cant > 0:
+            cur.execute("INSERT INTO entrega_productos (entrega_id, producto_id, cantidad) VALUES (%s,%s,%s)",
+                        (entrega_id, pid, cant))
+    mysql.connection.commit()
+    cur.close()
+    flash('Productos de entrega actualizados.', 'success')
+    return redirect('/entregas')
+
+@app.route('/entregas/asignar/<int:venta_id>', methods=['GET','POST'])
+def asignar_entrega(venta_id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, total, nombre, documento FROM ventas WHERE id=%s", (venta_id,))
+    venta = cur.fetchone()
+    if not venta:
+        cur.close()
+        flash('Venta no encontrada.', 'danger')
+        return redirect('/historial-compras')
+    cur.execute("""
+        SELECT d.producto_id, p.nombre, p.imagen, d.cantidad, d.precio
+        FROM detalle_venta d JOIN {0}.productos p ON d.producto_id=p.id
+        WHERE d.venta_id=%s
+    """.format(ALMACEN_DB), (venta_id,))
+    productos_venta = cur.fetchall()
+    cur.execute("SELECT id, direccion, distrito, referencia FROM direcciones WHERE usuario_id=%s", (venta['documento'] or ''))
+    direcciones = cur.fetchall()
+
+    if request.method == 'POST':
+        direccion = request.form.get('direccion_envio', '')
+        fecha_est = request.form.get('fecha_estimada') or None
+        notas = request.form.get('notas', '')
+        cur.execute("INSERT INTO seguimiento_entregas (venta_id, estado, direccion_envio, fecha_estimada, notas) VALUES (%s,'pendiente',%s,%s,%s)",
+                    (venta_id, direccion, fecha_est, notas))
+        entrega_id = cur.lastrowid
+        producto_ids = request.form.getlist('producto_id[]')
+        cantidades = request.form.getlist('cantidad[]')
+        for i in range(len(producto_ids)):
+            pid = int(producto_ids[i])
+            cant = int(cantidades[i]) if cantidades[i] else 1
+            if cant > 0:
+                cur.execute("INSERT INTO entrega_productos (entrega_id, producto_id, cantidad) VALUES (%s,%s,%s)",
+                            (entrega_id, pid, cant))
+        mysql.connection.commit()
+        cur.close()
+        flash(f'Entrega #{entrega_id} creada para venta #{venta_id}.', 'success')
+        return redirect('/entregas')
+
+    cur.close()
+    return render_template('asignar_entrega.html', venta=venta, productos_venta=productos_venta, direcciones=direcciones)
+
+# ─────────────────────────────────────────────
+# PRO25-26: VERIFICAR / CONSULTAR REGISTROS
+# ─────────────────────────────────────────────
+@app.route('/verificar-registros')
+def verificar_registros():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    seccion = request.args.get('seccion', 'resumen')
+    cur = mysql.connection.cursor()
+    stats = {}
+    cur.execute("SELECT COUNT(*) AS n FROM ventas")
+    stats['total_ventas'] = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM detalle_venta")
+    stats['total_detalle_ventas'] = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM ingresos")
+    stats['total_ingresos'] = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM detalle_ingreso")
+    stats['total_detalle_ingresos'] = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM salidas")
+    stats['total_salidas'] = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM detalle_salida")
+    stats['total_detalle_salidas'] = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM seguimiento_entregas")
+    stats['total_entregas'] = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM usuarios")
+    stats['total_usuarios'] = cur.fetchone()['n']
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos")
+    stats['total_productos'] = cur.fetchone()['n']
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.proveedores")
+    stats['total_proveedores'] = cur.fetchone()['n']
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos_para_pedir")
+    stats['total_pedidos'] = cur.fetchone()['n']
+
+    datos = []
+    if seccion == 'ventas':
+        cur.execute("SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento, u.correo FROM ventas v LEFT JOIN usuarios u ON v.cliente_id=u.id ORDER BY v.fecha DESC LIMIT 50")
+        datos = cur.fetchall()
+    elif seccion == 'ingresos':
+        cur.execute("SELECT i.id, i.fecha, p.nombre AS proveedor_nombre, (SELECT SUM(cantidad) FROM detalle_ingreso WHERE ingreso_id=i.id) AS items FROM ingresos i LEFT JOIN proveedores p ON i.proveedor_id=p.id ORDER BY i.fecha DESC LIMIT 50")
+        datos = cur.fetchall()
+    elif seccion == 'salidas':
+        cur.execute("SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(cantidad) FROM detalle_salida WHERE salida_id=s.id) AS items FROM salidas s LEFT JOIN ventas v ON s.venta_id=v.id ORDER BY s.fecha DESC LIMIT 50")
+        datos = cur.fetchall()
+    elif seccion == 'entregas':
+        cur.execute("SELECT e.id, e.estado, e.fecha_entrega, v.nombre AS cliente_nombre, v.total FROM seguimiento_entregas e JOIN ventas v ON e.venta_id=v.id ORDER BY e.created_at DESC LIMIT 50")
+        datos = cur.fetchall()
+    elif seccion == 'usuarios':
+        cur.execute("SELECT id, correo, rol, estado, created_at FROM usuarios ORDER BY created_at DESC LIMIT 50")
+        datos = cur.fetchall()
+
+    cur.close()
+    return render_template('verificar_registros.html', stats=stats, seccion=seccion, datos=datos)
+
+# ─────────────────────────────────────────────
+# PRO27: INFORME FINAL DEL DÍA
+# ─────────────────────────────────────────────
+@app.route('/informe-diario')
+def informe_diario():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    fecha_str = request.args.get('fecha', hoy)
+    cur = mysql.connection.cursor()
+
+    cur.execute("SELECT id, total, fecha, estado, nombre, documento FROM ventas WHERE DATE(fecha)=%s ORDER BY fecha", (fecha_str,))
+    ventas_dia = cur.fetchall()
+    cur.execute("SELECT COALESCE(SUM(total),0) AS total FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
+    ingresos_ventas = float(cur.fetchone()['total'])
+    cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
+    num_ventas = cur.fetchone()['n']
+
+    cur.execute("""
+        SELECT i.id, i.fecha, p.nombre AS proveedor_nombre,
+               (SELECT SUM(di.cantidad) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS items,
+               (SELECT COALESCE(SUM(di.cantidad*di.precio_compra),0) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS costo
+        FROM ingresos i LEFT JOIN proveedores p ON i.proveedor_id=p.id
+        WHERE DATE(i.fecha)=%s ORDER BY i.fecha
+    """, (fecha_str,))
+    ingresos_dia = cur.fetchall()
+    cur.execute("SELECT COUNT(*) AS n FROM ingresos WHERE DATE(fecha)=%s", (fecha_str,))
+    num_ingresos = cur.fetchone()['n']
+
+    cur.execute("""
+        SELECT s.id, s.fecha, v.nombre AS cliente_nombre,
+               (SELECT SUM(ds.cantidad) FROM detalle_salida ds WHERE ds.salida_id=s.id) AS items
+        FROM salidas s LEFT JOIN ventas v ON s.venta_id=v.id
+        WHERE DATE(s.fecha)=%s ORDER BY s.fecha
+    """, (fecha_str,))
+    salidas_dia = cur.fetchall()
+    cur.execute("SELECT COUNT(*) AS n FROM salidas WHERE DATE(fecha)=%s", (fecha_str,))
+    num_salidas = cur.fetchone()['n']
+
+    cur.execute("""
+        SELECT e.id, e.estado, e.fecha_entrega, v.nombre AS cliente_nombre, v.total
+        FROM seguimiento_entregas e JOIN ventas v ON e.venta_id=v.id
+        WHERE DATE(e.created_at)=%s OR DATE(e.fecha_entrega)=%s
+        ORDER BY e.created_at
+    """, (fecha_str, fecha_str))
+    entregas_dia = cur.fetchall()
+    num_entregadas = sum(1 for e in entregas_dia if e['estado'] == 'entregado')
+    num_pendientes = sum(1 for e in entregas_dia if e['estado'] != 'entregado')
+
+    cur.close()
+    return render_template('informe_diario.html',
+                           fecha=fecha_str,
+                           ventas_dia=ventas_dia, ingresos_ventas=ingresos_ventas, num_ventas=num_ventas,
+                           ingresos_dia=ingresos_dia, num_ingresos=num_ingresos,
+                           salidas_dia=salidas_dia, num_salidas=num_salidas,
+                           entregas_dia=entregas_dia, num_entregadas=num_entregadas, num_pendientes=num_pendientes)
 
 # ─────────────────────────────────────────────
 # INIT DB EN PRIMER REQUEST (MySQL request-scoped en Flask-MySQLdb)

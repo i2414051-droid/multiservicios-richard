@@ -55,6 +55,10 @@
                 </form>
               </td>
               <td>
+                <a href="/entregas/asignar/{{ venta.id }}" class="btn btn-sm btn-outline-info"
+                   title="Crear entrega">
+                  <i class="bi bi-truck"></i>
+                </a>
                 <a href="/historial-compras/eliminar/{{ venta.id }}" class="btn btn-danger btn-sm"
                    onclick="return confirm('¿Eliminar venta #{{ venta.id }}?')">
                   <i class="bi bi-trash"></i>

@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid px-4 mt-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+    <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-calendar-check"></i> Informe del Día</h2>
+    <div class="d-flex gap-2 align-items-center">
+      <form method="GET" class="d-flex gap-2">
+        <input type="date" class="form-control form-control-sm bg-dark text-white border-0" name="fecha" value="{{ fecha }}">
+        <button class="btn btn-sm btn-warning fw-bold">Buscar</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- RESUMEN -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3 stat-card" style="border-radius:18px">
+        <h3 style="color:#f39c12;font-weight:800">{{ num_ventas }}</h3>
+        <small style="color:#aaa">Ventas</small>
+        <div style="color:#27ae60;font-size:14px;font-weight:700">S/ {{ "%.2f"|format(ingresos_ventas) }}</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3 stat-card" style="border-radius:18px">
+        <h3 style="color:#27ae60;font-weight:800">{{ num_ingresos }}</h3>
+        <small style="color:#aaa">Ingresos</small>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3 stat-card" style="border-radius:18px">
+        <h3 style="color:#e74c3c;font-weight:800">{{ num_salidas }}</h3>
+        <small style="color:#aaa">Salidas</small>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3 stat-card" style="border-radius:18px">
+        <h3 style="color:#3498db;font-weight:800">{{ entregas_dia|length }}</h3>
+        <small style="color:#aaa">Entregas</small>
+        <div style="font-size:12px;color:#aaa">
+          <span class="text-success">{{ num_entregadas }} entregadas</span> ·
+          <span class="text-warning">{{ num_pendientes }} pendientes</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VENTAS DEL DÍA -->
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body">
+      <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-receipt me-2"></i>Ventas del día</h5>
+      {% if ventas_dia %}
+      <div class="table-responsive">
+        <table class="table table-dark table-hover" style="border-radius:12px;overflow:hidden">
+          <thead>
+            <tr style="color:#f39c12;border-bottom:2px solid rgba(243,156,18,.3)">
+              <th>#</th><th>Cliente</th><th>Documento</th><th>Total</th><th>Estado</th><th>Hora</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in ventas_dia %}
+            <tr>
+              <td style="color:#f39c12;font-weight:700">{{ v.id }}</td>
+              <td style="color:#ccc">{{ v.nombre or '—' }}</td>
+              <td style="color:#ccc">{{ v.documento or '—' }}</td>
+              <td style="color:#27ae60;font-weight:600">S/ {{ "%.2f"|format(v.total|float) }}</td>
+              <td>
+                {% if v.estado=='pagado' %}<span class="badge bg-success">Pagado</span>
+                {% elif v.estado=='cancelado' %}<span class="badge bg-danger">Cancelado</span>
+                {% else %}<span class="badge bg-warning text-dark">{{ v.estado }}</span>{% endif %}
+              </td>
+              <td style="color:#aaa;font-size:13px">{{ v.fecha }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p style="color:#aaa">No hubo ventas este día</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- INGRESOS DEL DÍA -->
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body">
+      <h5 style="color:#27ae60;font-weight:700"><i class="bi bi-box-arrow-in-down me-2"></i>Ingresos de productos</h5>
+      {% if ingresos_dia %}
+      <div class="table-responsive">
+        <table class="table table-dark table-hover" style="border-radius:12px;overflow:hidden">
+          <thead>
+            <tr style="color:#f39c12;border-bottom:2px solid rgba(243,156,18,.3)">
+              <th>#</th><th>Proveedor</th><th>Items</th><th>Costo</th><th>Hora</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for i in ingresos_dia %}
+            <tr>
+              <td style="color:#f39c12;font-weight:700">{{ i.id }}</td>
+              <td style="color:#ccc">{{ i.proveedor_nombre or '—' }}</td>
+              <td style="color:#ccc">{{ i.items or 0 }}</td>
+              <td style="color:#27ae60">S/ {{ "%.2f"|format(i.costo|float) }}</td>
+              <td style="color:#aaa;font-size:13px">{{ i.fecha }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p style="color:#aaa">No hubo ingresos este día</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- SALIDAS DEL DÍA -->
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body">
+      <h5 style="color:#e74c3c;font-weight:700"><i class="bi bi-box-arrow-up me-2"></i>Salidas de productos</h5>
+      {% if salidas_dia %}
+      <div class="table-responsive">
+        <table class="table table-dark table-hover" style="border-radius:12px;overflow:hidden">
+          <thead>
+            <tr style="color:#f39c12;border-bottom:2px solid rgba(243,156,18,.3)">
+              <th>#</th><th>Cliente</th><th>Items</th><th>Hora</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in salidas_dia %}
+            <tr>
+              <td style="color:#f39c12;font-weight:700">{{ s.id }}</td>
+              <td style="color:#ccc">{{ s.cliente_nombre or '—' }}</td>
+              <td style="color:#ccc">{{ s.items or 0 }}</td>
+              <td style="color:#aaa;font-size:13px">{{ s.fecha }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p style="color:#aaa">No hubo salidas este día</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ENTREGAS DEL DÍA -->
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body">
+      <h5 style="color:#3498db;font-weight:700"><i class="bi bi-truck me-2"></i>Entregas del día</h5>
+      {% if entregas_dia %}
+      <div class="table-responsive">
+        <table class="table table-dark table-hover" style="border-radius:12px;overflow:hidden">
+          <thead>
+            <tr style="color:#f39c12;border-bottom:2px solid rgba(243,156,18,.3)">
+              <th>#</th><th>Cliente</th><th>Total</th><th>Estado</th><th>Fecha entrega</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in entregas_dia %}
+            <tr>
+              <td style="color:#f39c12;font-weight:700">{{ e.id }}</td>
+              <td style="color:#ccc">{{ e.cliente_nombre or '—' }}</td>
+              <td style="color:#27ae60">S/ {{ "%.2f"|format(e.total|float) }}</td>
+              <td>
+                {% if e.estado=='entregado' %}<span class="badge bg-success">Entregado</span>
+                {% elif e.estado=='en camino' %}<span class="badge bg-info text-dark">En camino</span>
+                {% else %}<span class="badge bg-warning text-dark">{{ e.estado }}</span>{% endif %}
+              </td>
+              <td style="color:#aaa;font-size:13px">{{ e.fecha_entrega or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p style="color:#aaa">No hubo entregas este día</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
