@@ -57,6 +57,12 @@
       <a href="/historial" class="menu-item">
         <i class="bi bi-bag-check"></i> Mis compras
       </a>
+      <a href="/mis-entregas" class="menu-item">
+        <i class="bi bi-truck"></i> Entregas
+      </a>
+      <a href="/direcciones" class="menu-item">
+        <i class="bi bi-geo-alt"></i> Direcciones
+      </a>
       {% endif %}
     {% endif %}
   </div>
@@ -71,6 +77,9 @@
         <small>{{session['rol']}}</small>
       </div>
     </div>
+    <a href="/perfil" class="btn boton-personal me-2" title="Mi perfil">
+      <i class="bi bi-gear"></i>
+    </a>
     <a href="/logout" class="btn boton-personal">Salir</a>
     {% else %}
     <a href="/login" class="btn boton-personal">Login</a>

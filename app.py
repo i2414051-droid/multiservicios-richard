@@ -95,6 +95,14 @@ def init_db():
             cur.execute("ALTER TABLE usuarios ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
         except Exception:
             pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN recuperacion_token VARCHAR(255)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN recuperacion_expira DATETIME")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS carrito (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -133,6 +141,14 @@ def init_db():
             pass
         try:
             cur.execute("ALTER TABLE ventas ADD COLUMN estado VARCHAR(20) DEFAULT 'en espera'")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN metodo_pago VARCHAR(50)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN direccion_envio TEXT")
         except Exception:
             pass
         cur.execute("""
@@ -856,43 +872,6 @@ def index():
     productos = cur.fetchall()
     return render_template('index.html', productos=productos, categorias=CATEGORIAS)
 
-@app.route('/agregar/<int:id>')
-def agregar(id):
-    try:
-        usuario = obtener_usuario()
-        cur = mysql.connection.cursor()
-        cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
-        prod = cur.fetchone()
-        if not prod:
-            flash('Producto no encontrado.', 'danger')
-            return redirect('/')
-        stock_disponible = prod['stock']
-        if stock_disponible <= 0:
-            flash('Producto sin stock disponible.', 'danger')
-            return redirect('/')
-        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
-        en_carrito = cur.fetchone()['total'] or 0
-        if en_carrito + 1 > stock_disponible:
-            flash(f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).', 'danger')
-            return redirect('/')
-        cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
-        item = cur.fetchone()
-        if item:
-            cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
-        else:
-            cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
-        mysql.connection.commit()
-        cur.close()
-        flash('Producto agregado al carrito', 'success')
-    except Exception as e:
-        print(f"[agregar_carrito] {e}")
-        try:
-            mysql.connection.rollback()
-        except Exception:
-            pass
-        flash(f'Error: {e}', 'danger')
-    return redirect('/')
-
 @app.route('/carrito')
 def ver_carrito():
     usuario = obtener_usuario()
@@ -906,22 +885,6 @@ def ver_carrito():
     total = sum(p['precio'] * p['cantidad'] for p in productos)
     return render_template('carrito.html', productos=productos, total=total)
 
-@app.route('/aumentar-cantidad/<int:id_producto>')
-def aumentar_cantidad(id_producto):
-    usuario = obtener_usuario()
-    cur = mysql.connection.cursor()
-    cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
-    mysql.connection.commit()
-    return redirect('/carrito')
-
-@app.route('/reducir-cantidad/<int:id_producto>')
-def reducir_cantidad(id_producto):
-    usuario = obtener_usuario()
-    cur = mysql.connection.cursor()
-    cur.execute("UPDATE carrito SET cantidad=cantidad-1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
-    cur.execute("DELETE FROM carrito WHERE producto_id=%s AND usuario_id=%s AND cantidad<=0", (id_producto, usuario))
-    mysql.connection.commit()
-    return redirect('/carrito')
 
 @app.route('/actualizar-cantidad/<int:id_producto>', methods=['POST'])
 def actualizar_cantidad(id_producto):
@@ -948,86 +911,6 @@ def actualizar_cantidad(id_producto):
         return jsonify({'eliminado':False,'cantidad':fila['cantidad'],'subtotal':round(fila['cantidad']*float(fila['precio']),2),'total':round(float(total),2)})
     return jsonify({'eliminado':True,'total':round(float(total),2)})
 
-@app.route('/eliminar_carrito/<int:id>')
-def eliminar_carrito(id):
-    cur = mysql.connection.cursor()
-    cur.execute("DELETE FROM carrito WHERE id=%s", (id,))
-    mysql.connection.commit()
-    return redirect('/carrito')
-
-# ─────────────────────────────────────────────
-# COMPRA
-# ─────────────────────────────────────────────
-@app.route('/comprar')
-def comprar():
-    if 'user_id' not in session:
-        return redirect('/login')
-    user_id = int(session['user_id'])
-    cur = mysql.connection.cursor()
-    if 'guest_id' in session:
-        cur.execute("UPDATE carrito SET usuario_id=%s WHERE usuario_id=%s", (user_id, session['guest_id']))
-        mysql.connection.commit()
-    cur.execute("SELECT * FROM carrito WHERE usuario_id=%s", (user_id,))
-    if not cur.fetchall():
-        flash('Su carrito está vacío', 'warning')
-        return redirect('/carrito')
-    return redirect('/procesar_compra')
-
-@app.route('/procesar_compra')
-def procesar_compra():
-    if 'user_id' not in session:
-        return redirect('/login')
-    user_id = int(session['user_id'])
-    cur = mysql.connection.cursor()
-
-    try:
-        cur.execute(f"""
-            SELECT p.id, p.nombre, p.precio, c.cantidad
-            FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
-            WHERE c.usuario_id=%s
-        """, (user_id,))
-        items = cur.fetchall()
-        if not items:
-            return redirect('/carrito')
-
-        total = 0
-        for item in items:
-            cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (item['id'],))
-            row = cur.fetchone()
-            stock = row['stock'] if row else 0
-            if stock < item['cantidad']:
-                flash(f'Stock insuficiente para: {item["nombre"]}. Solo quedan {stock} unidad(es).', 'danger')
-                return redirect('/carrito')
-            total += item['precio'] * item['cantidad']
-
-        cur.execute("INSERT INTO ventas (cliente_id, total) VALUES(%s,%s)", (user_id, total))
-        venta_id = cur.lastrowid
-
-        for item in items:
-            cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
-                        (venta_id, item['id'], item['cantidad'], item['precio']))
-            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
-            verificar_stock_bajo(cur, item['id'])
-
-        cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
-        mysql.connection.commit()
-
-        # Auto-enviar boleta al cliente por email (en segundo plano)
-        correo_cliente = session.get('correo','')
-        if correo_cliente:
-            def _enviar_boleta():
-                with app.app_context():
-                    enviar_boleta_cliente(correo_cliente, venta_id)
-            threading.Thread(target=_enviar_boleta, daemon=True).start()
-
-        return redirect(f'/confirmacion/{venta_id}')
-    except Exception as e:
-        mysql.connection.rollback()
-        print(f"[procesar_compra] {e}")
-        flash('Ocurrió un error al procesar tu compra. Inténtalo de nuevo.', 'danger')
-        return redirect('/carrito')
-    finally:
-        cur.close()
 
 # ─────────────────────────────────────────────
 # BOLETA
@@ -1067,38 +950,6 @@ def preview_boleta():
     total = sum(p['cantidad'] * p['precio'] for p in productos)
     return render_template('preview_boleta.html', productos=productos, total=total,
                            doc=doc, nombre=nombre, venta_id=venta_id)
-
-@app.route('/guardar_boleta')
-def guardar_boleta():
-    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
-        return redirect('/login')
-    venta_id = request.args.get('venta_id')
-    doc      = request.args.get('doc')
-    nombre   = request.args.get('nombre')
-    cur = mysql.connection.cursor()
-    cur.execute("UPDATE ventas SET documento=%s, nombre=%s WHERE id=%s", (doc, nombre, venta_id))
-    mysql.connection.commit()
-    return redirect(f'/boleta_pdf/{venta_id}')
-
-@app.route('/boleta_pdf/<int:venta_id>')
-def boleta_pdf(venta_id):
-    pdf_bytes, _ = generar_boleta_pdf(venta_id)
-    if not pdf_bytes:
-        return "Venta no encontrada"
-    filename = f"boleta_{venta_id}.pdf"
-    filepath = os.path.join('static', filename)
-    with open(filepath, 'wb') as f:
-        f.write(pdf_bytes)
-    return send_file(filepath, as_attachment=True)
-
-@app.route('/confirmacion/<int:id>')
-def confirmacion(id):
-    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
-        return redirect('/login')
-    cur = mysql.connection.cursor()
-    cur.execute("SELECT total, fecha FROM ventas WHERE id=%s", (id,))
-    venta = cur.fetchone()
-    return render_template('confirmacion.html', venta=venta, id=id)
 
 # ─────────────────────────────────────────────
 # HISTORIAL
@@ -2025,6 +1876,461 @@ def informe_diario():
                            ingresos_dia=ingresos_dia, num_ingresos=num_ingresos,
                            salidas_dia=salidas_dia, num_salidas=num_salidas,
                            entregas_dia=entregas_dia, num_entregadas=num_entregadas, num_pendientes=num_pendientes)
+
+# ─────────────────────────────────────────────
+# PRO02: DETALLE DE PRODUCTO
+# ─────────────────────────────────────────────
+@app.route('/producto/<int:id>')
+def detalle_producto(id):
+    cur = mysql.connection.cursor()
+    cur.execute(f"SELECT * FROM {ALMACEN_DB}.productos WHERE id=%s AND estado='activo'", (id,))
+    producto = cur.fetchone()
+    cur.close()
+    if not producto:
+        flash('Producto no encontrado.', 'danger')
+        return redirect('/')
+    return render_template('producto_detalle.html', producto=producto)
+
+# ─────────────────────────────────────────────
+# PRO17-18: DIRECCIONES DEL CLIENTE
+# ─────────────────────────────────────────────
+@app.route('/direcciones')
+def mis_direcciones():
+    if 'user_id' not in session:
+        return redirect('/login')
+    user_id = session['user_id']
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT * FROM direcciones WHERE usuario_id=%s ORDER BY predeterminada DESC, created_at DESC", (user_id,))
+    dirs = cur.fetchall()
+    cur.close()
+    return render_template('direcciones.html', direcciones=dirs)
+
+@app.route('/direcciones/nueva', methods=['GET','POST'])
+def nueva_direccion():
+    if 'user_id' not in session:
+        return redirect('/login')
+    if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/direcciones')
+        user_id = session['user_id']
+        direccion = request.form.get('direccion', '').strip()
+        distrito = request.form.get('distrito', '').strip()
+        referencia = request.form.get('referencia', '').strip()
+        predeterminada = 1 if request.form.get('predeterminada') else 0
+        if not direccion:
+            flash('La dirección es obligatoria.', 'danger')
+            return redirect('/direcciones/nueva')
+        cur = mysql.connection.cursor()
+        if predeterminada:
+            cur.execute("UPDATE direcciones SET predeterminada=0 WHERE usuario_id=%s", (user_id,))
+        cur.execute("INSERT INTO direcciones (usuario_id, direccion, distrito, referencia, predeterminada) VALUES (%s,%s,%s,%s,%s)",
+                    (user_id, direccion, distrito, referencia, predeterminada))
+        mysql.connection.commit()
+        cur.close()
+        flash('Dirección agregada.', 'success')
+        return redirect('/direcciones')
+    return render_template('direccion_form.html', editar=None)
+
+@app.route('/direcciones/editar/<int:id>', methods=['GET','POST'])
+def editar_direccion(id):
+    if 'user_id' not in session:
+        return redirect('/login')
+    user_id = session['user_id']
+    cur = mysql.connection.cursor()
+    if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/direcciones')
+        direccion = request.form.get('direccion', '').strip()
+        distrito = request.form.get('distrito', '').strip()
+        referencia = request.form.get('referencia', '').strip()
+        predeterminada = 1 if request.form.get('predeterminada') else 0
+        if not direccion:
+            flash('La dirección es obligatoria.', 'danger')
+            return redirect(f'/direcciones/editar/{id}')
+        if predeterminada:
+            cur.execute("UPDATE direcciones SET predeterminada=0 WHERE usuario_id=%s", (user_id,))
+        cur.execute("UPDATE direcciones SET direccion=%s, distrito=%s, referencia=%s, predeterminada=%s WHERE id=%s AND usuario_id=%s",
+                    (direccion, distrito, referencia, predeterminada, id, user_id))
+        mysql.connection.commit()
+        cur.close()
+        flash('Dirección actualizada.', 'success')
+        return redirect('/direcciones')
+    cur.execute("SELECT * FROM direcciones WHERE id=%s AND usuario_id=%s", (id, user_id))
+    dir_editar = cur.fetchone()
+    cur.close()
+    if not dir_editar:
+        flash('Dirección no encontrada.', 'danger')
+        return redirect('/direcciones')
+    return render_template('direccion_form.html', editar=dir_editar)
+
+@app.route('/direcciones/eliminar/<int:id>')
+def eliminar_direccion(id):
+    if 'user_id' not in session:
+        return redirect('/login')
+    user_id = session['user_id']
+    cur = mysql.connection.cursor()
+    cur.execute("DELETE FROM direcciones WHERE id=%s AND usuario_id=%s", (id, user_id))
+    mysql.connection.commit()
+    cur.close()
+    flash('Dirección eliminada.', 'success')
+    return redirect('/direcciones')
+
+# ─────────────────────────────────────────────
+# PRO19+PRO21: CHECKOUT (Dirección → Pago → Resumen)
+# ─────────────────────────────────────────────
+@app.route('/checkout')
+def checkout():
+    if 'user_id' not in session:
+        return redirect('/login')
+    user_id = int(session['user_id'])
+    cur = mysql.connection.cursor()
+    cur.execute(f"""
+        SELECT c.id, c.producto_id, p.nombre, p.precio, p.imagen, c.cantidad
+        FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
+        WHERE c.usuario_id=%s
+    """, (user_id,))
+    items = cur.fetchall()
+    if not items:
+        flash('Su carrito está vacío.', 'warning')
+        return redirect('/carrito')
+    total = sum(p['precio'] * p['cantidad'] for p in items)
+    cur.execute("SELECT * FROM direcciones WHERE usuario_id=%s ORDER BY predeterminada DESC", (user_id,))
+    direcciones = cur.fetchall()
+    cur.execute("SELECT correo, nombre FROM usuarios WHERE id=%s", (user_id,))
+    usuario = cur.fetchone()
+    cur.close()
+    return render_template('checkout.html', items=items, total=total,
+                           direcciones=direcciones, usuario=usuario)
+
+@app.route('/procesar_compra', methods=['POST'])
+def procesar_compra():
+    if 'user_id' not in session:
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect('/checkout')
+    user_id = int(session['user_id'])
+    metodo_pago = request.form.get('metodo_pago', 'efectivo')
+    direccion_envio = request.form.get('direccion_envio', '')
+    cur = mysql.connection.cursor()
+    try:
+        cur.execute(f"""
+            SELECT p.id, p.nombre, p.precio, c.cantidad
+            FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
+            WHERE c.usuario_id=%s
+        """, (user_id,))
+        items = cur.fetchall()
+        if not items:
+            return redirect('/carrito')
+        total = 0
+        for item in items:
+            cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (item['id'],))
+            row = cur.fetchone()
+            stock = row['stock'] if row else 0
+            if stock < item['cantidad']:
+                flash(f'Stock insuficiente para: {item["nombre"]}. Solo quedan {stock} unidad(es).', 'danger')
+                return redirect('/carrito')
+            total += item['precio'] * item['cantidad']
+        cur.execute("INSERT INTO ventas (cliente_id, total, metodo_pago, direccion_envio) VALUES(%s,%s,%s,%s)",
+                    (user_id, total, metodo_pago, direccion_envio))
+        venta_id = cur.lastrowid
+        for item in items:
+            cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
+                        (venta_id, item['id'], item['cantidad'], item['precio']))
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
+            verificar_stock_bajo(cur, item['id'])
+        cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
+        mysql.connection.commit()
+        return redirect(f'/confirmacion/{venta_id}')
+    except Exception as e:
+        mysql.connection.rollback()
+        print(f"[procesar_compra] {e}")
+        flash('Error al procesar la compra.', 'danger')
+        return redirect('/carrito')
+    finally:
+        cur.close()
+
+@app.route('/confirmacion/<int:id>')
+def confirmacion(id):
+    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT * FROM ventas WHERE id=%s", (id,))
+    venta = cur.fetchone()
+    if not venta:
+        flash('Venta no encontrada.', 'danger')
+        return redirect('/')
+    cur.execute(f"""
+        SELECT p.nombre, p.imagen, d.cantidad, d.precio
+        FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
+        WHERE d.venta_id=%s
+    """, (id,))
+    productos = cur.fetchall()
+    cur.close()
+    return render_template('confirmacion.html', venta=venta, productos=productos, id=id)
+
+# ─────────────────────────────────────────────
+# PERFIL DEL CLIENTE
+# ─────────────────────────────────────────────
+@app.route('/perfil', methods=['GET','POST'])
+def perfil():
+    if 'user_id' not in session:
+        return redirect('/login')
+    user_id = session['user_id']
+    cur = mysql.connection.cursor()
+    if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/perfil')
+        nuevo_correo = request.form.get('correo', '').strip()
+        if nuevo_correo and nuevo_correo != session.get('correo'):
+            cur.execute("SELECT id FROM usuarios WHERE correo=%s AND id!=%s", (nuevo_correo, user_id))
+            if cur.fetchone():
+                flash('Ese correo ya está en uso.', 'danger')
+            else:
+                cur.execute("UPDATE usuarios SET correo=%s WHERE id=%s", (nuevo_correo, user_id))
+                mysql.connection.commit()
+                session['correo'] = nuevo_correo
+                flash('Correo actualizado.', 'success')
+        cur.close()
+        return redirect('/perfil')
+    cur.execute("SELECT id, correo, rol, estado, created_at FROM usuarios WHERE id=%s", (user_id,))
+    usuario = cur.fetchone()
+    cur.close()
+    return render_template('perfil.html', usuario=usuario)
+
+@app.route('/cambiar-password', methods=['POST'])
+def cambiar_password():
+    if 'user_id' not in session:
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect('/perfil')
+    user_id = session['user_id']
+    actual = request.form.get('actual', '')
+    nueva = request.form.get('nueva', '')
+    confirmar = request.form.get('confirmar_password', '')
+    if not actual or not nueva:
+        flash('Completa todos los campos.', 'danger')
+        return redirect('/perfil')
+    if len(nueva) < 6:
+        flash('La nueva contraseña debe tener al menos 6 caracteres.', 'danger')
+        return redirect('/perfil')
+    if nueva != confirmar:
+        flash('Las contraseñas no coinciden.', 'danger')
+        return redirect('/perfil')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT password FROM usuarios WHERE id=%s", (user_id,))
+    user = cur.fetchone()
+    if not user or not bcrypt.check_password_hash(user['password'], actual):
+        flash('La contraseña actual es incorrecta.', 'danger')
+        cur.close()
+        return redirect('/perfil')
+    h = bcrypt.generate_password_hash(nueva).decode('utf-8')
+    cur.execute("UPDATE usuarios SET password=%s WHERE id=%s", (h, user_id))
+    mysql.connection.commit()
+    cur.close()
+    flash('Contraseña cambiada correctamente.', 'success')
+    return redirect('/perfil')
+
+# ─────────────────────────────────────────────
+# SEGUIMIENTO DE ENTREGAS PARA EL CLIENTE
+# ─────────────────────────────────────────────
+@app.route('/mis-entregas')
+def mis_entregas():
+    if 'user_id' not in session:
+        return redirect('/login')
+    user_id = session['user_id']
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT e.id, e.estado, e.direccion_envio, e.fecha_estimada, e.fecha_entrega, e.notas,
+               v.id AS venta_id, v.total, v.fecha AS venta_fecha
+        FROM seguimiento_entregas e
+        JOIN ventas v ON e.venta_id=v.id
+        WHERE v.cliente_id=%s
+        ORDER BY e.created_at DESC
+    """, (user_id,))
+    entregas = cur.fetchall()
+    cur.close()
+    return render_template('mis_entregas.html', entregas=entregas)
+
+# ─────────────────────────────────────────────
+# RECUPERAR CONTRASEÑA
+# ─────────────────────────────────────────────
+@app.route('/recuperar-password', methods=['GET','POST'])
+def recuperar_password():
+    if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect('/recuperar-password')
+        correo = request.form.get('correo', '').strip()
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT id FROM usuarios WHERE correo=%s", (correo,))
+        user = cur.fetchone()
+        if user:
+            token = secrets.token_urlsafe(48)
+            expira = datetime.now() + timedelta(hours=2)
+            cur.execute("UPDATE usuarios SET recuperacion_token=%s, recuperacion_expira=%s WHERE id=%s",
+                        (token, expira, user['id']))
+            mysql.connection.commit()
+            flash('Si el correo existe, recibirás un enlace para restablecer tu contraseña.', 'success')
+        else:
+            flash('Si el correo existe, recibirás un enlace para restablecer tu contraseña.', 'success')
+        cur.close()
+        return redirect('/login')
+    return render_template('recuperar_password.html')
+
+@app.route('/restablecer-password/<token>', methods=['GET','POST'])
+def restablecer_password(token):
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id FROM usuarios WHERE recuperacion_token=%s AND recuperacion_expira>%s",
+                (token, datetime.now()))
+    user = cur.fetchone()
+    if not user:
+        cur.close()
+        flash('El enlace es inválido o ha expirado.', 'danger')
+        return redirect('/login')
+    if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido.', 'danger')
+            return redirect(f'/restablecer-password/{token}')
+        nueva = request.form.get('nueva', '')
+        confirmar = request.form.get('confirmar_password', '')
+        if len(nueva) < 6:
+            flash('La contraseña debe tener al menos 6 caracteres.', 'danger')
+            return redirect(f'/restablecer-password/{token}')
+        if nueva != confirmar:
+            flash('Las contraseñas no coinciden.', 'danger')
+            return redirect(f'/restablecer-password/{token}')
+        h = bcrypt.generate_password_hash(nueva).decode('utf-8')
+        cur.execute("UPDATE usuarios SET password=%s, recuperacion_token=NULL, recuperacion_expira=NULL WHERE id=%s",
+                    (h, user['id']))
+        mysql.connection.commit()
+        cur.close()
+        flash('Contraseña restablecida correctamente. Ya puedes iniciar sesión.', 'success')
+        return redirect('/login')
+    cur.close()
+    return render_template('restablecer_password.html', token=token)
+
+# ─────────────────────────────────────────────
+# FIX: BOLETA PDF CON AUTH + GUARDAR BOLETA CON OWNERSHIP
+# ─────────────────────────────────────────────
+@app.route('/boleta_pdf/<int:venta_id>')
+def boleta_pdf(venta_id):
+    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+        return redirect('/login')
+    user_id = session.get('user_id')
+    if user_id:
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT id FROM ventas WHERE id=%s AND cliente_id=%s", (venta_id, user_id))
+        if not cur.fetchone():
+            cur.close()
+            flash('No tienes acceso a esta boleta.', 'danger')
+            return redirect('/')
+        cur.close()
+    pdf_bytes, _ = generar_boleta_pdf(venta_id)
+    if not pdf_bytes:
+        flash('Venta no encontrada.', 'danger')
+        return redirect('/')
+    filename = f"boleta_{venta_id}.pdf"
+    filepath = os.path.join('static', filename)
+    with open(filepath, 'wb') as f:
+        f.write(pdf_bytes)
+    return send_file(filepath, as_attachment=True)
+
+@app.route('/guardar_boleta', methods=['POST'])
+def guardar_boleta():
+    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+        return redirect('/login')
+    venta_id = request.form.get('venta_id')
+    doc = request.form.get('doc', '')
+    nombre = request.form.get('nombre', '')
+    user_id = session.get('user_id')
+    cur = mysql.connection.cursor()
+    if user_id:
+        cur.execute("SELECT id FROM ventas WHERE id=%s AND cliente_id=%s", (venta_id, user_id))
+        if not cur.fetchone():
+            cur.close()
+            flash('No tienes acceso a esta venta.', 'danger')
+            return redirect('/')
+    cur.execute("UPDATE ventas SET documento=%s, nombre=%s WHERE id=%s", (doc, nombre, venta_id))
+    mysql.connection.commit()
+    cur.close()
+    return redirect(f'/boleta_pdf/{venta_id}')
+
+# ─────────────────────────────────────────────
+# FIX: ELIMINAR CARRITO CON OWNERSHIP CHECK
+# ─────────────────────────────────────────────
+@app.route('/eliminar_carrito/<int:id>')
+def eliminar_carrito(id):
+    usuario = obtener_usuario()
+    cur = mysql.connection.cursor()
+    cur.execute("DELETE FROM carrito WHERE id=%s AND usuario_id=%s", (id, usuario))
+    mysql.connection.commit()
+    cur.close()
+    return redirect('/carrito')
+
+# ─────────────────────────────────────────────
+# FIX: AUMENTAR CANTIDAD CON VALIDACIÓN DE STOCK
+# ─────────────────────────────────────────────
+@app.route('/aumentar-cantidad/<int:id_producto>')
+def aumentar_cantidad(id_producto):
+    usuario = obtener_usuario()
+    cur = mysql.connection.cursor()
+    cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s AND estado='activo'", (id_producto,))
+    prod = cur.fetchone()
+    if prod:
+        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id_producto))
+        en_carrito = cur.fetchone()['total'] or 0
+        if en_carrito < prod['stock']:
+            cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
+            mysql.connection.commit()
+        else:
+            flash('No hay más stock disponible.', 'warning')
+    cur.close()
+    return redirect('/carrito')
+
+# ─────────────────────────────────────────────
+# FIX: AGREGAR SOLO PRODUCTOS ACTIVOS
+# ─────────────────────────────────────────────
+@app.route('/agregar/<int:id>')
+def agregar(id):
+    try:
+        usuario = obtener_usuario()
+        cur = mysql.connection.cursor()
+        cur.execute(f"SELECT stock, estado FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
+        prod = cur.fetchone()
+        if not prod or prod['estado'] != 'activo':
+            flash('Producto no disponible.', 'danger')
+            return redirect('/')
+        stock_disponible = prod['stock']
+        if stock_disponible <= 0:
+            flash('Producto sin stock disponible.', 'danger')
+            return redirect('/')
+        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        en_carrito = cur.fetchone()['total'] or 0
+        if en_carrito + 1 > stock_disponible:
+            flash(f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).', 'danger')
+            return redirect('/')
+        cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        item = cur.fetchone()
+        if item:
+            cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        else:
+            cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
+        mysql.connection.commit()
+        cur.close()
+        flash('Producto agregado al carrito', 'success')
+    except Exception as e:
+        print(f"[agregar_carrito] {e}")
+        try:
+            mysql.connection.rollback()
+        except Exception:
+            pass
+        flash('Error al agregar al carrito.', 'danger')
+    return redirect('/')
 
 # ─────────────────────────────────────────────
 # INIT DB EN PRIMER REQUEST (MySQL request-scoped en Flask-MySQLdb)

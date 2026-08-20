@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb" style="background:transparent;color:#aaa">
+      <li class="breadcrumb-item"><a href="/" style="color:#f39c12">Inicio</a></li>
+      <li class="breadcrumb-item active" style="color:#ccc">{{ producto.nombre }}</li>
+    </ol>
+  </nav>
+
+  <div class="row g-4">
+    <!-- IMAGEN -->
+    <div class="col-md-5 text-center">
+      {% if producto.imagen %}
+      <img src="/static/{{ producto.imagen }}" alt="{{ producto.nombre }}"
+           style="max-width:100%;border-radius:18px;border:2px solid rgba(243,156,18,.3)">
+      {% else %}
+      <div style="background:#08111f;border-radius:18px;padding:80px;border:2px solid rgba(243,156,18,.3)">
+        <i class="bi bi-image" style="font-size:80px;color:#333"></i>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- DETALLES -->
+    <div class="col-md-7">
+      <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+        <div class="card-body p-4">
+          <h2 style="color:#f39c12;font-weight:800">{{ producto.nombre }}</h2>
+
+          <div class="d-flex align-items-center gap-3 mt-3 mb-3">
+            <h3 style="color:#27ae60;font-weight:800;margin:0">S/ {{ "%.2f"|format(producto.precio|float) }}</h3>
+            {% if producto.stock > 0 %}
+              <span class="badge bg-success" style="font-size:14px">Disponible ({{ producto.stock }})</span>
+            {% else %}
+              <span class="badge bg-danger" style="font-size:14px">Sin stock</span>
+            {% endif %}
+          </div>
+
+          {% if producto.categoria %}
+          <p style="color:#aaa"><i class="bi bi-tag me-1" style="color:#f39c12"></i> {{ producto.categoria }}</p>
+          {% endif %}
+
+          <hr style="border-color:rgba(243,156,18,.2)">
+
+          <h6 style="color:#f39c12;font-weight:700">Descripción</h6>
+          <p style="color:#ccc;line-height:1.7">
+            {{ producto.descripcion or 'Sin descripción disponible.' }}
+          </p>
+
+          {% if producto.stock > 0 %}
+          <a href="/agregar/{{ producto.id }}" class="btn btn-warning btn-lg fw-bold mt-3" style="border-radius:15px">
+            <i class="bi bi-cart-plus me-1"></i> Agregar al carrito
+          </a>
+          {% else %}
+          <button class="btn btn-secondary btn-lg mt-3" disabled style="border-radius:15px">
+            <i class="bi bi-x-circle me-1"></i> Sin stock
+          </button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
