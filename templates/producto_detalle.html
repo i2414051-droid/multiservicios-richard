@@ -15,7 +15,7 @@
       <img src="/static/{{ producto.imagen }}" alt="{{ producto.nombre }}"
            style="max-width:100%;border-radius:18px;border:2px solid rgba(243,156,18,.3)">
       {% else %}
-      <div style="background:#08111f;border-radius:18px;padding:80px;border:2px solid rgba(243,156,18,.3)">
+      <div class="tc-gold" style="border-radius:18px;padding:80px">
         <i class="bi bi-image" style="font-size:80px;color:#333"></i>
       </div>
       {% endif %}
@@ -23,7 +23,7 @@
 
     <!-- DETALLES -->
     <div class="col-md-7">
-      <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+      <div class="card" class="tc">
         <div class="card-body p-4">
           <h2 style="color:#f39c12;font-weight:800">{{ producto.nombre }}</h2>
 

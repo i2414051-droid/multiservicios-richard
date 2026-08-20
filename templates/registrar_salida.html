@@ -10,7 +10,7 @@
     <div class="row g-3 mb-4">
       <div class="col-md-6">
         <label class="form-label fw-bold">Venta asociada (opcional)</label>
-        <select name="venta_id" class="form-select" style="background:#08111f;color:white;border:1px solid #f39c12">
+        <select name="venta_id" class="form-select" class="tc-white">
           <option value="">-- Sin venta asociada --</option>
           {% for v in ventas %}
           <option value="{{ v.id }}">#{{ v.id }} — {{ v.nombre or 'Sin nombre' }} (S/ {{ "%.2f"|format(v.total|float) }}) — {{ v.fecha.strftime('%d/%m/%Y') if v.fecha else '' }}</option>
@@ -20,12 +20,12 @@
       <div class="col-md-6">
         <label class="form-label fw-bold">Notas / Observaciones</label>
         <input name="notas" class="form-control" placeholder="Ej: Salida por venta del día"
-               style="background:#08111f;color:white;border:1px solid rgba(243,156,18,.3)">
+               class="tc-white">
       </div>
     </div>
 
-    <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
-      <div class="card-header d-flex justify-content-between align-items-center" style="background:rgba(243,156,18,.1);border-bottom:1px solid rgba(243,156,18,.15)">
+    <div class="card mb-4" class="tc">
+      <div class="card-header d-flex justify-content-between align-items-center" class="tc-header">
         <h5 class="mb-0" style="color:#f39c12;font-weight:700">Productos a registrar salida</h5>
         <button type="button" class="btn btn-sm" style="background:#f39c12;color:#000;font-weight:bold;border-radius:15px" onclick="agregarFila()">
           <i class="bi bi-plus"></i> Agregar producto
@@ -33,7 +33,7 @@
       </div>
       <div class="card-body p-0">
         <table class="table table-dark table-hover mb-0 text-center align-middle" id="tabla-salidas">
-          <thead style="background:rgba(243,156,18,.08)">
+          <thead class="tc-accent">
             <tr>
               <th>Producto</th>
               <th>Stock actual</th>
@@ -44,7 +44,7 @@
           <tbody>
             <tr>
               <td>
-                <select name="producto_id[]" class="form-select form-select-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3)" required onchange="mostrarStock(this)">
+                <select name="producto_id[]" class="form-select form-select-sm" class="form-control ti" required onchange="mostrarStock(this)">
                   <option value="">Seleccionar...</option>
                   {% for p in productos %}
                   <option value="{{ p.id }}" data-stock="{{ p.stock }}">{{ p.nombre }}</option>
@@ -52,7 +52,7 @@
                 </select>
               </td>
               <td class="stock-val" style="color:#aaa">-</td>
-              <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3);width:80px;margin:auto" required></td>
+              <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" class="form-control ti" style="width:80px;margin:auto" required></td>
               <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
             </tr>
           </tbody>
@@ -75,7 +75,7 @@ function agregarFila() {
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td>
-      <select name="producto_id[]" class="form-select form-select-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3)" required onchange="mostrarStock(this)">
+      <select name="producto_id[]" class="form-select form-select-sm" class="form-control ti" required onchange="mostrarStock(this)">
         <option value="">Seleccionar...</option>
         {% for p in productos %}
         <option value="{{ p.id }}">{{ p.nombre }}</option>
@@ -83,7 +83,7 @@ function agregarFila() {
       </select>
     </td>
     <td class="stock-val" style="color:#aaa">-</td>
-    <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3);width:80px;margin:auto" required></td>
+    <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" class="form-control ti" style="width:80px;margin:auto" required></td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
   `;
   tbody.appendChild(tr);

@@ -10,15 +10,15 @@
     <div class="row g-4 mt-2">
       <!-- RESUMEN DE COMPRA -->
       <div class="col-lg-7">
-        <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+        <div class="card mb-4" class="tc">
           <div class="card-body">
             <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-bag me-2"></i>Productos ({{ items|length }})</h5>
             {% for item in items %}
-            <div class="d-flex align-items-center gap-3 py-2" style="border-bottom:1px solid rgba(255,255,255,.05)">
+            <div class="d-flex align-items-center gap-3 py-2" class="t-line">
               {% if item.imagen %}
               <img src="/static/{{ item.imagen }}" style="width:50px;height:50px;object-fit:cover;border-radius:10px" alt="">
               {% else %}
-              <div style="width:50px;height:50px;background:#1a1a2e;border-radius:10px;display:flex;align-items:center;justify-content:center">
+              <div style="width:50px;height:50px;background:var(--bg-body-3);border-radius:10px;display:flex;align-items:center;justify-content:center">
                 <i class="bi bi-image" style="color:#555"></i>
               </div>
               {% endif %}
@@ -38,7 +38,7 @@
         </div>
 
         <!-- DIRECCIÓN DE ENVÍO -->
-        <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+        <div class="card mb-4" class="tc">
           <div class="card-body">
             <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-geo-alt me-2"></i>Dirección de envío</h5>
             {% if direcciones %}
@@ -72,7 +72,7 @@
 
       <!-- MÉTODO DE PAGO -->
       <div class="col-lg-5">
-        <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+        <div class="card" class="tc">
           <div class="card-body">
             <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-wallet2 me-2"></i>Método de pago</h5>
 
@@ -130,10 +130,10 @@
 <style>
   .metodo-pago {
     display:flex;align-items:center;gap:12px;padding:14px 16px;
-    background:rgba(255,255,255,.03);border:2px solid transparent;
+    background:var(--bg-card);border:2px solid transparent;
     border-radius:12px;cursor:pointer;transition:.2s;
   }
   .metodo-pago:hover { border-color:rgba(243,156,18,.3); }
-  .metodo-pago.active { border-color:#f39c12;background:rgba(243,156,18,.08); }
+  .metodo-pago.active { border-color:#f39c12;background:var(--tc-accent,rgba(243,156,18,.08)); }
 </style>
 {% endblock %}

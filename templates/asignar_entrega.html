@@ -6,7 +6,7 @@
   <div class="row g-4 mt-3">
     <!-- INFO DE LA VENTA -->
     <div class="col-lg-5">
-      <div class="card mb-3" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+      <div class="card mb-3" class="tc">
         <div class="card-body">
           <h5 style="color:#f39c12;font-weight:700">Datos de la venta</h5>
           <p style="color:#ccc"><i class="bi bi-person me-1"></i> {{ venta.nombre or '—' }}</p>
@@ -17,11 +17,11 @@
 
       <!-- DIRECCIONES GUARDADAS -->
       {% if direcciones %}
-      <div class="card mb-3" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+      <div class="card mb-3" class="tc">
         <div class="card-body">
           <h6 style="color:#f39c12;font-weight:700">Direcciones guardadas</h6>
           {% for d in direcciones %}
-          <div class="p-2 mb-2" style="background:rgba(243,156,18,.08);border-radius:10px;cursor:pointer"
+          <div class="p-2 mb-2" class="tc-accent" style="border-radius:10px;cursor:pointer"
                onclick="document.getElementById('direccion').value='{{ d.direccion }}, {{ d.distrito }}'">
             <small style="color:#aaa"><i class="bi bi-geo-alt me-1"></i> {{ d.direccion }}, {{ d.distrito }}
               {% if d.referencia %} — {{ d.referencia }}{% endif %}</small>
@@ -34,7 +34,7 @@
 
     <!-- FORMULARIO -->
     <div class="col-lg-7">
-      <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+      <div class="card" class="tc">
         <div class="card-body">
           <form method="POST">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -58,7 +58,7 @@
             <p style="color:#aaa;font-size:13px" class="mb-3">Marca los productos que incluirás en esta entrega</p>
 
             {% for p in productos_venta %}
-            <div class="d-flex align-items-center gap-3 p-2 mb-2" style="background:rgba(243,156,18,.08);border-radius:10px">
+            <div class="d-flex align-items-center gap-3 p-2 mb-2" class="tc-accent" style="border-radius:10px">
               <input type="checkbox" name="producto_id[]" value="{{ p.producto_id }}" class="form-check-input" checked
                      onchange="this.closest('.d-flex').querySelector('input[type=number]').disabled=!this.checked">
               <div class="flex-grow-1" style="color:#ccc">

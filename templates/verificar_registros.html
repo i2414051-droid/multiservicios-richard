@@ -58,7 +58,7 @@
   <!-- INFO DETALLADA -->
   <div class="row g-3 mb-4">
     <div class="col-md-4">
-      <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.2);border-radius:18px">
+      <div class="card tc" style="border-radius:18px">
         <div class="card-body text-center">
           <small style="color:#aaa">Detalle ventas</small>
           <h4 style="color:#f39c12;font-weight:800">{{ stats.total_detalle_ventas }}</h4>
@@ -66,7 +66,7 @@
       </div>
     </div>
     <div class="col-md-4">
-      <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.2);border-radius:18px">
+      <div class="card tc" style="border-radius:18px">
         <div class="card-body text-center">
           <small style="color:#aaa">Detalle ingresos</small>
           <h4 style="color:#27ae60;font-weight:800">{{ stats.total_detalle_ingresos }}</h4>
@@ -74,7 +74,7 @@
       </div>
     </div>
     <div class="col-md-4">
-      <div class="card" style="background:#08111f;border:1px solid rgba(243,156,18,.2);border-radius:18px">
+      <div class="card tc" style="border-radius:18px">
         <div class="card-body text-center">
           <small style="color:#aaa">Detalle salidas</small>
           <h4 style="color:#e74c3c;font-weight:800">{{ stats.total_detalle_salidas }}</h4>
@@ -84,7 +84,7 @@
   </div>
 
   <!-- LISTA DE REGISTROS -->
-  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+  <div class="card mb-4" class="tc">
     <div class="card-body">
       <h5 style="color:#f39c12;font-weight:700" class="mb-3">
         {% if seccion=='ventas' %}Últimas 50 Ventas
@@ -98,7 +98,7 @@
       {% if seccion == 'resumen' %}
       <div class="row g-3">
         <div class="col-md-6 col-lg-4">
-          <div class="p-3" style="background:rgba(243,156,18,.08);border-radius:12px">
+          <div class="p-3" class="tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-box-seam me-1"></i> Inventario</h6>
             <p style="color:#ccc;margin:0">Productos: <strong>{{ stats.total_productos }}</strong></p>
             <p style="color:#ccc;margin:0">Proveedores: <strong>{{ stats.total_proveedores }}</strong></p>
@@ -106,7 +106,7 @@
           </div>
         </div>
         <div class="col-md-6 col-lg-4">
-          <div class="p-3" style="background:rgba(243,156,18,.08);border-radius:12px">
+          <div class="p-3" class="tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-receipt me-1"></i> Movimientos</h6>
             <p style="color:#ccc;margin:0">Ventas: <strong>{{ stats.total_ventas }}</strong> ({{ stats.total_detalle_ventas }} items)</p>
             <p style="color:#ccc;margin:0">Ingresos: <strong>{{ stats.total_ingresos }}</strong> ({{ stats.total_detalle_ingresos }} items)</p>
@@ -114,13 +114,13 @@
           </div>
         </div>
         <div class="col-md-6 col-lg-4">
-          <div class="p-3" style="background:rgba(243,156,18,.08);border-radius:12px">
+          <div class="p-3" class="tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-truck me-1"></i> Entregas</h6>
             <p style="color:#ccc;margin:0">Total: <strong>{{ stats.total_entregas }}</strong></p>
           </div>
         </div>
         <div class="col-12">
-          <div class="p-3" style="background:rgba(243,156,18,.08);border-radius:12px">
+          <div class="p-3" class="tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-people me-1"></i> Usuarios</h6>
             <p style="color:#ccc;margin:0">Total: <strong>{{ stats.total_usuarios }}</strong></p>
           </div>

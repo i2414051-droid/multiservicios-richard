@@ -12,8 +12,8 @@
   </div>
 
   <!-- FORMULARIO AGREGAR / EDITAR -->
-  <div class="card border-0 shadow mb-4" style="background:#1e1e2e;">
-    <div class="card-header" style="background:#2a2a3d;">
+  <div class="card border-0 shadow mb-4" class="tc-admin">
+    <div class="card-header" class="tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-person-plus me-2 text-info"></i>
         {% if editar %}Editar Proveedor: {{ editar.nombre }}{% else %}Agregar Nuevo Proveedor{% endif %}
@@ -116,8 +116,8 @@
   </form>
 
   <!-- TABLA PROVEEDORES -->
-  <div class="card border-0 shadow" style="background:#1e1e2e;">
-    <div class="card-header" style="background:#2a2a3d;">
+  <div class="card border-0 shadow" class="tc-admin">
+    <div class="card-header" class="tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-people me-2"></i>Proveedores registrados
         <span class="badge bg-info ms-2">{{ proveedores|length }}</span>
@@ -127,7 +127,7 @@
       {% if proveedores %}
       <div class="table-responsive">
         <table class="table table-dark table-hover mb-0 align-middle">
-          <thead style="background:#12122a;">
+          <thead class="tc-admin-thead">
             <tr>
               <th>Nombre</th>
               <th>Categoría</th>

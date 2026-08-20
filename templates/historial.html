@@ -9,11 +9,11 @@
 
   {% if historial %}
     {% for venta in historial %}
-    <div class="card mb-4 shadow-sm border-0" style="background:#1e1e2e;">
+    <div class="card mb-4 shadow-sm border-0" class="tc-admin">
 
       <!-- CABECERA -->
       <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
-           style="background:#2a2a3d; cursor:pointer;"
+           class="tc-admin-header" style="cursor:pointer"
            data-bs-toggle="collapse"
            data-bs-target="#compra-{{ venta.id }}">
         <div class="d-flex align-items-center gap-3">
@@ -35,7 +35,7 @@
         <div class="card-body p-0">
           <div class="table-responsive">
             <table class="table table-dark table-hover mb-0 text-center align-middle">
-              <thead style="background:#12122a;">
+              <thead class="tc-admin-thead">
                 <tr>
                   <th><i class="bi bi-hash"></i> ID</th>
                   <th>Producto</th>
@@ -66,7 +66,7 @@
                 {% endfor %}
               </tbody>
               <tfoot>
-                <tr style="background:#2a2a3d;">
+                <tr class="tc-admin-header">
                   <td colspan="5" class="text-end fw-bold text-white">TOTAL</td>
                   <td class="text-success fw-bold fs-6">
                     S/ {{ "%.2f"|format(venta.total) }}

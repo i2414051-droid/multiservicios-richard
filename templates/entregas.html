@@ -15,7 +15,7 @@
 
   {% if entregas %}
   {% for e in entregas %}
-  <div class="card mb-3" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+  <div class="card mb-3" class="tc">
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
         <div>
@@ -51,7 +51,7 @@
         <div class="d-flex flex-column gap-2" style="min-width:220px">
           <form method="POST" action="/entregas/actualizar/{{ e.id }}" class="d-flex gap-1">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <select name="estado" class="form-select form-select-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3);width:130px">
+            <select name="estado" class="form-select form-select-sm" class="form-control ti" style="width:130px">
               <option value="pendiente" {% if e.estado=='pendiente' %}selected{% endif %}>Pendiente</option>
               <option value="en camino" {% if e.estado=='en camino' %}selected{% endif %}>En camino</option>
               <option value="entregado" {% if e.estado=='entregado' %}selected{% endif %}>Entregado</option>
