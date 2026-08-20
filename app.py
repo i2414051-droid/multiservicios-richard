@@ -147,6 +147,52 @@ def init_db():
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ingresos (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                proveedor_id    INT,
+                notas           TEXT,
+                fecha           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS detalle_ingreso (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                ingreso_id  INT NOT NULL,
+                producto_id INT NOT NULL,
+                cantidad    INT NOT NULL,
+                precio_compra DECIMAL(10,2) DEFAULT 0
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS seguimiento_entregas (
+                id               INT AUTO_INCREMENT PRIMARY KEY,
+                venta_id         INT NOT NULL,
+                estado           VARCHAR(30) DEFAULT 'pendiente',
+                direccion_envio  VARCHAR(400),
+                fecha_estimada   DATE,
+                fecha_entrega    DATETIME,
+                notas            TEXT,
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS salidas (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                venta_id    INT,
+                notas       TEXT,
+                fecha       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS detalle_salida (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                salida_id   INT NOT NULL,
+                producto_id INT NOT NULL,
+                cantidad    INT NOT NULL
+            )
+        """)
+
         mysql.connection.commit()
         print("[init_db] Tablas de la BD principal creadas/verificadas OK")
     except Exception as e:
@@ -1302,6 +1348,318 @@ def enviar_email_a_proveedor(proveedor_id):
     else:
         flash('Error al enviar email. Verifica la configuración SMTP.', 'danger')
     return redirect('/productos-para-pedir')
+
+# ─────────────────────────────────────────────
+# PRO14: INGRESOS DE PRODUCTOS (Comprobante de ingreso)
+# ─────────────────────────────────────────────
+@app.route('/ingresos')
+def ingresos():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT i.id, i.fecha, i.notas,
+               p.nombre AS proveedor_nombre,
+               (SELECT SUM(di.cantidad) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS total_items
+        FROM ingresos i
+        LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
+        ORDER BY i.fecha DESC
+    """.format(ALMACEN_DB))
+    lista = cur.fetchall()
+    cur.close()
+    return render_template('ingresos.html', ingresos=lista)
+
+@app.route('/registrar-ingreso', methods=['GET','POST'])
+def registrar_ingreso():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute(f"SELECT id, nombre, stock, precio FROM {ALMACEN_DB}.productos WHERE estado='activo' ORDER BY nombre")
+    productos = cur.fetchall()
+    cur.execute(f"SELECT id, nombre FROM {ALMACEN_DB}.proveedores ORDER BY nombre")
+    proveedores = cur.fetchall()
+    cur.close()
+
+    if request.method == 'POST':
+        proveedor_id = request.form.get('proveedor_id') or None
+        notas = request.form.get('notas', '')
+        producto_ids = request.form.getlist('producto_id[]')
+        cantidades = request.form.getlist('cantidad[]')
+        precios = request.form.getlist('precio_compra[]')
+
+        cur = mysql.connection.cursor()
+        cur.execute("INSERT INTO ingresos (proveedor_id, notas) VALUES (%s, %s)", (proveedor_id, notas))
+        ingreso_id = cur.lastrowid
+
+        for i in range(len(producto_ids)):
+            pid = int(producto_ids[i])
+            cant = int(cantidades[i])
+            prec = float(precios[i]) if precios[i] else 0
+            if cant > 0:
+                cur.execute("INSERT INTO detalle_ingreso (ingreso_id, producto_id, cantidad, precio_compra) VALUES (%s,%s,%s,%s)",
+                            (ingreso_id, pid, cant, prec))
+                cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock+%s WHERE id=%s", (cant, pid))
+
+        mysql.connection.commit()
+        cur.close()
+        flash(f'Ingreso #{ingreso_id} registrado correctamente.', 'success')
+        return redirect(f'/comprobante-ingreso/{ingreso_id}')
+
+    return render_template('registrar_ingreso.html', productos=productos, proveedores=proveedores)
+
+@app.route('/comprobante-ingreso/<int:id>')
+def comprobante_ingreso(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT i.id, i.fecha, i.notas,
+               p.nombre AS proveedor_nombre, p.ruc AS proveedor_ruc,
+               p.celular AS proveedor_celular, p.correo AS proveedor_correo
+        FROM ingresos i
+        LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
+        WHERE i.id=%s
+    """.format(ALMACEN_DB), (id,))
+    ingreso = cur.fetchone()
+    if not ingreso:
+        flash('Ingreso no encontrado.', 'danger')
+        return redirect('/ingresos')
+    cur.execute("""
+        SELECT di.cantidad, di.precio_compra,
+               pr.nombre AS producto_nombre, pr.stock AS stock_actual
+        FROM detalle_ingreso di
+        JOIN {0}.productos pr ON di.producto_id=pr.id
+        WHERE di.ingreso_id=%s
+    """.format(ALMACEN_DB), (id,))
+    items = cur.fetchall()
+    total_general = sum(i['cantidad'] * float(i['precio_compra']) for i in items)
+    cur.close()
+    return render_template('comprobante_ingreso.html', ingreso=ingreso, items=items, total_general=total_general)
+
+@app.route('/eliminar-ingreso/<int:id>')
+def eliminar_ingreso(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT producto_id, cantidad FROM detalle_ingreso WHERE ingreso_id=%s", (id,))
+    items = cur.fetchall()
+    for item in items:
+        cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['producto_id']))
+    cur.execute("DELETE FROM detalle_ingreso WHERE ingreso_id=%s", (id,))
+    cur.execute("DELETE FROM ingresos WHERE id=%s", (id,))
+    mysql.connection.commit()
+    cur.close()
+    flash('Ingreso eliminado y stock revertido.', 'success')
+    return redirect('/ingresos')
+
+# ─────────────────────────────────────────────
+# PRO15-19: SEGUIMIENTO DE ENTREGAS
+# ─────────────────────────────────────────────
+@app.route('/entregas')
+def entregas():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    filtro = request.args.get('filtro', 'todas')
+    cur = mysql.connection.cursor()
+    sql = """
+        SELECT e.id, e.venta_id, e.estado, e.direccion_envio, e.fecha_estimada,
+               e.fecha_entrega, e.notas, e.created_at,
+               v.total, v.nombre AS cliente_nombre, v.documento AS cliente_doc,
+               u.correo AS cliente_correo
+        FROM seguimiento_entregas e
+        JOIN ventas v ON e.venta_id=v.id
+        LEFT JOIN usuarios u ON v.cliente_id=u.id
+    """
+    if filtro == 'pendientes':
+        sql += " WHERE e.estado='pendiente'"
+    elif filtro == 'en_camino':
+        sql += " WHERE e.estado='en camino'"
+    elif filtro == 'entregado':
+        sql += " WHERE e.estado='entregado'"
+    sql += " ORDER BY e.created_at DESC"
+    cur.execute(sql)
+    lista = cur.fetchall()
+    cur.close()
+    return render_template('entregas.html', entregas=lista, filtro=filtro)
+
+@app.route('/entregas/crear/<int:venta_id>', methods=['POST'])
+def crear_entrega(venta_id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id FROM seguimiento_entregas WHERE venta_id=%s", (venta_id,))
+    if cur.fetchone():
+        cur.close()
+        flash('Ya existe seguimiento para esta venta.', 'warning')
+        return redirect('/entregas')
+    direccion = request.form.get('direccion_envio', '')
+    fecha_est = request.form.get('fecha_estimada') or None
+    notas = request.form.get('notas', '')
+    cur.execute("INSERT INTO seguimiento_entregas (venta_id, estado, direccion_envio, fecha_estimada, notas) VALUES (%s,'pendiente',%s,%s,%s)",
+                (venta_id, direccion, fecha_est, notas))
+    mysql.connection.commit()
+    cur.close()
+    flash(f'Entrega para venta #{venta_id} creada.', 'success')
+    return redirect('/entregas')
+
+@app.route('/entregas/actualizar/<int:id>', methods=['POST'])
+def actualizar_entrega(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    nuevo_estado = request.form.get('estado', 'pendiente')
+    notas = request.form.get('notas', '')
+    cur = mysql.connection.cursor()
+    if nuevo_estado == 'entregado':
+        cur.execute("UPDATE seguimiento_entregas SET estado=%s, notas=%s, fecha_entrega=NOW() WHERE id=%s",
+                    (nuevo_estado, notas, id))
+    else:
+        cur.execute("UPDATE seguimiento_entregas SET estado=%s, notas=%s WHERE id=%s",
+                    (nuevo_estado, notas, id))
+    mysql.connection.commit()
+    cur.close()
+    flash('Estado de entrega actualizado.', 'success')
+    return redirect('/entregas')
+
+@app.route('/entregas/eliminar/<int:id>')
+def eliminar_entrega(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("DELETE FROM seguimiento_entregas WHERE id=%s", (id,))
+    mysql.connection.commit()
+    cur.close()
+    flash('Seguimiento de entrega eliminado.', 'success')
+    return redirect('/entregas')
+
+@app.route('/entregas/detalle/<int:id>')
+def detalle_entrega(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT e.*, v.total, v.nombre AS cliente_nombre, v.documento AS cliente_doc, v.fecha AS venta_fecha,
+               u.correo AS cliente_correo
+        FROM seguimiento_entregas e
+        JOIN ventas v ON e.venta_id=v.id
+        LEFT JOIN usuarios u ON v.cliente_id=u.id
+        WHERE e.id=%s
+    """, (id,))
+    entrega = cur.fetchone()
+    if not entrega:
+        flash('Entrega no encontrada.', 'danger')
+        return redirect('/entregas')
+    cur.execute("""
+        SELECT p.nombre, p.imagen, d.cantidad, d.precio
+        FROM detalle_venta d
+        JOIN {0}.productos p ON d.producto_id=p.id
+        WHERE d.venta_id=%s
+    """.format(ALMACEN_DB), (entrega['venta_id'],))
+    productos = cur.fetchall()
+    cur.close()
+    return render_template('detalle_entrega.html', entrega=entrega, productos=productos)
+
+# ─────────────────────────────────────────────
+# PRO23: REGISTRO DE SALIDA DE PRODUCTOS
+# ─────────────────────────────────────────────
+@app.route('/salidas')
+def salidas():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT s.id, s.fecha, s.notas,
+               v.id AS venta_id, v.nombre AS cliente_nombre, v.total AS venta_total,
+               (SELECT SUM(ds.cantidad) FROM detalle_salida ds WHERE ds.salida_id=s.id) AS total_items
+        FROM salidas s
+        LEFT JOIN ventas v ON s.venta_id=v.id
+        ORDER BY s.fecha DESC
+    """)
+    lista = cur.fetchall()
+    cur.close()
+    return render_template('salidas.html', salidas=lista)
+
+@app.route('/registrar-salida', methods=['GET','POST'])
+def registrar_salida():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT v.id, v.nombre, v.total, v.fecha, v.estado, u.correo
+        FROM ventas v LEFT JOIN usuarios u ON v.cliente_id=u.id
+        WHERE v.estado IN ('en espera','entregado') ORDER BY v.fecha DESC
+    """)
+    ventas = cur.fetchall()
+    cur.execute(f"SELECT id, nombre, stock FROM {ALMACEN_DB}.productos WHERE estado='activo' ORDER BY nombre")
+    productos = cur.fetchall()
+    cur.close()
+
+    if request.method == 'POST':
+        venta_id = request.form.get('venta_id') or None
+        notas = request.form.get('notas', '')
+        producto_ids = request.form.getlist('producto_id[]')
+        cantidades = request.form.getlist('cantidad[]')
+
+        cur = mysql.connection.cursor()
+        cur.execute("INSERT INTO salidas (venta_id, notas) VALUES (%s, %s)", (venta_id, notas))
+        salida_id = cur.lastrowid
+
+        for i in range(len(producto_ids)):
+            pid = int(producto_ids[i])
+            cant = int(cantidades[i])
+            if cant > 0:
+                cur.execute("INSERT INTO detalle_salida (salida_id, producto_id, cantidad) VALUES (%s,%s,%s)",
+                            (salida_id, pid, cant))
+                cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s AND stock>=%s", (cant, pid, cant))
+
+        mysql.connection.commit()
+        cur.close()
+        flash(f'Salida #{salida_id} registrada correctamente.', 'success')
+        return redirect(f'/comprobante-salida/{salida_id}')
+
+    return render_template('registrar_salida.html', ventas=ventas, productos=productos)
+
+@app.route('/comprobante-salida/<int:id>')
+def comprobante_salida(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT s.id, s.fecha, s.notas,
+               v.id AS venta_id, v.nombre AS cliente_nombre, v.documento AS cliente_doc,
+               v.total AS venta_total, v.fecha AS venta_fecha
+        FROM salidas s
+        LEFT JOIN ventas v ON s.venta_id=v.id
+        WHERE s.id=%s
+    """, (id,))
+    salida = cur.fetchone()
+    if not salida:
+        flash('Salida no encontrada.', 'danger')
+        return redirect('/salidas')
+    cur.execute("""
+        SELECT ds.cantidad, pr.nombre AS producto_nombre, pr.stock AS stock_actual
+        FROM detalle_salida ds
+        JOIN {0}.productos pr ON ds.producto_id=pr.id
+        WHERE ds.salida_id=%s
+    """.format(ALMACEN_DB), (id,))
+    items = cur.fetchall()
+    cur.close()
+    return render_template('comprobante_salida.html', salida=salida, items=items)
+
+@app.route('/eliminar-salida/<int:id>')
+def eliminar_salida(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT producto_id, cantidad FROM detalle_salida WHERE salida_id=%s", (id,))
+    items = cur.fetchall()
+    for item in items:
+        cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock+%s WHERE id=%s", (item['cantidad'], item['producto_id']))
+    cur.execute("DELETE FROM detalle_salida WHERE salida_id=%s", (id,))
+    cur.execute("DELETE FROM salidas WHERE id=%s", (id,))
+    mysql.connection.commit()
+    cur.close()
+    flash('Salida eliminada y stock revertido.', 'success')
+    return redirect('/salidas')
 
 # ─────────────────────────────────────────────
 # ERROR HANDLER (loguea el error exacto)

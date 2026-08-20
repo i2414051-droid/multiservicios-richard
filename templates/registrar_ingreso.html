@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid px-4 mt-4">
+  <h2 style="color:#f39c12;font-weight:800;margin-bottom:25px">
+    <i class="bi bi-box-arrow-in-down"></i> Registrar Ingreso de Productos
+  </h2>
+
+  <form method="POST" action="/registrar-ingreso">
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <label class="form-label fw-bold">Proveedor (opcional)</label>
+        <select name="proveedor_id" class="form-select" style="background:#08111f;color:white;border:1px solid #f39c12">
+          <option value="">-- Sin proveedor --</option>
+          {% for p in proveedores %}
+          <option value="{{ p.id }}">{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-bold">Notas / Observaciones</label>
+        <input name="notas" class="form-control" placeholder="Ej: Ingreso por reposición mensual"
+               style="background:#08111f;color:white;border:1px solid rgba(243,156,18,.3)">
+      </div>
+    </div>
+
+    <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+      <div class="card-header d-flex justify-content-between align-items-center" style="background:rgba(243,156,18,.1);border-bottom:1px solid rgba(243,156,18,.15)">
+        <h5 class="mb-0" style="color:#f39c12;font-weight:700">Productos a ingresar</h5>
+        <button type="button" class="btn btn-sm" style="background:#f39c12;color:#000;font-weight:bold;border-radius:15px" onclick="agregarFila()">
+          <i class="bi bi-plus"></i> Agregar producto
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-dark table-hover mb-0 text-center align-middle" id="tabla-productos">
+          <thead style="background:rgba(243,156,18,.08)">
+            <tr>
+              <th>Producto</th>
+              <th>Stock actual</th>
+              <th>Cantidad a ingresar</th>
+              <th>Precio compra (S/)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <select name="producto_id[]" class="form-select form-select-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3)" required>
+                  <option value="">Seleccionar...</option>
+                  {% for p in productos %}
+                  <option value="{{ p.id }}" data-stock="{{ p.stock }}">{{ p.nombre }} (S/ {{ p.precio }})</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td class="stock-val" style="color:#aaa">-</td>
+              <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3);width:80px;margin:auto" required></td>
+              <td><input type="number" step="0.01" name="precio_compra[]" min="0" value="0" class="form-control form-control-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3);width:100px;margin:auto"></td>
+              <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn" style="background:#f39c12;font-weight:bold;border-radius:20px;padding:10px 30px">
+        <i class="bi bi-check-circle"></i> Registrar Ingreso
+      </button>
+      <a href="/ingresos" class="btn" style="border:1px solid #f39c12;color:#f39c12;border-radius:20px;padding:10px 30px">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<script>
+const productosData = {{ productos|tojson }};
+function agregarFila() {
+  const tbody = document.querySelector('#tabla-productos tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>
+      <select name="producto_id[]" class="form-select form-select-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3)" required onchange="mostrarStock(this)">
+        <option value="">Seleccionar...</option>
+        {% for p in productos %}
+        <option value="{{ p.id }}">{{ p.nombre }} (S/ {{ p.precio }})</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td class="stock-val" style="color:#aaa">-</td>
+    <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3);width:80px;margin:auto" required></td>
+    <td><input type="number" step="0.01" name="precio_compra[]" min="0" value="0" class="form-control form-control-sm" style="background:#0d1b2a;color:white;border:1px solid rgba(243,156,18,.3);width:100px;margin:auto"></td>
+    <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+document.querySelectorAll('select[name="producto_id[]"]').forEach(sel => {
+  sel.addEventListener('change', function() {
+    const opt = this.options[this.selectedIndex];
+    const stock = opt.getAttribute('data-stock');
+    this.closest('tr').querySelector('.stock-val').textContent = stock ? stock : '-';
+  });
+});
+</script>
+{% endblock %}

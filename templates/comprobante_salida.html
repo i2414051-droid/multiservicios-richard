@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container px-4 mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-receipt"></i> Comprobante de Salida #{{ salida.id }}</h2>
+    <a href="/salidas" class="btn" style="border:1px solid #f39c12;color:#f39c12;border-radius:20px">Volver</a>
+  </div>
+
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body">
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <small style="color:#888">Salida N°</small><br>
+          <strong style="color:#f39c12;font-size:20px">#{{ salida.id }}</strong>
+        </div>
+        <div class="col-md-3">
+          <small style="color:#888">Fecha</small><br>
+          <strong style="color:white">{{ salida.fecha.strftime('%d/%m/%Y %H:%M') if salida.fecha else '-' }}</strong>
+        </div>
+        <div class="col-md-3">
+          <small style="color:#888">Venta asociada</small><br>
+          {% if salida.venta_id %}
+          <span class="badge bg-primary" style="font-size:14px">#{{ salida.venta_id }}</span>
+          {% else %}
+          <span style="color:#666">Sin venta</span>
+          {% endif %}
+        </div>
+        <div class="col-md-3">
+          <small style="color:#888">Cliente</small><br>
+          <strong style="color:white">{{ salida.cliente_nombre or '-' }}</strong>
+          {% if salida.cliente_doc %}<br><small style="color:#aaa">{{ salida.cliente_doc }}</small>{% endif %}
+        </div>
+      </div>
+      {% if salida.notas %}
+      <div><small style="color:#888">Notas:</small><br><span style="color:#ccc">{{ salida.notas }}</span></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body p-0">
+      <table class="table table-dark table-hover mb-0 text-center align-middle">
+        <thead style="background:rgba(243,156,18,.1)">
+          <tr>
+            <th>Producto</th>
+            <th>Cantidad</th>
+            <th>Stock Actual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr>
+            <td style="color:white">{{ item.producto_nombre }}</td>
+            <td><span class="badge bg-info text-dark">{{ item.cantidad }}</span></td>
+            <td>
+              {% if item.stock_actual <= 0 %}
+              <span class="badge bg-danger">{{ item.stock_actual }}</span>
+              {% elif item.stock_actual <= 5 %}
+              <span class="badge bg-warning text-dark">{{ item.stock_actual }}</span>
+              {% else %}
+              <span class="badge bg-success">{{ item.stock_actual }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container px-4 mt-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-receipt"></i> Comprobante de Ingreso #{{ ingreso.id }}</h2>
+    <a href="/ingresos" class="btn" style="border:1px solid #f39c12;color:#f39c12;border-radius:20px">Volver</a>
+  </div>
+
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body">
+      <div class="row mb-3">
+        <div class="col-md-4">
+          <small style="color:#888">Ingreso N°</small><br>
+          <strong style="color:#f39c12;font-size:20px">#{{ ingreso.id }}</strong>
+        </div>
+        <div class="col-md-4">
+          <small style="color:#888">Fecha</small><br>
+          <strong style="color:white">{{ ingreso.fecha.strftime('%d/%m/%Y %H:%M') if ingreso.fecha else '-' }}</strong>
+        </div>
+        <div class="col-md-4">
+          <small style="color:#888">Proveedor</small><br>
+          <strong style="color:white">{{ ingreso.proveedor_nombre or 'Sin proveedor' }}</strong>
+          {% if ingreso.proveedor_ruc %}<br><small style="color:#aaa">RUC: {{ ingreso.proveedor_ruc }}</small>{% endif %}
+          {% if ingreso.proveedor_celular %}<br><small style="color:#aaa">Cel: {{ ingreso.proveedor_celular }}</small>{% endif %}
+        </div>
+      </div>
+      {% if ingreso.notas %}
+      <div class="mb-3"><small style="color:#888">Notas:</small><br><span style="color:#ccc">{{ ingreso.notas }}</span></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mb-4" style="background:#08111f;border:1px solid rgba(243,156,18,.25);border-radius:18px">
+    <div class="card-body p-0">
+      <table class="table table-dark table-hover mb-0 text-center align-middle">
+        <thead style="background:rgba(243,156,18,.1)">
+          <tr>
+            <th>Producto</th>
+            <th>Cantidad</th>
+            <th>Precio Compra</th>
+            <th>Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr>
+            <td style="color:white">{{ item.producto_nombre }}</td>
+            <td><span class="badge bg-info text-dark">{{ item.cantidad }}</span></td>
+            <td style="color:#ccc">S/ {{ "%.2f"|format(item.precio_compra|float) }}</td>
+            <td style="color:#f39c12;font-weight:700">S/ {{ "%.2f"|format(item.cantidad * item.precio_compra|float) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr style="background:rgba(243,156,18,.1)">
+            <td colspan="3" class="text-end fw-bold" style="color:white;font-size:16px">TOTAL</td>
+            <td style="color:#f39c12;font-weight:800;font-size:18px">S/ {{ "%.2f"|format(total_general) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
