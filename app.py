@@ -143,7 +143,14 @@ def init_db():
             )
         """)
 
-        # ── Base de datos de Gestión de Almacén: productos, proveedores, para pedir
+        mysql.connection.commit()
+        print("[init_db] Tablas de la BD principal creadas/verificadas OK")
+    except Exception as e:
+        print(f"[init_db] Error creando tablas principales: {e}")
+
+    # ── Base de datos de Gestión de Almacén: productos, proveedores, para pedir
+    try:
+        cur = mysql.connection.cursor()
         try:
             cur.execute(f"CREATE DATABASE IF NOT EXISTS {ALMACEN_DB} CHARACTER SET utf8mb4")
         except Exception:
@@ -206,8 +213,9 @@ def init_db():
 
         mysql.connection.commit()
         cur.close()
+        print(f"[init_db] Tablas de almacén en '{ALMACEN_DB}' creadas/verificadas OK")
     except Exception as e:
-        print(f"[init_db] {e}")
+        print(f"[init_db] Error en tablas de almacén: {e}")
 
 # ─────────────────────────────────────────────
 # HELPERS
@@ -687,30 +695,39 @@ def index():
 
 @app.route('/agregar/<int:id>')
 def agregar(id):
-    usuario = obtener_usuario()
-    cur = mysql.connection.cursor()
-    cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
-    prod = cur.fetchone()
-    if not prod:
-        flash('Producto no encontrado.', 'danger')
-        return redirect('/')
-    stock_disponible = prod['stock']
-    if stock_disponible <= 0:
-        flash('Producto sin stock disponible.', 'danger')
-        return redirect('/')
-    cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
-    en_carrito = cur.fetchone()['total'] or 0
-    if en_carrito + 1 > stock_disponible:
-        flash(f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).', 'danger')
-        return redirect('/')
-    cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
-    item = cur.fetchone()
-    if item:
-        cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
-    else:
-        cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
-    mysql.connection.commit()
-    flash('Producto agregado al carrito', 'success')
+    try:
+        usuario = obtener_usuario()
+        cur = mysql.connection.cursor()
+        cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
+        prod = cur.fetchone()
+        if not prod:
+            flash('Producto no encontrado.', 'danger')
+            return redirect('/')
+        stock_disponible = prod['stock']
+        if stock_disponible <= 0:
+            flash('Producto sin stock disponible.', 'danger')
+            return redirect('/')
+        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        en_carrito = cur.fetchone()['total'] or 0
+        if en_carrito + 1 > stock_disponible:
+            flash(f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).', 'danger')
+            return redirect('/')
+        cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        item = cur.fetchone()
+        if item:
+            cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        else:
+            cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
+        mysql.connection.commit()
+        cur.close()
+        flash('Producto agregado al carrito', 'success')
+    except Exception as e:
+        print(f"[agregar_carrito] {e}")
+        try:
+            mysql.connection.rollback()
+        except Exception:
+            pass
+        flash('Error al agregar producto. Inténtalo de nuevo.', 'danger')
     return redirect('/')
 
 @app.route('/carrito')
@@ -1244,13 +1261,19 @@ def manejar_error(e):
     return "Ocurrió un error interno. Revisa los logs.", 500
 
 # ─────────────────────────────────────────────
-# INIT DB AL ARRANCAR (crea/migra tablas faltantes)
+# INIT DB EN PRIMER REQUEST (MySQL request-scoped en Flask-MySQLdb)
 # ─────────────────────────────────────────────
-try:
-    with app.app_context():
-        init_db()
-except Exception as e:
-    print(f"[startup init_db] {e}")
+_db_initialized = False
+
+@app.before_request
+def _ensure_db():
+    global _db_initialized
+    if not _db_initialized:
+        _db_initialized = True
+        try:
+            init_db()
+        except Exception as e:
+            print(f"[before_request init_db] {e}")
 
 # ─────────────────────────────────────────────
 # RUN
