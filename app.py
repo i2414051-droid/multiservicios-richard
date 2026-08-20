@@ -92,6 +92,10 @@ def init_db():
             cur.execute("ALTER TABLE carrito ADD COLUMN cantidad INT DEFAULT 1")
         except Exception:
             pass
+        try:
+            cur.execute("ALTER TABLE carrito DROP FOREIGN KEY carrito_ibfk_1")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS ventas (
                 id         INT AUTO_INCREMENT PRIMARY KEY,
