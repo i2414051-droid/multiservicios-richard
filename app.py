@@ -38,6 +38,7 @@ mysql = MySQL(app)
 
 # Segunda base de datos (Gestión de Almacén): productos, proveedores y para pedir
 ALMACEN_DB = os.environ.get('MYSQL_DB_ALMACEN', 'gestion_de_almacen')
+MAIN_DB = os.environ.get('MYSQL_DB', 'proyecto_multiservicios_richard')
 
 # ─────────────────────────────────────────────
 # FLASK-MAIL (env vars para Render)
@@ -59,6 +60,7 @@ CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 # INIT TABLAS NUEVAS
 # ─────────────────────────────────────────────
 def init_db():
+    global ALMACEN_DB
     try:
         cur = mysql.connection.cursor()
 
@@ -145,7 +147,8 @@ def init_db():
         try:
             cur.execute(f"CREATE DATABASE IF NOT EXISTS {ALMACEN_DB} CHARACTER SET utf8mb4")
         except Exception:
-            pass
+            print(f"[init_db] No se pudo crear BD '{ALMACEN_DB}', usando BD principal")
+            ALMACEN_DB = MAIN_DB
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.productos (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
