@@ -1986,6 +1986,9 @@ def checkout():
         return redirect('/login')
     user_id = int(session['user_id'])
     cur = mysql.connection.cursor()
+    if 'guest_id' in session:
+        cur.execute("UPDATE carrito SET usuario_id=%s WHERE usuario_id=%s", (str(user_id), session['guest_id']))
+        mysql.connection.commit()
     cur.execute(f"""
         SELECT c.id, c.producto_id, p.nombre, p.precio, p.imagen, c.cantidad
         FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
@@ -1998,7 +2001,7 @@ def checkout():
     total = sum(p['precio'] * p['cantidad'] for p in items)
     cur.execute("SELECT * FROM direcciones WHERE usuario_id=%s ORDER BY predeterminada DESC", (user_id,))
     direcciones = cur.fetchall()
-    cur.execute("SELECT correo, nombre FROM usuarios WHERE id=%s", (user_id,))
+    cur.execute("SELECT correo FROM usuarios WHERE id=%s", (user_id,))
     usuario = cur.fetchone()
     cur.close()
     return render_template('checkout.html', items=items, total=total,
