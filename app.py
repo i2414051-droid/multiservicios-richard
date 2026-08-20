@@ -783,7 +783,7 @@ def agregar(id):
             mysql.connection.rollback()
         except Exception:
             pass
-        flash('Error al agregar producto. Inténtalo de nuevo.', 'danger')
+        flash(f'Error: {e}', 'danger')
     return redirect('/')
 
 @app.route('/carrito')
