@@ -412,7 +412,7 @@ def ruta_init_db():
         return "Acceso denegado"
     init_db()
     flash('Tablas creadas/verificadas correctamente.', 'success')
-    return redirect('/admin')
+    return redirect('/dashboard')
 
 # ─────────────────────────────────────────────
 # AUTH
@@ -462,7 +462,7 @@ def login():
             flash('Bienvenido', 'success')
             if session['rol'] in ['admin','administrador']:
                 init_db()
-                return redirect('/admin')
+                return redirect('/dashboard')
             return redirect('/')
 
         if bloqueo_usuario:
@@ -521,6 +521,63 @@ def registro():
 # ─────────────────────────────────────────────
 # ADMIN PANEL
 # ─────────────────────────────────────────────
+@app.route('/dashboard')
+def dashboard():
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+
+    cur.execute("SELECT COUNT(*) AS total FROM ventas")
+    total_ventas = cur.fetchone()['total'] or 0
+
+    cur.execute("SELECT COALESCE(SUM(total), 0) AS total FROM ventas")
+    ingresos_totales = float(cur.fetchone()['total'] or 0)
+
+    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos WHERE estado='activo'")
+    productos_activos = cur.fetchone()['total'] or 0
+
+    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock <= 5")
+    stock_bajo = cur.fetchone()['total'] or 0
+
+    cur.execute("SELECT COUNT(*) AS total FROM usuarios")
+    total_usuarios = cur.fetchone()['total'] or 0
+
+    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos_para_pedir WHERE estado='pendiente'")
+    pedidos_pendientes = cur.fetchone()['total'] or 0
+
+    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.proveedores")
+    total_proveedores = cur.fetchone()['total'] or 0
+
+    cur.execute("SELECT COUNT(*) AS total FROM ventas WHERE estado='en espera'")
+    ventas_pendientes = cur.fetchone()['total'] or 0
+
+    cur.execute("""
+        SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento
+        FROM ventas v ORDER BY v.fecha DESC LIMIT 5
+    """)
+    ultimas_ventas = cur.fetchall()
+
+    cur.execute(f"""
+        SELECT id, nombre, stock, categoria, imagen
+        FROM {ALMACEN_DB}.productos
+        WHERE estado='activo' AND stock <= 5
+        ORDER BY stock ASC LIMIT 10
+    """)
+    productos_stock_bajo = cur.fetchall()
+
+    cur.close()
+    return render_template('dashboard.html',
+                           total_ventas=total_ventas,
+                           ingresos_totales=ingresos_totales,
+                           productos_activos=productos_activos,
+                           stock_bajo=stock_bajo,
+                           total_usuarios=total_usuarios,
+                           pedidos_pendientes=pedidos_pendientes,
+                           total_proveedores=total_proveedores,
+                           ventas_pendientes=ventas_pendientes,
+                           ultimas_ventas=ultimas_ventas,
+                           productos_stock_bajo=productos_stock_bajo)
+
 @app.route('/admin')
 def admin():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -529,7 +586,6 @@ def admin():
     cur.execute(f"SELECT * FROM {ALMACEN_DB}.productos")
     productos = cur.fetchall()
 
-    # Contadores para badges
     cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos_para_pedir WHERE estado='pendiente'")
     r = cur.fetchone()
     pedidos_pendientes = r['total'] if r else 0
