@@ -16,7 +16,7 @@
            style="max-width:100%;border-radius:18px;border:2px solid rgba(243,156,18,.3)">
       {% else %}
       <div class="tc-gold" style="border-radius:18px;padding:80px">
-        <i class="bi bi-image" style="font-size:80px;color:#333"></i>
+        <i class="bi bi-image" style="font-size:80px;color:var(--text-muted)"></i>
       </div>
       {% endif %}
     </div>
@@ -43,7 +43,7 @@
           <hr style="border-color:rgba(243,156,18,.2)">
 
           <h6 style="color:#f39c12;font-weight:700">Descripción</h6>
-          <p style="color:#ccc;line-height:1.7">
+          <p style="color:var(--text-secondary);line-height:1.7">
             {{ producto.descripcion or 'Sin descripción disponible.' }}
           </p>
 

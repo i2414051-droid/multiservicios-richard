@@ -514,8 +514,57 @@ width:100%;
 }
 
 /* ═══════════════════════════════════════ */
-/* GENERAL LIGHT OVERRIDES FOR BOOTSTRAP  */
+/* GENERAL DARK (DEFAULT) + LIGHT OVERRIDES FOR BOOTSTRAP  */
 /* ═══════════════════════════════════════ */
+
+/* Dark mode card defaults */
+.card,
+.card-body {
+  background-color: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-card) !important;
+}
+.card-header {
+  background-color: var(--bg-usuario) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-card) !important;
+}
+.card-header.bg-dark {
+  background-color: var(--bg-usuario) !important;
+}
+.card-header.bg-secondary {
+  background-color: var(--bg-usuario) !important;
+}
+
+/* Stat cards */
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 16px;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+.stat-card h3,
+.stat-card h4,
+.stat-card h5 {
+  color: var(--text-primary) !important;
+}
+.stat-card small {
+  color: var(--text-muted) !important;
+}
+.selected-card {
+  background: rgba(243,156,18,0.1);
+  border: 2px solid #f39c12;
+  border-radius: 16px;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+.selected-card h3,
+.selected-card h4,
+.selected-card h5 {
+  color: var(--text-primary) !important;
+}
+.selected-card small {
+  color: var(--text-muted) !important;
+}
 
 /* Cards */
 [data-theme="light"] .card,
