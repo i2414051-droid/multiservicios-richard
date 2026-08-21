@@ -600,6 +600,41 @@ td, th, p, label, span, a:not(.btn):not(.menu-item):not(.nav-link) {
 }
 
 /* Forms */
+/* Dark mode defaults */
+.form-control,
+.form-select {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-usuario) !important;
+}
+.form-control::placeholder {
+  color: var(--text-muted) !important;
+}
+.form-control:focus,
+.form-select:focus {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-input) !important;
+  border-color: #f39c12 !important;
+  box-shadow: 0 0 0 0.2rem rgba(243,156,18,0.15) !important;
+}
+.input-group-text {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-usuario) !important;
+}
+.form-label {
+  color: var(--text-primary) !important;
+}
+.form-check-input {
+  background-color: var(--bg-input);
+  border-color: var(--border-usuario);
+}
+select option {
+  color: var(--text-primary);
+  background-color: var(--bg-card);
+}
+
+/* Light mode overrides */
 [data-theme="light"] .form-control,
 [data-theme="light"] .form-select {
   background-color: var(--bg-input) !important;
