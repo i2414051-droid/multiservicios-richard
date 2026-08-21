@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
 {% block content %}
 
 <div class="container-fluid mt-4">
@@ -100,7 +101,7 @@
 
   <!-- RESUMEN -->
   <p class="text-muted mb-3">
-    <strong>{{ historial|length }}</strong> venta(s) encontrada(s)
+    <strong>{{ total }}</strong> venta(s) encontrada(s)
     {% if buscar %} para <em>"{{ buscar }}"</em>{% endif %}.
   </p>
 
@@ -195,6 +196,8 @@
 
     </div>
     {% endfor %}
+
+  {{ paginacion(page, total_pages, total, '/historial-compras?', buscar) }}
 
   {% else %}
     <div class="text-center py-5">

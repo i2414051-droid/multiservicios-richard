@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
 {% block content %}
 <div class="container-fluid px-4 mt-4">
   <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
@@ -8,9 +9,20 @@
     </a>
   </div>
 
+  <!-- BUSCADOR -->
+  <form method="GET" class="mb-3">
+    <div class="input-group" style="max-width:400px">
+      <input type="text" name="buscar" class="form-control" placeholder="Buscar por proveedor..."
+             value="{{ buscar }}">
+      <button class="btn btn-warning" type="submit"><i class="bi bi-search"></i></button>
+      {% if buscar %}<a href="/ingresos" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+    </div>
+  </form>
+
   {% if ingresos %}
   <div class="card tc">
     <div class="card-body p-0">
+      <div class="table-responsive">
       <table class="table table-dark table-hover mb-0 text-center align-middle">
         <thead style="background:rgba(243,156,18,.1)">
           <tr>
@@ -39,6 +51,8 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      {{ paginacion(page, total_pages, total, '/ingresos?', buscar) }}
     </div>
   </div>
   {% else %}

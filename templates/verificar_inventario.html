@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
 {% block content %}
 <div class="container-fluid px-4 mt-4">
   <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-clipboard-check"></i> Verificar Inventario por Cantidad</h2>
@@ -39,6 +40,17 @@
     </div>
   </div>
 
+  <!-- BUSCADOR -->
+  <form method="GET" class="mb-3">
+    <div class="input-group" style="max-width:400px">
+      <input type="text" name="buscar" class="form-control" placeholder="Buscar producto..."
+             value="{{ buscar }}">
+      <input type="hidden" name="filtro" value="{{ filtro }}">
+      <button class="btn btn-warning" type="submit"><i class="bi bi-search"></i></button>
+      {% if buscar %}<a href="/verificar-inventario?filtro={{ filtro }}" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+    </div>
+  </form>
+
   <!-- TABLA -->
   <div class="card mb-4 tc">
     <div class="card-body">
@@ -49,7 +61,7 @@
         {% elif filtro=='normal' %}Stock normal (más de 10)
         {% elif filtro=='inactivos' %}Productos inactivos
         {% else %}Todos los productos{% endif %}
-        <span class="badge" style="background:#f39c12;color:#000">{{ productos|length }}</span>
+        <span class="badge" style="background:#f39c12;color:#000">{{ total }}</span>
       </h5>
 
       {% if productos %}
@@ -100,6 +112,7 @@
           </tbody>
         </table>
       </div>
+      {{ paginacion(page, total_pages, total, '/verificar-inventario?', buscar, filtro) }}
       {% else %}
       <div class="text-center py-5">
         <i class="bi bi-check-circle" style="font-size:48px;color:#27ae60"></i>

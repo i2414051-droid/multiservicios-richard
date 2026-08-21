@@ -940,3 +940,135 @@ select option {
 .checkout-address-option input[type="radio"]:checked ~ div span {
   color: var(--text-primary) !important;
 }
+
+/* ═══════════════════════════════════════ */
+/* RESPONSIVE — MOBILE FIRST               */
+/* ═══════════════════════════════════════ */
+
+/* Navbar mobile */
+@media (max-width: 991.98px) {
+  .navbar-custom {
+    padding: 10px;
+  }
+  .logo-navbar {
+    width: 55px;
+  }
+  .nombre-logo {
+    font-size: 12px;
+  }
+  .nombre-logo span {
+    font-size: 22px;
+  }
+  .menu {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0;
+    padding: 10px 0;
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 10px;
+  }
+  .menu-item {
+    padding: 10px 15px;
+    border-bottom: 1px solid var(--border-subtle);
+    border-radius: 8px;
+  }
+  .menu-item:hover {
+    border-bottom: 1px solid #f39c12;
+  }
+  .usuario-box {
+    width: 100%;
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .navbar .d-flex.align-items-center.gap-2.ms-lg-auto {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 8px !important;
+    width: 100%;
+  }
+  .navbar .d-flex.align-items-center.gap-2.ms-lg-auto .btn {
+    width: 100%;
+  }
+}
+
+/* Tables — horizontal scroll on mobile */
+@media (max-width: 767.98px) {
+  .table-responsive {
+    font-size: 0.85rem;
+  }
+  .table th, .table td {
+    padding: 0.4rem 0.3rem;
+    white-space: nowrap;
+  }
+  .btn-sm {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+  }
+}
+
+/* Cards — stack vertically */
+@media (max-width: 575.98px) {
+  .container, .container-fluid {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  h2 {
+    font-size: 1.3rem;
+  }
+  .d-flex.gap-2.mb-4.flex-wrap {
+    flex-direction: column;
+  }
+  .d-flex.gap-2.mb-4.flex-wrap .btn {
+    width: 100%;
+  }
+  .d-flex.justify-content-between {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .d-flex.justify-content-between .btn {
+    width: 100%;
+  }
+  /* Checkout cards */
+  .metodo-pago {
+    padding: 12px;
+    font-size: 0.9rem;
+  }
+  .metodo-pago i {
+    font-size: 20px !important;
+  }
+  /* Pagination */
+  .pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .page-link {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.8rem;
+  }
+  /* Forms */
+  .form-control, .form-select {
+    font-size: 0.9rem;
+  }
+  .input-group {
+    flex-wrap: nowrap;
+  }
+  /* Flash messages */
+  .alert {
+    font-size: 0.85rem;
+  }
+}
+
+/* Navbar toggler styling */
+.navbar-toggler {
+  border-color: rgba(243,156,18,.5);
+  padding: 4px 8px;
+}
+.navbar-toggler-icon {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(243,156,18,1)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+[data-theme="light"] .navbar-toggler {
+  border-color: rgba(0,0,0,.3);
+}
+[data-theme="light"] .navbar-toggler-icon {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(0,0,0,.7)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}

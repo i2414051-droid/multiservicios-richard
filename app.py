@@ -72,6 +72,28 @@ TOKEN = os.environ.get('APIPERU_TOKEN', '')
 
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
+PER_PAGE = 15
+
+def paginate_query(cur, sql_count, sql_data, params, page, per_page=PER_PAGE):
+    cur.execute(sql_count, params)
+    total = cur.fetchone()['total']
+    total_pages = max(1, -(-total // per_page))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+    cur.execute(sql_data + " LIMIT %s OFFSET %s", params + (per_page, offset))
+    items = cur.fetchall()
+    return items, total, page, total_pages
+
+def render_paginated(template, cur, sql_count, sql_data, params, page, extra=None):
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, params, page)
+    ctx = {
+        'items': items, 'total': total, 'page': page,
+        'total_pages': total_pages, 'has_prev': page > 1, 'has_next': page < total_pages,
+    }
+    if extra:
+        ctx.update(extra)
+    return render_template(template, **ctx)
+
 # ─────────────────────────────────────────────
 # INIT TABLAS NUEVAS
 # ─────────────────────────────────────────────
@@ -727,9 +749,16 @@ def dashboard():
 def admin():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return "Acceso denegado"
+    buscar = request.args.get('buscar', '')
+    page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
-    cur.execute(f"SELECT * FROM {ALMACEN_DB}.productos")
-    productos = cur.fetchall()
+
+    where = "WHERE p.nombre LIKE %s"
+    params = [f'%{buscar}%']
+    sql_count = f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos p {where}"
+    sql_data = f"""SELECT p.* FROM {ALMACEN_DB}.productos p {where}
+                   ORDER BY p.id DESC"""
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
 
     cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos_para_pedir WHERE estado='pendiente'")
     r = cur.fetchone()
@@ -739,8 +768,11 @@ def admin():
     r2 = cur.fetchone()
     total_proveedores = r2['total'] if r2 else 0
 
+    cur.close()
     return render_template('admin.html',
-                           productos=productos,
+                           productos=items, buscar=buscar,
+                           page=page, total_pages=total_pages,
+                           total=total, has_prev=page > 1, has_next=page < total_pages,
                            pedidos_pendientes=pedidos_pendientes,
                            total_proveedores=total_proveedores)
 
@@ -1076,18 +1108,18 @@ def historial_compras():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/')
     buscar = request.args.get('buscar','')
+    page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
     cur.execute("SELECT SUM(total) AS gran_total FROM ventas")
     res = cur.fetchone()
     gran_total = res['gran_total'] or 0
-    cur.execute("""
-        SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular, v.estado
+    sql_count = "SELECT COUNT(*) AS total FROM ventas v JOIN usuarios u ON v.cliente_id=u.id WHERE u.correo LIKE %s"
+    sql_data = """SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular, v.estado
         FROM ventas v JOIN usuarios u ON v.cliente_id=u.id
-        WHERE u.correo LIKE %s ORDER BY v.fecha DESC
-    """, (f'%{buscar}%',))
-    ventas_raw = cur.fetchall()
+        WHERE u.correo LIKE %s ORDER BY v.fecha DESC"""
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
     historial = []
-    for v in ventas_raw:
+    for v in items:
         cur.execute(f"""
             SELECT p.id AS producto_id, p.nombre, p.descripcion, d.cantidad, d.precio
             FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
@@ -1095,7 +1127,9 @@ def historial_compras():
         """, (v['id'],))
         historial.append({**v, 'productos': cur.fetchall()})
     cur.close()
-    return render_template('historial_compras_admin.html', historial=historial, buscar=buscar, gran_total=gran_total)
+    return render_template('historial_compras_admin.html', historial=historial, buscar=buscar,
+                           gran_total=gran_total, page=page, total_pages=total_pages,
+                           total=total, has_prev=page > 1, has_next=page < total_pages)
 
 @app.route('/historial-compras/estado/<int:venta_id>', methods=['POST'])
 def actualizar_estado_venta(venta_id):
@@ -1172,14 +1206,15 @@ def permisos():
         cur.close()
         return redirect('/permisos')
     buscar = request.args.get('buscar','')
-    cur.execute("""
-        SELECT id, correo, rol, estado FROM usuarios WHERE correo LIKE %s
-        ORDER BY CASE rol WHEN 'admin' THEN 0 WHEN 'administrador' THEN 1 ELSE 2 END, correo ASC
-    """, (f'%{buscar}%',))
-    usuarios = cur.fetchall()
+    page = int(request.args.get('page', 1))
+    sql_count = "SELECT COUNT(*) AS total FROM usuarios WHERE correo LIKE %s"
+    sql_data = """SELECT id, correo, rol, estado FROM usuarios WHERE correo LIKE %s
+        ORDER BY CASE rol WHEN 'admin' THEN 0 WHEN 'administrador' THEN 1 ELSE 2 END, correo ASC"""
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
     cur.close()
-    return render_template('permisos.html', usuarios=usuarios, buscar=buscar,
-                           es_superadmin=es_superadmin)
+    return render_template('permisos.html', usuarios=items, buscar=buscar,
+                           es_superadmin=es_superadmin, page=page, total_pages=total_pages,
+                           total=total, has_prev=page > 1, has_next=page < total_pages)
 
 # ─────────────────────────────────────────────
 # PROVEEDORES
@@ -1211,17 +1246,20 @@ def proveedores():
 
     buscar = request.args.get('buscar','')
     cat_filtro = request.args.get('categoria','')
-    sql = f"SELECT * FROM {ALMACEN_DB}.proveedores WHERE nombre LIKE %s"
+    page = int(request.args.get('page', 1))
+    where = "WHERE nombre LIKE %s"
     vals = [f'%{buscar}%']
     if cat_filtro:
-        sql += " AND categoria=%s"
+        where += " AND categoria=%s"
         vals.append(cat_filtro)
-    sql += " ORDER BY nombre ASC"
-    cur.execute(sql, tuple(vals))
-    lista = cur.fetchall()
+    sql_count = f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.proveedores {where}"
+    sql_data = f"SELECT * FROM {ALMACEN_DB}.proveedores {where} ORDER BY nombre ASC"
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(vals), page)
     cur.close()
-    return render_template('proveedores.html', proveedores=lista,
-                           categorias=CATEGORIAS, buscar=buscar, cat_filtro=cat_filtro)
+    return render_template('proveedores.html', proveedores=items,
+                           categorias=CATEGORIAS, buscar=buscar, cat_filtro=cat_filtro,
+                           page=page, total_pages=total_pages, total=total,
+                           has_prev=page > 1, has_next=page < total_pages)
 
 @app.route('/proveedores/editar/<int:id>', methods=['GET','POST'])
 def editar_proveedor(id):
@@ -1387,18 +1425,24 @@ def enviar_email_a_proveedor(proveedor_id):
 def ingresos():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    buscar = request.args.get('buscar', '')
+    page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
-    cur.execute("""
-        SELECT i.id, i.fecha, i.notas,
+    sql_count = """SELECT COUNT(*) AS total FROM ingresos i
+        LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
+        WHERE p.nombre LIKE %s""".format(ALMACEN_DB)
+    sql_data = """SELECT i.id, i.fecha, i.notas,
                p.nombre AS proveedor_nombre,
                (SELECT SUM(di.cantidad) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS total_items
         FROM ingresos i
         LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
-        ORDER BY i.fecha DESC
-    """.format(ALMACEN_DB))
-    lista = cur.fetchall()
+        WHERE p.nombre LIKE %s
+        ORDER BY i.fecha DESC""".format(ALMACEN_DB)
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
     cur.close()
-    return render_template('ingresos.html', ingresos=lista)
+    return render_template('ingresos.html', ingresos=items, buscar=buscar,
+                           page=page, total_pages=total_pages, total=total,
+                           has_prev=page > 1, has_next=page < total_pages)
 
 @app.route('/registrar-ingreso', methods=['GET','POST'])
 def registrar_ingreso():
@@ -1611,18 +1655,24 @@ def detalle_entrega(id):
 def salidas():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    buscar = request.args.get('buscar', '')
+    page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
-    cur.execute("""
-        SELECT s.id, s.fecha, s.notas,
+    sql_count = """SELECT COUNT(*) AS total FROM salidas s
+        LEFT JOIN ventas v ON s.venta_id=v.id
+        WHERE COALESCE(v.nombre, '') LIKE %s"""
+    sql_data = """SELECT s.id, s.fecha, s.notas,
                v.id AS venta_id, v.nombre AS cliente_nombre, v.total AS venta_total,
                (SELECT SUM(ds.cantidad) FROM detalle_salida ds WHERE ds.salida_id=s.id) AS total_items
         FROM salidas s
         LEFT JOIN ventas v ON s.venta_id=v.id
-        ORDER BY s.fecha DESC
-    """)
-    lista = cur.fetchall()
+        WHERE COALESCE(v.nombre, '') LIKE %s
+        ORDER BY s.fecha DESC"""
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
     cur.close()
-    return render_template('salidas.html', salidas=lista)
+    return render_template('salidas.html', salidas=items, buscar=buscar,
+                           page=page, total_pages=total_pages, total=total,
+                           has_prev=page > 1, has_next=page < total_pages)
 
 @app.route('/registrar-salida', methods=['GET','POST'])
 def registrar_salida():
@@ -1757,21 +1807,26 @@ def verificar_inventario():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     filtro = request.args.get('filtro', 'todos')
+    buscar = request.args.get('buscar', '')
+    page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
-    sql = f"SELECT id, nombre, stock, precio, categoria, imagen, estado FROM {ALMACEN_DB}.productos WHERE 1=1"
+    where = "WHERE p.nombre LIKE %s"
+    params = [f'%{buscar}%']
     if filtro == 'sin_stock':
-        sql += " AND stock=0 AND estado='activo'"
+        where += " AND p.stock=0 AND p.estado='activo'"
     elif filtro == 'critico':
-        sql += " AND stock BETWEEN 1 AND 3 AND estado='activo'"
+        where += " AND p.stock BETWEEN 1 AND 3 AND p.estado='activo'"
     elif filtro == 'bajo':
-        sql += " AND stock BETWEEN 4 AND 10 AND estado='activo'"
+        where += " AND p.stock BETWEEN 4 AND 10 AND p.estado='activo'"
     elif filtro == 'normal':
-        sql += " AND stock > 10 AND estado='activo'"
+        where += " AND p.stock > 10 AND p.estado='activo'"
     elif filtro == 'inactivos':
-        sql += " AND estado='inactivo'"
-    sql += " ORDER BY stock ASC"
-    cur.execute(sql)
-    productos = cur.fetchall()
+        where += " AND p.estado='inactivo'"
+    sql_count = f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos p {where}"
+    sql_data = f"""SELECT p.id, p.nombre, p.stock, p.precio, p.categoria, p.imagen, p.estado
+        FROM {ALMACEN_DB}.productos p {where} ORDER BY p.stock ASC"""
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
+
     cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock=0")
     sin_stock = cur.fetchone()['n']
     cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock BETWEEN 1 AND 3")
@@ -1782,7 +1837,9 @@ def verificar_inventario():
     normal = cur.fetchone()['n']
     cur.close()
     return render_template('verificar_inventario.html',
-                           productos=productos, filtro=filtro,
+                           productos=items, filtro=filtro, buscar=buscar,
+                           page=page, total_pages=total_pages, total=total,
+                           has_prev=page > 1, has_next=page < total_pages,
                            sin_stock=sin_stock, critico=critico, bajo=bajo, normal=normal)
 
 # ─────────────────────────────────────────────
