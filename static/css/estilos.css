@@ -20,8 +20,8 @@ font-family:'Montserrat',sans-serif;
   --bg-stock-ok: #091e09;
   --bg-stock-no: #2c0808;
   --text-primary: #ffffff;
-  --text-secondary: #cccccc;
-  --text-muted: #aaaaaa;
+  --text-secondary: #dce1e8;
+  --text-muted: #b8c0cc;
   --text-dark: #000000;
   --border-main: rgba(243,156,18,0.3);
   --border-card: rgba(243,156,18,0.3);
@@ -563,6 +563,15 @@ width:100%;
 }
 
 /* Text colors */
+.text-muted {
+  color: var(--text-muted) !important;
+}
+small, .small {
+  color: var(--text-muted);
+}
+td, th, p, label, span, a:not(.btn):not(.menu-item):not(.nav-link) {
+  color: inherit;
+}
 [data-theme="light"] .text-white {
   color: var(--text-primary) !important;
 }
