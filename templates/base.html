@@ -25,26 +25,16 @@
     </span>
   </a>
 
-  <!-- HAMBURGER + THEME TOGGLE (siempre visibles) -->
-  <div class="d-flex align-items-center gap-2">
-    <button class="theme-toggle" id="themeToggle" title="Cambiar tema">
-      <i class="bi bi-moon-fill icon-moon"></i>
-      <i class="bi bi-sun-fill icon-sun"></i>
-    </button>
-    <a href="/carrito" class="btn carrito-btn position-relative">
-      <i class="bi bi-cart3"></i>
-      {% if cantidad_carrito > 0 %}
-      <span class="contador-carrito">{{cantidad_carrito}}</span>
-      {% endif %}
-    </a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu" aria-controls="navMenu" aria-expanded="false" aria-label="Menú">
-      <span class="navbar-toggler-icon"></span>
-    </button>
-  </div>
+  <!-- HAMBURGER (solo mobile) -->
+  <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu" aria-controls="navMenu" aria-expanded="false" aria-label="Menú">
+    <span class="navbar-toggler-icon"></span>
+  </button>
 
   <!-- MENU COLAPSABLE -->
   <div class="collapse navbar-collapse" id="navMenu">
-    <div class="menu mx-lg-3">
+
+    <!-- MENÚ (centrado) -->
+    <div class="menu mx-lg-auto">
       <a href="/" class="menu-item">
         <i class="bi bi-house-fill"></i> Inicio
       </a>
@@ -77,8 +67,18 @@
       {% endif %}
     </div>
 
-    <!-- USUARIO (colapsa en mobile) -->
-    <div class="d-flex align-items-center gap-2 ms-lg-auto mt-3 mt-lg-0">
+    <!-- DERECHA: Theme + Carrito + Perfil -->
+    <div class="d-flex align-items-center gap-2 ms-lg-auto">
+      <button class="theme-toggle" id="themeToggle" title="Cambiar tema">
+        <i class="bi bi-moon-fill icon-moon"></i>
+        <i class="bi bi-sun-fill icon-sun"></i>
+      </button>
+      <a href="/carrito" class="btn carrito-btn position-relative">
+        <i class="bi bi-cart3"></i>
+        {% if cantidad_carrito > 0 %}
+        <span class="contador-carrito">{{cantidad_carrito}}</span>
+        {% endif %}
+      </a>
       {% if session.get('correo') %}
       <div class="usuario-box">
         <i class="bi bi-person-circle"></i>
@@ -95,6 +95,7 @@
       <a href="/login" class="btn boton-personal">Login</a>
       {% endif %}
     </div>
+
   </div>
 
 </div>

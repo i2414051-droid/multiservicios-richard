@@ -985,8 +985,16 @@ select option {
     align-items: stretch !important;
     gap: 8px !important;
     width: 100%;
+    margin-top: 10px;
   }
-  .navbar .d-flex.align-items-center.gap-2.ms-lg-auto .btn {
+  .navbar .d-flex.align-items-center.gap-2.ms-lg-auto .btn,
+  .navbar .d-flex.align-items-center.gap-2.ms-lg-auto .theme-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .navbar .d-flex.align-items-center.gap-2.ms-lg-auto .carrito-btn {
     width: 100%;
   }
 }
