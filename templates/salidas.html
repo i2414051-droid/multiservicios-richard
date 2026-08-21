@@ -9,7 +9,7 @@
   </div>
 
   {% if salidas %}
-  <div class="card" class="tc">
+  <div class="card tc">
     <div class="card-body p-0">
       <table class="table table-dark table-hover mb-0 text-center align-middle">
         <thead style="background:rgba(243,156,18,.1)">
@@ -30,12 +30,12 @@
               {% if s.venta_id %}
               <span class="badge bg-primary">#{{ s.venta_id }}</span>
               {% else %}
-              <span style="color:#666">—</span>
+              <span style="color:var(--text-muted)">—</span>
               {% endif %}
             </td>
-            <td style="color:#ccc">{{ s.cliente_nombre or '-' }}</td>
+            <td style="color:var(--text-secondary)">{{ s.cliente_nombre or '-' }}</td>
             <td><span class="badge bg-info text-dark">{{ s.total_items or 0 }}</span></td>
-            <td style="color:#aaa">{{ s.fecha.strftime('%d/%m/%Y %H:%M') if s.fecha else '-' }}</td>
+            <td style="color:var(--text-muted)">{{ s.fecha.strftime('%d/%m/%Y %H:%M') if s.fecha else '-' }}</td>
             <td>
               <div class="d-flex gap-1 justify-content-center">
                 <a href="/comprobante-salida/{{ s.id }}" class="btn btn-sm" style="border:1px solid #f39c12;color:#f39c12">Ver</a>
@@ -50,7 +50,7 @@
     </div>
   </div>
   {% else %}
-  <div class="text-center py-5" style="color:#666">
+  <div class="text-center py-5" style="color:var(--text-muted)">
     <i class="bi bi-inbox display-4"></i>
     <p class="mt-3">No hay salidas registradas.</p>
     <a href="/registrar-salida" class="btn mt-2" style="background:#f39c12;font-weight:bold;border-radius:20px">Registrar primera salida</a>

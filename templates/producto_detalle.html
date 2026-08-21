@@ -2,9 +2,9 @@
 {% block content %}
 <div class="container mt-4">
   <nav aria-label="breadcrumb">
-    <ol class="breadcrumb" style="background:transparent;color:#aaa">
+    <ol class="breadcrumb" style="background:transparent;color:var(--text-muted)">
       <li class="breadcrumb-item"><a href="/" style="color:#f39c12">Inicio</a></li>
-      <li class="breadcrumb-item active" style="color:#ccc">{{ producto.nombre }}</li>
+      <li class="breadcrumb-item active" style="color:var(--text-secondary)">{{ producto.nombre }}</li>
     </ol>
   </nav>
 
@@ -23,7 +23,7 @@
 
     <!-- DETALLES -->
     <div class="col-md-7">
-      <div class="card" class="tc">
+      <div class="card tc">
         <div class="card-body p-4">
           <h2 style="color:#f39c12;font-weight:800">{{ producto.nombre }}</h2>
 
@@ -37,7 +37,7 @@
           </div>
 
           {% if producto.categoria %}
-          <p style="color:#aaa"><i class="bi bi-tag me-1" style="color:#f39c12"></i> {{ producto.categoria }}</p>
+          <p style="color:var(--text-muted)"><i class="bi bi-tag me-1" style="color:#f39c12"></i> {{ producto.categoria }}</p>
           {% endif %}
 
           <hr style="border-color:rgba(243,156,18,.2)">

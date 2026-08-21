@@ -14,7 +14,7 @@
     </a>
   </div>
 
-  <div class="alert border-0" class="tc-success">
+  <div class="alert border-0 tc-success">
     <i class="bi bi-info-circle me-2"></i>
     Estos productos fueron <strong>agregados automáticamente</strong> porque su stock llegó a 1 o menos.
     Aquí puedes ajustar cantidades, enviar el pedido al proveedor por WhatsApp o Email, y marcarlos como enviados.
@@ -24,9 +24,8 @@
 
   <!-- POR PROVEEDOR -->
   {% for pid, data in proveedores_pedidos.items() %}
-  <div class="card border-0 shadow mb-4" class="tc-admin">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
-         class="tc-admin-header">
+  <div class="card border-0 shadow mb-4 tc-admin">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-truck me-2 text-info"></i>
         Proveedor: {{ data.proveedor_nombre }}
@@ -113,7 +112,7 @@
   {% endfor %}
 
   {% else %}
-  <div class="card border-0 shadow text-center py-5" class="tc-admin">
+  <div class="card border-0 shadow text-center py-5 tc-admin">
     <div class="card-body">
       <i class="bi bi-check-circle-fill display-3 text-success mb-3"></i>
       <h4 class="text-white">¡Todo en orden!</h4>

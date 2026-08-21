@@ -10,7 +10,7 @@
     <div class="row g-3 mb-4">
       <div class="col-md-6">
         <label class="form-label fw-bold">Venta asociada (opcional)</label>
-        <select name="venta_id" class="form-select" class="tc-white">
+        <select name="venta_id" class="form-select tc-white">
           <option value="">-- Sin venta asociada --</option>
           {% for v in ventas %}
           <option value="{{ v.id }}">#{{ v.id }} — {{ v.nombre or 'Sin nombre' }} (S/ {{ "%.2f"|format(v.total|float) }}) — {{ v.fecha.strftime('%d/%m/%Y') if v.fecha else '' }}</option>
@@ -19,13 +19,12 @@
       </div>
       <div class="col-md-6">
         <label class="form-label fw-bold">Notas / Observaciones</label>
-        <input name="notas" class="form-control" placeholder="Ej: Salida por venta del día"
-               class="tc-white">
+        <input name="notas" placeholder="Ej: Salida por venta del día"class="form-control tc-white">
       </div>
     </div>
 
-    <div class="card mb-4" class="tc">
-      <div class="card-header d-flex justify-content-between align-items-center" class="tc-header">
+    <div class="card mb-4 tc">
+      <div class="card-header d-flex justify-content-between align-items-center tc-header">
         <h5 class="mb-0" style="color:#f39c12;font-weight:700">Productos a registrar salida</h5>
         <button type="button" class="btn btn-sm" style="background:#f39c12;color:#000;font-weight:bold;border-radius:15px" onclick="agregarFila()">
           <i class="bi bi-plus"></i> Agregar producto
@@ -44,15 +43,15 @@
           <tbody>
             <tr>
               <td>
-                <select name="producto_id[]" class="form-select form-select-sm" class="form-control ti" required onchange="mostrarStock(this)">
+                <select name="producto_id[]" class="form-select form-select-sm form-control ti" required onchange="mostrarStock(this)">
                   <option value="">Seleccionar...</option>
                   {% for p in productos %}
                   <option value="{{ p.id }}" data-stock="{{ p.stock }}">{{ p.nombre }}</option>
                   {% endfor %}
                 </select>
               </td>
-              <td class="stock-val" style="color:#aaa">-</td>
-              <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" class="form-control ti" style="width:80px;margin:auto" required></td>
+              <td class="stock-val" style="color:var(--text-muted)">-</td>
+              <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm form-control ti" style="width:80px;margin:auto" required></td>
               <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
             </tr>
           </tbody>
@@ -75,15 +74,15 @@ function agregarFila() {
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td>
-      <select name="producto_id[]" class="form-select form-select-sm" class="form-control ti" required onchange="mostrarStock(this)">
+      <select name="producto_id[]" class="form-select form-select-sm form-control ti" required onchange="mostrarStock(this)">
         <option value="">Seleccionar...</option>
         {% for p in productos %}
         <option value="{{ p.id }}">{{ p.nombre }}</option>
         {% endfor %}
       </select>
     </td>
-    <td class="stock-val" style="color:#aaa">-</td>
-    <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm" class="form-control ti" style="width:80px;margin:auto" required></td>
+    <td class="stock-val" style="color:var(--text-muted)">-</td>
+    <td><input type="number" name="cantidad[]" min="1" value="1" class="form-control form-control-sm form-control ti" style="width:80px;margin:auto" required></td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
   `;
   tbody.appendChild(tr);

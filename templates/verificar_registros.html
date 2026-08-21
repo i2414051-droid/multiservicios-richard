@@ -9,7 +9,7 @@
       <a href="/verificar-registros?seccion=resumen" class="text-decoration-none">
         <div class="card text-center p-3 {% if seccion=='resumen' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
           <i class="bi bi-grid" style="font-size:24px;color:#f39c12"></i>
-          <small class="mt-1" style="color:#aaa">Resumen</small>
+          <small class="mt-1" style="color:var(--text-muted)">Resumen</small>
         </div>
       </a>
     </div>
@@ -17,7 +17,7 @@
       <a href="/verificar-registros?seccion=ventas" class="text-decoration-none">
         <div class="card text-center p-3 {% if seccion=='ventas' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
           <h5 style="color:#f39c12;font-weight:800">{{ stats.total_ventas }}</h5>
-          <small style="color:#aaa">Ventas</small>
+          <small style="color:var(--text-muted)">Ventas</small>
         </div>
       </a>
     </div>
@@ -25,7 +25,7 @@
       <a href="/verificar-registros?seccion=ingresos" class="text-decoration-none">
         <div class="card text-center p-3 {% if seccion=='ingresos' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
           <h5 style="color:#27ae60;font-weight:800">{{ stats.total_ingresos }}</h5>
-          <small style="color:#aaa">Ingresos</small>
+          <small style="color:var(--text-muted)">Ingresos</small>
         </div>
       </a>
     </div>
@@ -33,7 +33,7 @@
       <a href="/verificar-registros?seccion=salidas" class="text-decoration-none">
         <div class="card text-center p-3 {% if seccion=='salidas' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
           <h5 style="color:#e74c3c;font-weight:800">{{ stats.total_salidas }}</h5>
-          <small style="color:#aaa">Salidas</small>
+          <small style="color:var(--text-muted)">Salidas</small>
         </div>
       </a>
     </div>
@@ -41,7 +41,7 @@
       <a href="/verificar-registros?seccion=entregas" class="text-decoration-none">
         <div class="card text-center p-3 {% if seccion=='entregas' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
           <h5 style="color:#3498db;font-weight:800">{{ stats.total_entregas }}</h5>
-          <small style="color:#aaa">Entregas</small>
+          <small style="color:var(--text-muted)">Entregas</small>
         </div>
       </a>
     </div>
@@ -49,7 +49,7 @@
       <a href="/verificar-registros?seccion=usuarios" class="text-decoration-none">
         <div class="card text-center p-3 {% if seccion=='usuarios' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
           <h5 style="color:#9b59b6;font-weight:800">{{ stats.total_usuarios }}</h5>
-          <small style="color:#aaa">Usuarios</small>
+          <small style="color:var(--text-muted)">Usuarios</small>
         </div>
       </a>
     </div>
@@ -60,7 +60,7 @@
     <div class="col-md-4">
       <div class="card tc" style="border-radius:18px">
         <div class="card-body text-center">
-          <small style="color:#aaa">Detalle ventas</small>
+          <small style="color:var(--text-muted)">Detalle ventas</small>
           <h4 style="color:#f39c12;font-weight:800">{{ stats.total_detalle_ventas }}</h4>
         </div>
       </div>
@@ -68,7 +68,7 @@
     <div class="col-md-4">
       <div class="card tc" style="border-radius:18px">
         <div class="card-body text-center">
-          <small style="color:#aaa">Detalle ingresos</small>
+          <small style="color:var(--text-muted)">Detalle ingresos</small>
           <h4 style="color:#27ae60;font-weight:800">{{ stats.total_detalle_ingresos }}</h4>
         </div>
       </div>
@@ -76,7 +76,7 @@
     <div class="col-md-4">
       <div class="card tc" style="border-radius:18px">
         <div class="card-body text-center">
-          <small style="color:#aaa">Detalle salidas</small>
+          <small style="color:var(--text-muted)">Detalle salidas</small>
           <h4 style="color:#e74c3c;font-weight:800">{{ stats.total_detalle_salidas }}</h4>
         </div>
       </div>
@@ -84,7 +84,7 @@
   </div>
 
   <!-- LISTA DE REGISTROS -->
-  <div class="card mb-4" class="tc">
+  <div class="card mb-4 tc">
     <div class="card-body">
       <h5 style="color:#f39c12;font-weight:700" class="mb-3">
         {% if seccion=='ventas' %}Últimas 50 Ventas
@@ -98,31 +98,31 @@
       {% if seccion == 'resumen' %}
       <div class="row g-3">
         <div class="col-md-6 col-lg-4">
-          <div class="p-3" class="tc-accent" style="border-radius:12px">
+          <div class="p-3 tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-box-seam me-1"></i> Inventario</h6>
-            <p style="color:#ccc;margin:0">Productos: <strong>{{ stats.total_productos }}</strong></p>
-            <p style="color:#ccc;margin:0">Proveedores: <strong>{{ stats.total_proveedores }}</strong></p>
-            <p style="color:#ccc;margin:0">Pedidos pendientes: <strong>{{ stats.total_pedidos }}</strong></p>
+            <p style="color:var(--text-secondary);margin:0">Productos: <strong>{{ stats.total_productos }}</strong></p>
+            <p style="color:var(--text-secondary);margin:0">Proveedores: <strong>{{ stats.total_proveedores }}</strong></p>
+            <p style="color:var(--text-secondary);margin:0">Pedidos pendientes: <strong>{{ stats.total_pedidos }}</strong></p>
           </div>
         </div>
         <div class="col-md-6 col-lg-4">
-          <div class="p-3" class="tc-accent" style="border-radius:12px">
+          <div class="p-3 tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-receipt me-1"></i> Movimientos</h6>
-            <p style="color:#ccc;margin:0">Ventas: <strong>{{ stats.total_ventas }}</strong> ({{ stats.total_detalle_ventas }} items)</p>
-            <p style="color:#ccc;margin:0">Ingresos: <strong>{{ stats.total_ingresos }}</strong> ({{ stats.total_detalle_ingresos }} items)</p>
-            <p style="color:#ccc;margin:0">Salidas: <strong>{{ stats.total_salidas }}</strong> ({{ stats.total_detalle_salidas }} items)</p>
+            <p style="color:var(--text-secondary);margin:0">Ventas: <strong>{{ stats.total_ventas }}</strong> ({{ stats.total_detalle_ventas }} items)</p>
+            <p style="color:var(--text-secondary);margin:0">Ingresos: <strong>{{ stats.total_ingresos }}</strong> ({{ stats.total_detalle_ingresos }} items)</p>
+            <p style="color:var(--text-secondary);margin:0">Salidas: <strong>{{ stats.total_salidas }}</strong> ({{ stats.total_detalle_salidas }} items)</p>
           </div>
         </div>
         <div class="col-md-6 col-lg-4">
-          <div class="p-3" class="tc-accent" style="border-radius:12px">
+          <div class="p-3 tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-truck me-1"></i> Entregas</h6>
-            <p style="color:#ccc;margin:0">Total: <strong>{{ stats.total_entregas }}</strong></p>
+            <p style="color:var(--text-secondary);margin:0">Total: <strong>{{ stats.total_entregas }}</strong></p>
           </div>
         </div>
         <div class="col-12">
-          <div class="p-3" class="tc-accent" style="border-radius:12px">
+          <div class="p-3 tc-accent" style="border-radius:12px">
             <h6 style="color:#f39c12"><i class="bi bi-people me-1"></i> Usuarios</h6>
-            <p style="color:#ccc;margin:0">Total: <strong>{{ stats.total_usuarios }}</strong></p>
+            <p style="color:var(--text-secondary);margin:0">Total: <strong>{{ stats.total_usuarios }}</strong></p>
           </div>
         </div>
       </div>
@@ -150,40 +150,40 @@
             <tr>
               <td style="color:#f39c12;font-weight:700">{{ d.id }}</td>
               {% if seccion == 'ventas' %}
-                <td style="color:#ccc">{{ d.nombre or '—' }}</td>
-                <td style="color:#ccc">{{ d.documento or '—' }}</td>
+                <td style="color:var(--text-secondary)">{{ d.nombre or '—' }}</td>
+                <td style="color:var(--text-secondary)">{{ d.documento or '—' }}</td>
                 <td style="color:#27ae60;font-weight:600">S/ {{ "%.2f"|format(d.total|float) }}</td>
                 <td>
                   {% if d.estado == 'pagado' %}<span class="badge bg-success">Pagado</span>
                   {% elif d.estado == 'cancelado' %}<span class="badge bg-danger">Cancelado</span>
                   {% else %}<span class="badge bg-warning text-dark">{{ d.estado }}</span>{% endif %}
                 </td>
-                <td style="color:#aaa;font-size:13px">{{ d.fecha }}</td>
+                <td style="color:var(--text-muted);font-size:13px">{{ d.fecha }}</td>
               {% elif seccion == 'ingresos' %}
-                <td style="color:#ccc">{{ d.proveedor_nombre or '—' }}</td>
-                <td style="color:#ccc">{{ d.items or 0 }}</td>
-                <td style="color:#aaa;font-size:13px">{{ d.fecha }}</td>
+                <td style="color:var(--text-secondary)">{{ d.proveedor_nombre or '—' }}</td>
+                <td style="color:var(--text-secondary)">{{ d.items or 0 }}</td>
+                <td style="color:var(--text-muted);font-size:13px">{{ d.fecha }}</td>
               {% elif seccion == 'salidas' %}
-                <td style="color:#ccc">{{ d.cliente_nombre or '—' }}</td>
-                <td style="color:#ccc">{{ d.items or 0 }}</td>
-                <td style="color:#aaa;font-size:13px">{{ d.fecha }}</td>
+                <td style="color:var(--text-secondary)">{{ d.cliente_nombre or '—' }}</td>
+                <td style="color:var(--text-secondary)">{{ d.items or 0 }}</td>
+                <td style="color:var(--text-muted);font-size:13px">{{ d.fecha }}</td>
               {% elif seccion == 'entregas' %}
-                <td style="color:#ccc">{{ d.cliente_nombre or '—' }}</td>
+                <td style="color:var(--text-secondary)">{{ d.cliente_nombre or '—' }}</td>
                 <td style="color:#27ae60">S/ {{ "%.2f"|format(d.total|float) }}</td>
                 <td>
                   {% if d.estado=='entregado' %}<span class="badge bg-success">Entregado</span>
                   {% elif d.estado=='en camino' %}<span class="badge bg-info text-dark">En camino</span>
                   {% else %}<span class="badge bg-warning text-dark">{{ d.estado }}</span>{% endif %}
                 </td>
-                <td style="color:#aaa;font-size:13px">{{ d.fecha_entrega or '—' }}</td>
+                <td style="color:var(--text-muted);font-size:13px">{{ d.fecha_entrega or '—' }}</td>
               {% elif seccion == 'usuarios' %}
-                <td style="color:#ccc">{{ d.correo }}</td>
+                <td style="color:var(--text-secondary)">{{ d.correo }}</td>
                 <td><span class="badge" style="background:#f39c12;color:#000">{{ d.rol }}</span></td>
                 <td>
                   {% if d.estado == 'activo' %}<span class="badge bg-success">Activo</span>
                   {% else %}<span class="badge bg-secondary">{{ d.estado }}</span>{% endif %}
                 </td>
-                <td style="color:#aaa;font-size:13px">{{ d.created_at }}</td>
+                <td style="color:var(--text-muted);font-size:13px">{{ d.created_at }}</td>
               {% endif %}
             </tr>
             {% endfor %}
@@ -192,7 +192,7 @@
       </div>
       {% else %}
       <div class="text-center py-4">
-        <p style="color:#aaa">No hay registros para mostrar</p>
+        <p style="color:var(--text-muted)">No hay registros para mostrar</p>
       </div>
       {% endif %}
     </div>

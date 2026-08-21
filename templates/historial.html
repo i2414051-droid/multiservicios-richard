@@ -9,11 +9,10 @@
 
   {% if historial %}
     {% for venta in historial %}
-    <div class="card mb-4 shadow-sm border-0" class="tc-admin">
+    <div class="card mb-4 shadow-sm border-0 tc-admin">
 
       <!-- CABECERA -->
-      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
-           class="tc-admin-header" style="cursor:pointer"
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 tc-admin-header" style="cursor:pointer"
            data-bs-toggle="collapse"
            data-bs-target="#compra-{{ venta.id }}">
         <div class="d-flex align-items-center gap-3">

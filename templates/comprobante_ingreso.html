@@ -6,31 +6,31 @@
     <a href="/ingresos" class="btn" style="border:1px solid #f39c12;color:#f39c12;border-radius:20px">Volver</a>
   </div>
 
-  <div class="card mb-4" class="tc">
+  <div class="card mb-4 tc">
     <div class="card-body">
       <div class="row mb-3">
         <div class="col-md-4">
-          <small style="color:#888">Ingreso N°</small><br>
+          <small style="color:var(--text-muted)">Ingreso N°</small><br>
           <strong style="color:#f39c12;font-size:20px">#{{ ingreso.id }}</strong>
         </div>
         <div class="col-md-4">
-          <small style="color:#888">Fecha</small><br>
-          <strong style="color:white">{{ ingreso.fecha.strftime('%d/%m/%Y %H:%M') if ingreso.fecha else '-' }}</strong>
+          <small style="color:var(--text-muted)">Fecha</small><br>
+          <strong style="color:var(--text-primary)">{{ ingreso.fecha.strftime('%d/%m/%Y %H:%M') if ingreso.fecha else '-' }}</strong>
         </div>
         <div class="col-md-4">
-          <small style="color:#888">Proveedor</small><br>
-          <strong style="color:white">{{ ingreso.proveedor_nombre or 'Sin proveedor' }}</strong>
-          {% if ingreso.proveedor_ruc %}<br><small style="color:#aaa">RUC: {{ ingreso.proveedor_ruc }}</small>{% endif %}
-          {% if ingreso.proveedor_celular %}<br><small style="color:#aaa">Cel: {{ ingreso.proveedor_celular }}</small>{% endif %}
+          <small style="color:var(--text-muted)">Proveedor</small><br>
+          <strong style="color:var(--text-primary)">{{ ingreso.proveedor_nombre or 'Sin proveedor' }}</strong>
+          {% if ingreso.proveedor_ruc %}<br><small style="color:var(--text-muted)">RUC: {{ ingreso.proveedor_ruc }}</small>{% endif %}
+          {% if ingreso.proveedor_celular %}<br><small style="color:var(--text-muted)">Cel: {{ ingreso.proveedor_celular }}</small>{% endif %}
         </div>
       </div>
       {% if ingreso.notas %}
-      <div class="mb-3"><small style="color:#888">Notas:</small><br><span style="color:#ccc">{{ ingreso.notas }}</span></div>
+      <div class="mb-3"><small style="color:var(--text-muted)">Notas:</small><br><span style="color:var(--text-secondary)">{{ ingreso.notas }}</span></div>
       {% endif %}
     </div>
   </div>
 
-  <div class="card mb-4" class="tc">
+  <div class="card mb-4 tc">
     <div class="card-body p-0">
       <table class="table table-dark table-hover mb-0 text-center align-middle">
         <thead style="background:rgba(243,156,18,.1)">
@@ -44,9 +44,9 @@
         <tbody>
           {% for item in items %}
           <tr>
-            <td style="color:white">{{ item.producto_nombre }}</td>
+            <td style="color:var(--text-primary)">{{ item.producto_nombre }}</td>
             <td><span class="badge bg-info text-dark">{{ item.cantidad }}</span></td>
-            <td style="color:#ccc">S/ {{ "%.2f"|format(item.precio_compra|float) }}</td>
+            <td style="color:var(--text-secondary)">S/ {{ "%.2f"|format(item.precio_compra|float) }}</td>
             <td style="color:#f39c12;font-weight:700">S/ {{ "%.2f"|format(item.cantidad * item.precio_compra|float) }}</td>
           </tr>
           {% endfor %}

@@ -6,29 +6,29 @@
   <div class="row g-4 mt-2">
     <!-- DATOS -->
     <div class="col-md-6">
-      <div class="card h-100" class="tc">
+      <div class="card h-100 tc">
         <div class="card-body">
           <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-envelope me-1"></i> Datos de cuenta</h5>
           <form method="POST" action="/perfil">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <div class="mb-3">
-              <label class="form-label" style="color:#aaa">Correo electrónico</label>
+              <label class="form-label" style="color:var(--text-muted)">Correo electrónico</label>
               <input type="email" class="form-control bg-dark text-white border-0" name="correo"
                      value="{{ usuario.correo }}">
             </div>
             <div class="mb-3">
-              <label class="form-label" style="color:#aaa">Rol</label>
+              <label class="form-label" style="color:var(--text-muted)">Rol</label>
               <input type="text" class="form-control bg-dark text-white border-0" value="{{ usuario.rol }}" disabled>
             </div>
             <div class="mb-3">
-              <label class="form-label" style="color:#aaa">Estado</label>
+              <label class="form-label" style="color:var(--text-muted)">Estado</label>
               <span class="badge {% if usuario.estado=='activo' %}bg-success{% else %}bg-danger{% endif %}">
                 {{ usuario.estado }}
               </span>
             </div>
             <div class="mb-3">
-              <label class="form-label" style="color:#aaa">Miembro desde</label>
-              <p style="color:#ccc;margin:0">{{ usuario.created_at }}</p>
+              <label class="form-label" style="color:var(--text-muted)">Miembro desde</label>
+              <p style="color:var(--text-secondary);margin:0">{{ usuario.created_at }}</p>
             </div>
             <button type="submit" class="btn btn-warning fw-bold">
               <i class="bi bi-check-lg me-1"></i> Actualizar correo
@@ -40,21 +40,21 @@
 
     <!-- CONTRASEÑA -->
     <div class="col-md-6">
-      <div class="card h-100" class="tc">
+      <div class="card h-100 tc">
         <div class="card-body">
           <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-lock me-1"></i> Cambiar contraseña</h5>
           <form method="POST" action="/cambiar-password">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <div class="mb-3">
-              <label class="form-label" style="color:#aaa">Contraseña actual</label>
+              <label class="form-label" style="color:var(--text-muted)">Contraseña actual</label>
               <input type="password" class="form-control bg-dark text-white border-0" name="actual" required>
             </div>
             <div class="mb-3">
-              <label class="form-label" style="color:#aaa">Nueva contraseña</label>
+              <label class="form-label" style="color:var(--text-muted)">Nueva contraseña</label>
               <input type="password" class="form-control bg-dark text-white border-0" name="nueva" required minlength="6">
             </div>
             <div class="mb-3">
-              <label class="form-label" style="color:#aaa">Confirmar nueva contraseña</label>
+              <label class="form-label" style="color:var(--text-muted)">Confirmar nueva contraseña</label>
               <input type="password" class="form-control bg-dark text-white border-0" name="confirmar_password" required>
             </div>
             <button type="submit" class="btn btn-warning fw-bold">

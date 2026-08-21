@@ -12,8 +12,8 @@
   </div>
 
   <!-- FORMULARIO AGREGAR / EDITAR -->
-  <div class="card border-0 shadow mb-4" class="tc-admin">
-    <div class="card-header" class="tc-admin-header">
+  <div class="card border-0 shadow mb-4 tc-admin">
+    <div class="card-header tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-person-plus me-2 text-info"></i>
         {% if editar %}Editar Proveedor: {{ editar.nombre }}{% else %}Agregar Nuevo Proveedor{% endif %}
@@ -116,8 +116,8 @@
   </form>
 
   <!-- TABLA PROVEEDORES -->
-  <div class="card border-0 shadow" class="tc-admin">
-    <div class="card-header" class="tc-admin-header">
+  <div class="card border-0 shadow tc-admin">
+    <div class="card-header tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-people me-2"></i>Proveedores registrados
         <span class="badge bg-info ms-2">{{ proveedores|length }}</span>

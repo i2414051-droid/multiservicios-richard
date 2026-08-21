@@ -6,38 +6,38 @@
     <a href="/salidas" class="btn" style="border:1px solid #f39c12;color:#f39c12;border-radius:20px">Volver</a>
   </div>
 
-  <div class="card mb-4" class="tc">
+  <div class="card mb-4 tc">
     <div class="card-body">
       <div class="row mb-3">
         <div class="col-md-3">
-          <small style="color:#888">Salida N°</small><br>
+          <small style="color:var(--text-muted)">Salida N°</small><br>
           <strong style="color:#f39c12;font-size:20px">#{{ salida.id }}</strong>
         </div>
         <div class="col-md-3">
-          <small style="color:#888">Fecha</small><br>
-          <strong style="color:white">{{ salida.fecha.strftime('%d/%m/%Y %H:%M') if salida.fecha else '-' }}</strong>
+          <small style="color:var(--text-muted)">Fecha</small><br>
+          <strong style="color:var(--text-primary)">{{ salida.fecha.strftime('%d/%m/%Y %H:%M') if salida.fecha else '-' }}</strong>
         </div>
         <div class="col-md-3">
-          <small style="color:#888">Venta asociada</small><br>
+          <small style="color:var(--text-muted)">Venta asociada</small><br>
           {% if salida.venta_id %}
           <span class="badge bg-primary" style="font-size:14px">#{{ salida.venta_id }}</span>
           {% else %}
-          <span style="color:#666">Sin venta</span>
+          <span style="color:var(--text-muted)">Sin venta</span>
           {% endif %}
         </div>
         <div class="col-md-3">
-          <small style="color:#888">Cliente</small><br>
-          <strong style="color:white">{{ salida.cliente_nombre or '-' }}</strong>
-          {% if salida.cliente_doc %}<br><small style="color:#aaa">{{ salida.cliente_doc }}</small>{% endif %}
+          <small style="color:var(--text-muted)">Cliente</small><br>
+          <strong style="color:var(--text-primary)">{{ salida.cliente_nombre or '-' }}</strong>
+          {% if salida.cliente_doc %}<br><small style="color:var(--text-muted)">{{ salida.cliente_doc }}</small>{% endif %}
         </div>
       </div>
       {% if salida.notas %}
-      <div><small style="color:#888">Notas:</small><br><span style="color:#ccc">{{ salida.notas }}</span></div>
+      <div><small style="color:var(--text-muted)">Notas:</small><br><span style="color:var(--text-secondary)">{{ salida.notas }}</span></div>
       {% endif %}
     </div>
   </div>
 
-  <div class="card mb-4" class="tc">
+  <div class="card mb-4 tc">
     <div class="card-body p-0">
       <table class="table table-dark table-hover mb-0 text-center align-middle">
         <thead style="background:rgba(243,156,18,.1)">
@@ -50,7 +50,7 @@
         <tbody>
           {% for item in items %}
           <tr>
-            <td style="color:white">{{ item.producto_nombre }}</td>
+            <td style="color:var(--text-primary)">{{ item.producto_nombre }}</td>
             <td><span class="badge bg-info text-dark">{{ item.cantidad }}</span></td>
             <td>
               {% if item.stock_actual <= 0 %}
