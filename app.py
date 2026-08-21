@@ -1,4 +1,4 @@
-import os, uuid, io, threading, secrets
+import os, uuid, io, threading, secrets, time
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -103,6 +103,26 @@ def init_db():
             cur.execute("ALTER TABLE usuarios ADD COLUMN recuperacion_expira DATETIME")
         except Exception:
             pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN nombre VARCHAR(100)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN apellido VARCHAR(50)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN telefono VARCHAR(15)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN documento_tipo VARCHAR(5)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD COLUMN documento_numero VARCHAR(15)")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS carrito (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -149,6 +169,26 @@ def init_db():
             pass
         try:
             cur.execute("ALTER TABLE ventas ADD COLUMN direccion_envio TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN apellido VARCHAR(50)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN telefono VARCHAR(15)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN correo VARCHAR(100)")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN notas_entrega TEXT")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE ventas ADD COLUMN comprobante_pago VARCHAR(255)")
         except Exception:
             pass
         cur.execute("""
@@ -854,6 +894,64 @@ def consultar(tipo, numero):
         return jsonify(data)
     except Exception as e:
         return jsonify({'error': str(e)})
+
+# ─────────────────────────────────────────────
+# VALIDAR DOCUMENTO (para checkout - clientes)
+# ─────────────────────────────────────────────
+@app.route('/api/validar-documento', methods=['POST'])
+def api_validar_documento():
+    if 'user_id' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    data = request.get_json()
+    tipo = data.get('tipo', '')
+    numero = data.get('numero', '')
+    nombres = data.get('nombres', '').strip()
+    apellidos = data.get('apellidos', '').strip()
+    if tipo not in ['dni', 'ruc']:
+        return jsonify({'error': 'Tipo inválido', 'valido': False})
+    if not numero or not nombres or not apellidos:
+        return jsonify({'error': 'Campos incompletos', 'valido': False})
+    if tipo == 'dni' and len(numero) != 8:
+        return jsonify({'error': 'DNI debe tener 8 dígitos', 'valido': False})
+    if tipo == 'ruc' and len(numero) != 11:
+        return jsonify({'error': 'RUC debe tener 11 dígitos', 'valido': False})
+    if not TOKEN:
+        return jsonify({'error': 'API no configurada', 'valido': False})
+    url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
+    try:
+        resp = requests.get(url, timeout=10)
+        api_data = resp.json()
+        if 'error' in api_data:
+            return jsonify({'error': 'Documento no encontrado en registros', 'valido': False})
+        if tipo == 'dni':
+            api_nombre = f"{api_data.get('nombres', '')} {api_data.get('apellidoPaterno', '')} {api_data.get('apellidoMaterno', '')}".strip()
+            api_estado = api_data.get('estado', '')
+            if api_estado and api_estado.upper() != 'ACTIVO':
+                return jsonify({'error': f'Estado del DNI: {api_estado}', 'valido': False})
+        else:
+            api_nombre = api_data.get('razonSocial', '')
+            api_estado = api_data.get('estado', '')
+            api_condicion = api_data.get('condicion', '')
+            if api_estado and api_estado.upper() != 'ACTIVO':
+                return jsonify({'error': f'Estado del RUC: {api_estado}', 'valido': False})
+            if api_condicion and 'HABIDO' not in api_condicion.upper():
+                return jsonify({'error': f'Condición: {api_condicion}', 'valido': False})
+        usuario_nombre = f"{nombres} {apellidos}".strip().upper()
+        api_nombre_upper = api_nombre.upper()
+        if usuario_nombre not in api_nombre_upper and api_nombre_upper not in usuario_nombre:
+            similitud = sum(1 for a, b in zip(usuario_nombre.split(), api_nombre_upper.split()) if a == b)
+            total_palabras = max(len(usuario_nombre.split()), len(api_nombre_upper.split()))
+            if total_palabras > 0 and similitud / total_palabras < 0.5:
+                return jsonify({
+                    'error': f'Los datos no coinciden. Registrado: {api_nombre}',
+                    'valido': False,
+                    'api_nombre': api_nombre
+                })
+        return jsonify({'valido': True, 'api_nombre': api_nombre})
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Servicio temporalmente no disponible. Intenta de nuevo.', 'valido': False})
+    except Exception as e:
+        return jsonify({'error': 'Error al validar documento', 'valido': False})
 
 # ─────────────────────────────────────────────
 # TIENDA / CARRITO
@@ -2001,7 +2099,7 @@ def checkout():
     total = sum(p['precio'] * p['cantidad'] for p in items)
     cur.execute("SELECT * FROM direcciones WHERE usuario_id=%s ORDER BY predeterminada DESC", (user_id,))
     direcciones = cur.fetchall()
-    cur.execute("SELECT correo FROM usuarios WHERE id=%s", (user_id,))
+    cur.execute("SELECT correo, nombre, apellido, telefono, documento_tipo, documento_numero FROM usuarios WHERE id=%s", (user_id,))
     usuario = cur.fetchone()
     cur.close()
     return render_template('checkout.html', items=items, total=total,
@@ -2015,10 +2113,50 @@ def procesar_compra():
         flash('Token CSRF inválido.', 'danger')
         return redirect('/checkout')
     user_id = int(session['user_id'])
+
+    nombres = request.form.get('nombres', '').strip()
+    apellidos = request.form.get('apellidos', '').strip()
+    doc_tipo = request.form.get('doc_tipo', 'dni')
+    doc_numero = request.form.get('doc_numero', '').strip()
+    telefono = request.form.get('telefono', '').strip()
+    correo = request.form.get('correo', '').strip()
     metodo_pago = request.form.get('metodo_pago', 'efectivo')
     direccion_envio = request.form.get('direccion_envio', '')
+    notas_entrega = request.form.get('notas_entrega', '').strip()
+
+    if not all([nombres, apellidos, doc_numero, telefono, direccion_envio]):
+        flash('Todos los campos son obligatorios.', 'danger')
+        return redirect('/checkout')
+    if doc_tipo == 'dni' and (len(doc_numero) != 8 or not doc_numero.isdigit()):
+        flash('DNI debe tener exactamente 8 dígitos.', 'danger')
+        return redirect('/checkout')
+    if doc_tipo == 'ruc' and (len(doc_numero) != 11 or not doc_numero.isdigit()):
+        flash('RUC debe tener exactamente 11 dígitos.', 'danger')
+        return redirect('/checkout')
+    if len(telefono) < 9 or not telefono.isdigit():
+        flash('Celular debe tener al menos 9 dígitos.', 'danger')
+        return redirect('/checkout')
+
+    comprobante_filename = ''
+    if metodo_pago in ['yape', 'plin', 'transferencia']:
+        comprobante = request.files.get('comprobante_pago')
+        if comprobante and comprobante.filename:
+            ext = os.path.splitext(comprobante.filename)[1].lower()
+            if ext in ['.jpg', '.jpeg', '.png', '.webp', '.pdf']:
+                fn = f"comprobante_{user_id}_{int(time.time())}{ext}"
+                comprobante.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
+                comprobante_filename = 'uploads/' + fn
+            else:
+                flash('Formato de comprobante no válido. Use JPG, PNG o PDF.', 'danger')
+                return redirect('/checkout')
+
     cur = mysql.connection.cursor()
     try:
+        cur.execute("SELECT id FROM ventas WHERE cliente_id=%s AND fecha > NOW() - INTERVAL 30 SECOND", (user_id,))
+        if cur.fetchone():
+            flash('Ya estás procesando una compra. Espera unos segundos.', 'warning')
+            return redirect('/checkout')
+
         cur.execute(f"""
             SELECT p.id, p.nombre, p.precio, c.cantidad
             FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
@@ -2036,8 +2174,11 @@ def procesar_compra():
                 flash(f'Stock insuficiente para: {item["nombre"]}. Solo quedan {stock} unidad(es).', 'danger')
                 return redirect('/carrito')
             total += item['precio'] * item['cantidad']
-        cur.execute("INSERT INTO ventas (cliente_id, total, metodo_pago, direccion_envio) VALUES(%s,%s,%s,%s)",
-                    (user_id, total, metodo_pago, direccion_envio))
+
+        cur.execute("""INSERT INTO ventas
+            (cliente_id, total, metodo_pago, direccion_envio, documento, nombre, apellido, telefono, correo, notas_entrega, comprobante_pago)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (user_id, total, metodo_pago, direccion_envio, doc_numero, nombres, apellidos, telefono, correo, notas_entrega, comprobante_filename or None))
         venta_id = cur.lastrowid
         for item in items:
             cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
@@ -2045,7 +2186,21 @@ def procesar_compra():
             cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
             verificar_stock_bajo(cur, item['id'])
         cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
+
+        cur.execute("""UPDATE usuarios SET
+            nombre=IFNULL(nombre,%s), apellido=IFNULL(apellido,%s),
+            telefono=IFNULL(telefono,%s), documento_tipo=IFNULL(documento_tipo,%s),
+            documento_numero=IFNULL(documento_numero,%s)
+            WHERE id=%s""",
+            (nombres, apellidos, telefono, doc_tipo, doc_numero, user_id))
+
         mysql.connection.commit()
+
+        try:
+            enviar_boleta_cliente(correo, venta_id)
+        except Exception:
+            pass
+
         return redirect(f'/confirmacion/{venta_id}')
     except Exception as e:
         mysql.connection.rollback()

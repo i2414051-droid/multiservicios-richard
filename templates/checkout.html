@@ -1,132 +1,239 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="container mt-4">
+<div class="container mt-4" style="max-width:900px">
   <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-credit-card"></i> Checkout</h2>
 
-  <form method="POST" action="/procesar_compra" id="checkoutForm">
+  <form method="POST" action="/procesar_compra" id="checkoutForm" enctype="multipart/form-data">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="metodo_pago" id="metodoPagoHidden" value="efectivo">
 
-    <div class="row g-4 mt-2">
-      <!-- RESUMEN DE COMPRA -->
-      <div class="col-lg-7">
-        <div class="card mb-4 tc">
-          <div class="card-body">
-            <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-bag me-2"></i>Productos ({{ items|length }})</h5>
-            {% for item in items %}
-            <div class="d-flex align-items-center gap-3 py-2 t-line">
-              {% if item.imagen %}
-              <img src="/static/{{ item.imagen }}" style="width:50px;height:50px;object-fit:cover;border-radius:10px" alt="">
-              {% else %}
-              <div style="width:50px;height:50px;background:var(--bg-body-3);border-radius:10px;display:flex;align-items:center;justify-content:center">
-                <i class="bi bi-image" style="color:var(--text-muted)"></i>
-              </div>
-              {% endif %}
-              <div class="flex-grow-1">
-                <span style="color:var(--text-primary);font-weight:600">{{ item.nombre }}</span><br>
-                <small style="color:var(--text-muted)">Cant: {{ item.cantidad }} × S/ {{ "%.2f"|format(item.precio|float) }}</small>
-              </div>
-              <span style="color:#27ae60;font-weight:700">S/ {{ "%.2f"|format(item.precio|float * item.cantidad|int) }}</span>
-            </div>
-            {% endfor %}
-
-            <div class="mt-3 d-flex justify-content-between align-items-center">
-              <span style="color:var(--text-primary);font-size:1.2em;font-weight:700">TOTAL</span>
-              <span style="color:#27ae60;font-size:1.4em;font-weight:800">S/ {{ "%.2f"|format(total) }}</span>
-            </div>
+    <!-- ═══════════════════════════════════ -->
+    <!-- 1. DATOS PERSONALES -->
+    <!-- ═══════════════════════════════════ -->
+    <div class="card mb-4 tc">
+      <div class="card-body">
+        <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-person me-2"></i>Datos personales</h5>
+        <div class="row g-3 mt-1">
+          <div class="col-md-6">
+            <label class="form-label">Nombres</label>
+            <input type="text" name="nombres" id="nombres" class="form-control"
+                   value="{{ usuario.nombre or '' }}" required placeholder="Ej: Juan Carlos">
           </div>
-        </div>
-
-        <!-- DIRECCIÓN DE ENVÍO -->
-        <div class="card mb-4 tc">
-          <div class="card-body">
-            <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-geo-alt me-2"></i>Dirección de envío</h5>
-            {% if direcciones %}
-            {% for d in direcciones %}
-            <label class="d-flex align-items-start gap-3 p-3 mb-2" style="background:rgba(243,156,18,.05);border-radius:12px;cursor:pointer;border:2px solid transparent;transition:.2s"
-                   onmouseover="this.style.borderColor='rgba(243,156,18,.3)'" onmouseout="this.style.borderColor='transparent'">
-              <input type="radio" name="direccion_envio" value="{{ d.direccion }}, {{ d.distrito or '' }}"
-                     class="form-check-input mt-1" {% if loop.first %}checked{% endif %} required>
-              <div>
-                <span style="color:var(--text-primary);font-weight:600">{{ d.direccion }}</span>
-                {% if d.distrito %}<br><small style="color:var(--text-muted)">{{ d.distrito }}</small>{% endif %}
-                {% if d.referencia %}<br><small style="color:var(--text-muted)">{{ d.referencia }}</small>{% endif %}
-                {% if d.predeterminada %}<span class="badge ms-2" style="background:#f39c12;color:#000;font-size:10px">Principal</span>{% endif %}
-              </div>
-            </label>
-            {% endfor %}
-            {% else %}
-            <div class="p-3" style="background:rgba(241,196,15,.08);border-radius:12px">
-              <p style="color:#f1c40f;margin:0">No tienes direcciones guardadas.</p>
-              <a href="/direcciones/nueva" style="color:#f39c12">Agregar dirección</a>
-            </div>
-            {% endif %}
-
-            <div class="mt-3">
-              <input type="text" class="form-control bg-dark text-white border-0" name="direccion_envio_texto"
-                     placeholder="O escribe una dirección aquí..." id="direccionManual">
-            </div>
+          <div class="col-md-6">
+            <label class="form-label">Apellidos</label>
+            <input type="text" name="apellidos" id="apellidos" class="form-control"
+                   value="{{ usuario.apellido or '' }}" required placeholder="Ej: Pérez López">
           </div>
-        </div>
-      </div>
-
-      <!-- MÉTODO DE PAGO -->
-      <div class="col-lg-5">
-        <div class="card tc">
-          <div class="card-body">
-            <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-wallet2 me-2"></i>Método de pago</h5>
-
-            <div class="d-grid gap-2 mt-3">
-              <label class="metodo-pago active" data-metodo="efectivo">
-                <input type="radio" name="metodo_radio" value="efectivo" checked class="d-none"
-                       onchange="document.getElementById('metodoPagoHidden').value='efectivo';document.querySelectorAll('.metodo-pago').forEach(m=>m.classList.remove('active'));this.closest('.metodo-pago').classList.add('active')">
-                <i class="bi bi-cash-stack" style="font-size:24px;color:#27ae60"></i>
-                <div><strong style="color:var(--text-primary)">Efectivo</strong><br><small style="color:var(--text-muted)">Pago contra entrega</small></div>
-              </label>
-
-              <label class="metodo-pago" data-metodo="yape">
-                <input type="radio" name="metodo_radio" value="yape" class="d-none"
-                       onchange="document.getElementById('metodoPagoHidden').value='yape';document.querySelectorAll('.metodo-pago').forEach(m=>m.classList.remove('active'));this.closest('.metodo-pago').classList.add('active')">
-                <i class="bi bi-phone" style="font-size:24px;color:#9b59b6"></i>
-                <div><strong style="color:var(--text-primary)">Yape</strong><br><small style="color:var(--text-muted)">Transferencia instantánea</small></div>
-              </label>
-
-              <label class="metodo-pago" data-metodo="plin">
-                <input type="radio" name="metodo_radio" value="plin" class="d-none"
-                       onchange="document.getElementById('metodoPagoHidden').value='plin';document.querySelectorAll('.metodo-pago').forEach(m=>m.classList.remove('active'));this.closest('.metodo-pago').classList.add('active')">
-                <i class="bi bi-phone" style="font-size:24px;color:#3498db"></i>
-                <div><strong style="color:var(--text-primary)">Plin</strong><br><small style="color:var(--text-muted)">Transferencia instantánea</small></div>
-              </label>
-
-              <label class="metodo-pago" data-metodo="transferencia">
-                <input type="radio" name="metodo_radio" value="transferencia" class="d-none"
-                       onchange="document.getElementById('metodoPagoHidden').value='transferencia';document.querySelectorAll('.metodo-pago').forEach(m=>m.classList.remove('active'));this.closest('.metodo-pago').classList.add('active')">
-                <i class="bi bi-bank" style="font-size:24px;color:#f39c12"></i>
-                <div><strong style="color:var(--text-primary)">Transferencia bancaria</strong><br><small style="color:var(--text-muted)">Depósito o transferencia</small></div>
-              </label>
-
-              <label class="metodo-pago" data-metodo="tarjeta">
-                <input type="radio" name="metodo_radio" value="tarjeta" class="d-none"
-                       onchange="document.getElementById('metodoPagoHidden').value='tarjeta';document.querySelectorAll('.metodo-pago').forEach(m=>m.classList.remove('active'));this.closest('.metodo-pago').classList.add('active')">
-                <i class="bi bi-credit-card" style="font-size:24px;color:#e74c3c"></i>
-                <div><strong style="color:var(--text-primary)">Tarjeta</strong><br><small style="color:var(--text-muted)">Débito o crédito</small></div>
-              </label>
+          <div class="col-md-4">
+            <label class="form-label">Tipo de documento</label>
+            <select name="doc_tipo" id="docTipo" class="form-select" onchange="onDocTipoChange()">
+              <option value="dni" {% if usuario.documento_tipo == 'dni' %}selected{% endif %}>DNI</option>
+              <option value="ruc" {% if usuario.documento_tipo == 'ruc' %}selected{% endif %}>RUC</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">N° Documento</label>
+            <div class="input-group">
+              <input type="text" name="doc_numero" id="docNumero" class="form-control"
+                     value="{{ usuario.documento_numero or '' }}" required
+                     maxlength="11" inputmode="numeric" placeholder="8 o 11 dígitos"
+                     oninput="autoDetectDocTipo(this.value)">
+              <button type="button" class="btn btn-outline-warning" id="btnValidarDoc" onclick="validarDocumento()">
+                <i class="bi bi-check-circle"></i> Validar
+              </button>
             </div>
-
-            <button type="submit" class="btn btn-warning btn-lg fw-bold w-100 mt-4" style="border-radius:15px">
-              <i class="bi bi-check-circle me-1"></i> Confirmar compra — S/ {{ "%.2f"|format(total) }}
-            </button>
-
-            <a href="/carrito" class="btn btn-outline-light w-100 mt-2" style="border-radius:15px">
-              <i class="bi bi-arrow-left me-1"></i> Volver al carrito
-            </a>
+            <div id="docStatus" class="mt-1" style="font-size:12px"></div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Celular</label>
+            <input type="text" name="telefono" id="telefono" class="form-control"
+                   value="{{ usuario.telefono or '' }}" required
+                   maxlength="9" inputmode="numeric" placeholder="912345678">
+          </div>
+          <div class="col-md-12">
+            <label class="form-label">Correo electrónico</label>
+            <input type="email" name="correo" class="form-control"
+                   value="{{ usuario.correo or '' }}" readonly
+                   style="background:var(--bg-body-3);opacity:0.7">
           </div>
         </div>
       </div>
     </div>
+
+    <!-- ═══════════════════════════════════ -->
+    <!-- 2. RESUMEN DE COMPRA -->
+    <!-- ═══════════════════════════════════ -->
+    <div class="card mb-4 tc">
+      <div class="card-body">
+        <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-bag me-2"></i>Productos ({{ items|length }})</h5>
+        {% for item in items %}
+        <div class="d-flex align-items-center gap-3 py-2 t-line">
+          {% if item.imagen %}
+          <img src="/static/{{ item.imagen }}" style="width:50px;height:50px;object-fit:cover;border-radius:10px" alt="">
+          {% else %}
+          <div style="width:50px;height:50px;background:var(--bg-body-3);border-radius:10px;display:flex;align-items:center;justify-content:center">
+            <i class="bi bi-image" style="color:var(--text-muted)"></i>
+          </div>
+          {% endif %}
+          <div class="flex-grow-1">
+            <span style="color:var(--text-primary);font-weight:600">{{ item.nombre }}</span><br>
+            <small style="color:var(--text-muted)">Cant: {{ item.cantidad }} × S/ {{ "%.2f"|format(item.precio|float) }}</small>
+          </div>
+          <span style="color:#27ae60;font-weight:700">S/ {{ "%.2f"|format(item.precio|float * item.cantidad|int) }}</span>
+        </div>
+        {% endfor %}
+        <div class="mt-3 d-flex justify-content-between align-items-center">
+          <span style="color:var(--text-primary);font-size:1.2em;font-weight:700">TOTAL</span>
+          <span style="color:#27ae60;font-size:1.4em;font-weight:800">S/ {{ "%.2f"|format(total) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════ -->
+    <!-- 3. DIRECCIÓN DE ENVÍO + MAPA -->
+    <!-- ═══════════════════════════════════ -->
+    <div class="card mb-4 tc">
+      <div class="card-body">
+        <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-geo-alt me-2"></i>Dirección de envío</h5>
+
+        {% if direcciones %}
+        {% for d in direcciones %}
+        <label class="d-flex align-items-start gap-3 p-3 mb-2 checkout-address-option"
+               onclick="seleccionarDireccion(this, '{{ d.direccion|e }}{% if d.distrito %}, {{ d.distrito|e }}{% endif %}')">
+          <input type="radio" name="direccion_envio_select" value="{{ d.direccion }}, {{ d.distrito or '' }}"
+                 class="form-check-input mt-1" {% if loop.first %}checked{% endif %}>
+          <div>
+            <span style="color:var(--text-primary);font-weight:600">{{ d.direccion }}</span>
+            {% if d.distrito %}<br><small style="color:var(--text-muted)">{{ d.distrito }}</small>{% endif %}
+            {% if d.referencia %}<br><small style="color:var(--text-muted)">{{ d.referencia }}</small>{% endif %}
+            {% if d.predeterminada %}<span class="badge ms-2" style="background:#f39c12;color:#000;font-size:10px">Principal</span>{% endif %}
+          </div>
+        </label>
+        {% endfor %}
+        {% endif %}
+
+        <div class="mt-3">
+          <label class="form-label">Dirección de entrega</label>
+          <input type="text" class="form-control" name="direccion_envio" id="direccionEnvio"
+                 placeholder="Escribe o selecciona en el mapa..." required>
+        </div>
+
+        <div class="mt-2">
+          <button type="button" class="btn btn-sm btn-outline-warning" onclick="obtenerUbicacion()">
+            <i class="bi bi-geo-alt-fill me-1"></i> Mi ubicación
+          </button>
+        </div>
+
+        <div id="mapaContainer" class="mt-3" style="display:none">
+          <div id="mapa" style="height:250px;border-radius:12px;border:1px solid var(--border-card)"></div>
+          <small style="color:var(--text-muted)">Haz clic en el mapa para colocar tu dirección</small>
+        </div>
+
+        <div class="mt-3">
+          <label class="form-label">Notas de entrega <small style="color:var(--text-muted)">(opcional)</small></label>
+          <textarea name="notas_entrega" class="form-control" rows="2"
+                    placeholder="Ej: Dejar en la portería, llamar al llegar, 3er piso depto B..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════ -->
+    <!-- 4. MÉTODO DE PAGO -->
+    <!-- ═══════════════════════════════════ -->
+    <div class="card mb-4 tc">
+      <div class="card-body">
+        <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-wallet2 me-2"></i>Método de pago</h5>
+        <div class="d-grid gap-2 mt-3">
+          <label class="metodo-pago active" data-metodo="efectivo">
+            <input type="radio" name="metodo_radio" value="efectivo" checked class="d-none"
+                   onchange="cambiarMetodo('efectivo')">
+            <i class="bi bi-cash-stack" style="font-size:24px;color:#27ae60"></i>
+            <div><strong style="color:var(--text-primary)">Efectivo</strong><br><small style="color:var(--text-muted)">Pago contra entrega</small></div>
+          </label>
+          <label class="metodo-pago" data-metodo="yape">
+            <input type="radio" name="metodo_radio" value="yape" class="d-none"
+                   onchange="cambiarMetodo('yape')">
+            <i class="bi bi-phone" style="font-size:24px;color:#9b59b6"></i>
+            <div><strong style="color:var(--text-primary)">Yape</strong><br><small style="color:var(--text-muted)">Transferencia instantánea</small></div>
+          </label>
+          <label class="metodo-pago" data-metodo="plin">
+            <input type="radio" name="metodo_radio" value="plin" class="d-none"
+                   onchange="cambiarMetodo('plin')">
+            <i class="bi bi-phone" style="font-size:24px;color:#3498db"></i>
+            <div><strong style="color:var(--text-primary)">Plin</strong><br><small style="color:var(--text-muted)">Transferencia instantánea</small></div>
+          </label>
+          <label class="metodo-pago" data-metodo="transferencia">
+            <input type="radio" name="metodo_radio" value="transferencia" class="d-none"
+                   onchange="cambiarMetodo('transferencia')">
+            <i class="bi bi-bank" style="font-size:24px;color:#f39c12"></i>
+            <div><strong style="color:var(--text-primary)">Transferencia bancaria</strong><br><small style="color:var(--text-muted)">Depósito o transferencia</small></div>
+          </label>
+          <label class="metodo-pago" data-metodo="tarjeta">
+            <input type="radio" name="metodo_radio" value="tarjeta" class="d-none"
+                   onchange="cambiarMetodo('tarjeta')">
+            <i class="bi bi-credit-card" style="font-size:24px;color:#e74c3c"></i>
+            <div><strong style="color:var(--text-primary)">Tarjeta</strong><br><small style="color:var(--text-muted)">Débito o crédito</small></div>
+          </label>
+        </div>
+
+        <!-- COMPROBANTE DE PAGO -->
+        <div id="comprobanteSection" class="mt-3" style="display:none">
+          <div id="comprobanteInfo" class="p-3 mb-2" style="background:rgba(243,156,18,.08);border-radius:12px;font-size:13px">
+          </div>
+          <label class="form-label">Subir comprobante de pago <small style="color:var(--text-muted)">(jpg, png o pdf)</small></label>
+          <input type="file" name="comprobante_pago" class="form-control" accept=".jpg,.jpeg,.png,.webp,.pdf">
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════ -->
+    <!-- 5. CONFIRMACIÓN FINAL -->
+    <!-- ═══════════════════════════════════ -->
+    <div class="card mb-4 tc" id="resumenCard" style="display:none">
+      <div class="card-body">
+        <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-clipboard-check me-2"></i>Resumen de tu pedido</h5>
+        <div class="row mt-3" style="font-size:14px">
+          <div class="col-md-6">
+            <p style="margin:4px 0"><span style="color:var(--text-muted)">Nombre:</span> <strong id="resNombre"></strong></p>
+            <p style="margin:4px 0"><span style="color:var(--text-muted)">Documento:</span> <strong id="resDoc"></strong></p>
+            <p style="margin:4px 0"><span style="color:var(--text-muted)">Celular:</span> <strong id="resTel"></strong></p>
+            <p style="margin:4px 0"><span style="color:var(--text-muted)">Correo:</span> <strong id="resCorreo"></strong></p>
+          </div>
+          <div class="col-md-6">
+            <p style="margin:4px 0"><span style="color:var(--text-muted)">Dirección:</span> <strong id="resDireccion"></strong></p>
+            <p style="margin:4px 0"><span style="color:var(--text-muted)">Notas:</span> <strong id="resNotas"></strong></p>
+            <p style="margin:4px 0"><span style="color:var(--text-muted)">Pago:</span> <strong id="resPago"></strong></p>
+            <p style="margin:4px 0;color:#27ae60;font-size:18px;font-weight:800">TOTAL: <span id="resTotal"></span></p>
+          </div>
+        </div>
+        <div class="form-check mt-3">
+          <input class="form-check-input" type="checkbox" id="confirmarDatos" required>
+          <label class="form-check-label" for="confirmarDatos" style="color:var(--text-primary)">
+            Confirmo que todos los datos son correctos
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTONES -->
+    <div class="d-grid gap-2">
+      <button type="button" class="btn btn-warning btn-lg fw-bold" id="btnConfirmar"
+              style="border-radius:15px" onclick="mostrarResumen()">
+        <i class="bi bi-arrow-right-circle me-1"></i> Revisar mi pedido
+      </button>
+      <button type="submit" class="btn btn-success btn-lg fw-bold" id="btnComprar"
+              style="border-radius:15px;display:none" disabled>
+        <i class="bi bi-check-circle me-1"></i> Confirmar compra — S/ {{ "%.2f"|format(total) }}
+      </button>
+      <a href="/carrito" class="btn btn-outline-light" style="border-radius:15px">
+        <i class="bi bi-arrow-left me-1"></i> Volver al carrito
+      </a>
+    </div>
   </form>
 </div>
 
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   .metodo-pago {
     display:flex;align-items:center;gap:12px;padding:14px 16px;
@@ -135,5 +242,189 @@
   }
   .metodo-pago:hover { border-color:rgba(243,156,18,.3); }
   .metodo-pago.active { border-color:#f39c12;background:var(--tc-accent,rgba(243,156,18,.08)); }
+  .checkout-address-option {
+    background:rgba(243,156,18,.05);border-radius:12px;cursor:pointer;border:2px solid transparent;transition:.2s;
+  }
+  .checkout-address-option:hover { border-color:rgba(243,156,18,.3); }
 </style>
+<script>
+var mapa = null;
+var marcador = null;
+var docValidado = false;
+
+function seleccionarDireccion(el, dir) {
+  document.getElementById('direccionEnvio').value = dir;
+}
+
+function onDocTipoChange() {
+  var tipo = document.getElementById('docTipo').value;
+  document.getElementById('docNumero').maxLength = tipo === 'dni' ? 8 : 11;
+  document.getElementById('docNumero').value = '';
+  docValidado = false;
+  document.getElementById('docStatus').innerHTML = '';
+  document.getElementById('docStatus').style.color = '';
+}
+
+function autoDetectDocTipo(valor) {
+  if (valor.length === 8 && /^\d+$/.test(valor)) {
+    document.getElementById('docTipo').value = 'dni';
+  } else if (valor.length === 11 && /^\d+$/.test(valor)) {
+    document.getElementById('docTipo').value = 'ruc';
+  }
+}
+
+function validarDocumento() {
+  var tipo = document.getElementById('docTipo').value;
+  var numero = document.getElementById('docNumero').value.trim();
+  var nombres = document.getElementById('nombres').value.trim();
+  var apellidos = document.getElementById('apellidos').value.trim();
+  var statusEl = document.getElementById('docStatus');
+  var btn = document.getElementById('btnValidarDoc');
+
+  if (!numero) { statusEl.innerHTML = '<span style="color:#e74c3c">Ingresa el número</span>'; return; }
+  if (!nombres || !apellidos) { statusEl.innerHTML = '<span style="color:#e74c3c">Completa nombres y apellidos</span>'; return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+  statusEl.innerHTML = '<span style="color:#f39c12">Validando...</span>';
+
+  fetch('/api/validar-documento', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tipo: tipo, numero: numero, nombres: nombres, apellidos: apellidos })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-check-circle"></i> Validar';
+    if (data.valido) {
+      docValidado = true;
+      statusEl.innerHTML = '<span style="color:#27ae60"><i class="bi bi-check-circle-fill"></i> Documento validado correctamente</span>';
+    } else {
+      docValidado = false;
+      statusEl.innerHTML = '<span style="color:#e74c3c"><i class="bi bi-x-circle-fill"></i> ' + (data.error || 'Error al validar') + '</span>';
+    }
+  })
+  .catch(function() {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-check-circle"></i> Validar';
+    docValidado = false;
+    statusEl.innerHTML = '<span style="color:#e74c3c">Error de conexión</span>';
+  });
+}
+
+function cambiarMetodo(metodo) {
+  document.getElementById('metodoPagoHidden').value = metodo;
+  document.querySelectorAll('.metodo-pago').forEach(function(m) { m.classList.remove('active'); });
+  document.querySelector('[data-metodo="' + metodo + '"]').classList.add('active');
+  var sec = document.getElementById('comprobanteSection');
+  var info = document.getElementById('comprobanteInfo');
+  if (metodo === 'yape') {
+    sec.style.display = 'block';
+    info.innerHTML = '<i class="bi bi-phone me-1" style="color:#9b59b6"></i> Realiza el pago por Yape al número <strong>999 888 777</strong> y sube el comprobante.';
+  } else if (metodo === 'plin') {
+    sec.style.display = 'block';
+    info.innerHTML = '<i class="bi bi-phone me-1" style="color:#3498db"></i> Realiza el pago por Plin al número <strong>999 888 777</strong> y sube el comprobante.';
+  } else if (metodo === 'transferencia') {
+    sec.style.display = 'block';
+    info.innerHTML = '<i class="bi bi-bank me-1" style="color:#f39c12"></i> Cuenta BCP: <strong>123-456789-01-12</strong><br>CCI: 00212345678901123456<br>Sube el comprobante de transferencia.';
+  } else {
+    sec.style.display = 'none';
+  }
+}
+
+function mostrarResumen() {
+  var nombres = document.getElementById('nombres').value.trim();
+  var apellidos = document.getElementById('apellidos').value.trim();
+  var docTipo = document.getElementById('docTipo').value.toUpperCase();
+  var docNum = document.getElementById('docNumero').value.trim();
+  var tel = document.getElementById('telefono').value.trim();
+  var dir = document.getElementById('direccionEnvio').value.trim();
+
+  if (!nombres || !apellidos || !docNum || !tel || !dir) {
+    alert('Por favor completa todos los campos obligatorios.');
+    return;
+  }
+  if (!docValidado) {
+    alert('Debes validar tu documento antes de continuar.');
+    return;
+  }
+
+  document.getElementById('resNombre').textContent = nombres + ' ' + apellidos;
+  document.getElementById('resDoc').textContent = docTipo + ': ' + docNum;
+  document.getElementById('resTel').textContent = tel;
+  document.getElementById('resCorreo').textContent = '{{ usuario.correo or "" }}';
+  document.getElementById('resDireccion').textContent = dir;
+  document.getElementById('resNotas').textContent = document.querySelector('[name="notas_entrega"]').value || 'Sin notas';
+  document.getElementById('resPago').textContent = document.getElementById('metodoPagoHidden').value.charAt(0).toUpperCase() + document.getElementById('metodoPagoHidden').value.slice(1);
+  document.getElementById('resTotal').textContent = 'S/ {{ "%.2f"|format(total) }}';
+
+  document.getElementById('resumenCard').style.display = 'block';
+  document.getElementById('btnConfirmar').style.display = 'none';
+  document.getElementById('btnComprar').style.display = 'block';
+  document.getElementById('resumenCard').scrollIntoView({ behavior: 'smooth' });
+
+  document.getElementById('confirmarDatos').addEventListener('change', function() {
+    document.getElementById('btnComprar').disabled = !this.checked;
+  });
+}
+
+document.getElementById('checkoutForm').addEventListener('submit', function() {
+  var btn = document.getElementById('btnComprar');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i> Procesando...';
+});
+
+function initMapa() {
+  var container = document.getElementById('mapaContainer');
+  container.style.display = 'block';
+  if (mapa) return;
+  mapa = L.map('mapa').set([-12.0464, -77.0428], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(mapa);
+  mapa.on('click', function(e) {
+    if (marcador) mapa.removeLayer(marcador);
+    marcador = L.marker(e.latlng).addTo(mapa);
+    fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + e.latlng.lat + '&lon=' + e.latlng.lng)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.display_name) {
+          document.getElementById('direccionEnvio').value = data.display_name;
+        }
+      });
+  });
+}
+
+function obtenerUbicacion() {
+  initMapa();
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      var latlng = [pos.coords.latitude, pos.coords.longitude];
+      mapa.setView(latlng, 16);
+      if (marcador) mapa.removeLayer(marcador);
+      marcador = L.marker(latlng).addTo(mapa);
+      fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latlng[0] + '&lon=' + latlng[1])
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.display_name) {
+            document.getElementById('direccionEnvio').value = data.display_name;
+          }
+        });
+    }, function() {
+      alert('No se pudo obtener tu ubicación.');
+    });
+  }
+}
+
+var radios = document.querySelectorAll('[name="direccion_envio_select"]');
+radios.forEach(function(r) {
+  r.addEventListener('change', function() {
+    document.getElementById('direccionEnvio').value = this.value;
+  });
+});
+if (radios.length > 0) {
+  document.getElementById('direccionEnvio').value = radios[0].value;
+}
+</script>
 {% endblock %}
