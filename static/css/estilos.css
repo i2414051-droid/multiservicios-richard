@@ -916,28 +916,6 @@ select option {
 }
 
 /* ═══════════════════════════════════════ */
-/* LEAFLET MAP                            */
-/* ═══════════════════════════════════════ */
-#mapa .leaflet-container {
-  background: var(--bg-card);
-}
-.leaflet-control-attribution {
-  font-size: 10px !important;
-  background: rgba(0,0,0,.5) !important;
-  color: #ccc !important;
-}
-.leaflet-control-attribution a {
-  color: #f39c12 !important;
-}
-[data-theme="light"] .leaflet-control-attribution {
-  background: rgba(255,255,255,.8) !important;
-  color: #333 !important;
-}
-[data-theme="light"] .leaflet-control-attribution a {
-  color: #0066cc !important;
-}
-
-/* ═══════════════════════════════════════ */
 /* CHECKOUT CONFIRMATION STEP             */
 /* ═══════════════════════════════════════ */
 .boleta-preview {
@@ -961,9 +939,4 @@ select option {
 /* ═══════════════════════════════════════ */
 .checkout-address-option input[type="radio"]:checked ~ div span {
   color: var(--text-primary) !important;
-}
-
-/* Document validation status */
-#docStatus i {
-  margin-right: 4px;
 }
