@@ -9,6 +9,7 @@
         <h3 class="text-center mb-3">🔐 Login Admin</h3>
 
         <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
             <!-- CAMPO CORREO -->
             <input type="email"
@@ -46,6 +47,9 @@
         <!-- LINK REGISTRO -->
         <div class="text-center mt-3">
             <a href="/registro">Crear cuenta</a>
+        </div>
+        <div class="text-center mt-2">
+            <a href="/recuperar-password" style="color:#f39c12;font-size:13px">¿Olvidaste tu contraseña?</a>
         </div>
 
     </div>

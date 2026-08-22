@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
 {% block content %}
 
 <div class="container mt-4">
@@ -12,7 +13,7 @@
     </a>
   </div>
 
-  <div class="alert alert-info border-0" style="background:#1e3a5f;">
+  <div class="alert alert-info border-0 tc-info">
     <i class="bi bi-info-circle me-2"></i>
     Solo el administrador principal
     <strong>admin@mail.com</strong> puede asignar el rol
@@ -40,17 +41,17 @@
   </form>
 
   <!-- TABLA USUARIOS -->
-  <div class="card border-0 shadow" style="background:#1e1e2e;">
-    <div class="card-header" style="background:#2a2a3d;">
+  <div class="card border-0 shadow tc-admin">
+    <div class="card-header tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-people me-2"></i>Usuarios registrados
-        <span class="badge bg-secondary ms-2" id="contador-usuarios">{{ usuarios|length }}</span>
+        <span class="badge bg-secondary ms-2" id="contador-usuarios">{{ total }}</span>
       </span>
     </div>
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-dark table-hover mb-0 text-center align-middle">
-          <thead style="background:#12122a;">
+          <thead class="tc-admin-thead">
             <tr>
               <th>ID</th>
               <th>Correo</th>
@@ -95,6 +96,7 @@
                     <form method="POST" action="/permisos"
                           onsubmit="return confirm('¿Cambiar el rol de este usuario?')"
                           class="d-inline">
+                      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                       <input type="hidden" name="user_id" value="{{ u.id }}">
                       {% if u.rol in ['admin', 'administrador'] %}
                         <input type="hidden" name="rol" value="cliente">
@@ -133,6 +135,7 @@
         </table>
       </div>
     </div>
+    {{ paginacion(page, total_pages, total, '/permisos?', buscar) }}
   </div>
 
 </div>
@@ -143,11 +146,6 @@
     var fila = btn.closest('tr');
     if (fila) {
       fila.remove();
-      var contador = document.getElementById('contador-usuarios');
-      if (contador) {
-        var n = parseInt(contador.textContent) || 0;
-        contador.textContent = Math.max(0, n - 1);
-      }
     }
   }
 </script>

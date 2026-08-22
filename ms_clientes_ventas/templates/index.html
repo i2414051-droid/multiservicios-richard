@@ -132,7 +132,7 @@ class="producto-img">
 
 <h5>
 
-{{p.nombre}}
+<a href="/producto/{{p.id}}" style="color:inherit;text-decoration:none">{{p.nombre}}</a>
 
 </h5>
 
@@ -159,6 +159,10 @@ class="btn btn-agregar">
 
 Agregar al carrito
 
+</a>
+
+<a href="/producto/{{p.id}}" class="btn btn-outline-warning btn-sm mt-1" style="border-radius:10px;font-size:12px">
+<i class="bi bi-eye"></i> Ver detalle
 </a>
 
 {% else %}

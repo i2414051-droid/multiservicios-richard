@@ -14,7 +14,7 @@
     </a>
   </div>
 
-  <div class="alert border-0" style="background:#1e3a1e; color:#90ee90;">
+  <div class="alert border-0 tc-success">
     <i class="bi bi-info-circle me-2"></i>
     Estos productos fueron <strong>agregados automáticamente</strong> porque su stock llegó a 1 o menos.
     Aquí puedes ajustar cantidades, enviar el pedido al proveedor por WhatsApp o Email, y marcarlos como enviados.
@@ -24,9 +24,8 @@
 
   <!-- POR PROVEEDOR -->
   {% for pid, data in proveedores_pedidos.items() %}
-  <div class="card border-0 shadow mb-4" style="background:#1e1e2e;">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
-         style="background:#2a2a3d;">
+  <div class="card border-0 shadow mb-4 tc-admin">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-truck me-2 text-info"></i>
         Proveedor: {{ data.proveedor_nombre }}
@@ -50,7 +49,7 @@
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-dark table-hover mb-0 align-middle text-center">
-          <thead style="background:#12122a;">
+          <thead class="tc-admin-thead">
             <tr>
               <th>Producto</th>
               <th>Categoría</th>
@@ -79,6 +78,7 @@
               <td>
                 <form method="POST" action="/productos-para-pedir/actualizar/{{ ped.id }}"
                       class="d-flex align-items-center justify-content-center gap-2">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                   <input type="number" name="cantidad" value="{{ ped.cantidad_pedido }}"
                          min="1" class="form-control form-control-sm bg-dark text-white border-secondary"
                          style="width:80px">
@@ -112,7 +112,7 @@
   {% endfor %}
 
   {% else %}
-  <div class="card border-0 shadow text-center py-5" style="background:#1e1e2e;">
+  <div class="card border-0 shadow text-center py-5 tc-admin">
     <div class="card-body">
       <i class="bi bi-check-circle-fill display-3 text-success mb-3"></i>
       <h4 class="text-white">¡Todo en orden!</h4>

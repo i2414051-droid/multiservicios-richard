@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
 {% block content %}
 
 <div class="container mt-4">
@@ -27,9 +28,10 @@
 
     <!-- FORMULARIO AGREGAR -->
     <div class="card shadow-sm mb-4">
-        <div class="card-header bg-dark text-white">Agregar Producto</div>
+        <div class="card-header">Agregar Producto</div>
         <div class="card-body">
             <form method="POST" action="/agregar_producto" enctype="multipart/form-data" class="row g-2 mb-4">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Nombre</label>
@@ -78,8 +80,17 @@
 
     <!-- TABLA PRODUCTOS -->
     <div class="card shadow-sm">
-        <div class="card-header bg-secondary text-white">Lista de Productos</div>
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span>Lista de Productos <span class="badge" style="background:#f39c12;color:#000">{{ total }}</span></span>
+            <form method="GET" class="d-flex gap-2" style="max-width:350px">
+                <input type="text" name="buscar" class="form-control form-control-sm" placeholder="Buscar producto..."
+                       value="{{ buscar }}">
+                <button class="btn btn-sm btn-warning" type="submit"><i class="bi bi-search"></i></button>
+                {% if buscar %}<a href="/admin" class="btn btn-sm btn-outline-secondary">Limpiar</a>{% endif %}
+            </form>
+        </div>
         <div class="card-body p-0">
+            <div class="table-responsive">
             <table class="table table-hover table-bordered mb-0 text-center align-middle">
                 <thead class="table-dark">
                     <tr>
@@ -152,6 +163,8 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
+            {{ paginacion(page, total_pages, total, '/admin?', buscar) }}
         </div>
     </div>
 
