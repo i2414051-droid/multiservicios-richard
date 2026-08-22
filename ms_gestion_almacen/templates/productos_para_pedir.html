@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+    <h2 class="mb-0">
+      <i class="bi bi-cart-dash me-2 text-danger"></i>Productos para Pedir
+      {% if pedidos %}
+      <span class="badge bg-danger ms-2">{{ pedidos|length }}</span>
+      {% endif %}
+    </h2>
+    <a href="/admin" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i> Volver al Panel
+    </a>
+  </div>
+
+  <div class="alert border-0" style="background:#1e3a1e; color:#90ee90;">
+    <i class="bi bi-info-circle me-2"></i>
+    Estos productos fueron <strong>agregados automáticamente</strong> porque su stock llegó a 1 o menos.
+    Aquí puedes ajustar cantidades, enviar el pedido al proveedor por WhatsApp o Email, y marcarlos como enviados.
+  </div>
+
+  {% if pedidos %}
+
+  <!-- POR PROVEEDOR -->
+  {% for pid, data in proveedores_pedidos.items() %}
+  <div class="card border-0 shadow mb-4" style="background:#1e1e2e;">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
+         style="background:#2a2a3d;">
+      <span class="text-white fw-bold">
+        <i class="bi bi-truck me-2 text-info"></i>
+        Proveedor: {{ data.proveedor_nombre }}
+        {% if data.proveedor_celular %}
+        <small class="text-muted ms-2">📱 {{ data.proveedor_celular }}</small>
+        {% endif %}
+      </span>
+      <div class="d-flex gap-2 flex-wrap">
+        {% if data.whatsapp_url %}
+        <a href="{{ data.whatsapp_url }}" target="_blank" class="btn btn-success btn-sm fw-bold">
+          <i class="bi bi-whatsapp me-1"></i>Enviar por WhatsApp
+        </a>
+        {% endif %}
+        {% if data.proveedor_correo and pid != 'sin_proveedor' %}
+        <a href="/productos-para-pedir/enviar-email/{{ pid }}" class="btn btn-info btn-sm fw-bold text-dark">
+          <i class="bi bi-envelope me-1"></i>Enviar por Email
+        </a>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0 align-middle text-center">
+          <thead style="background:#12122a;">
+            <tr>
+              <th>Producto</th>
+              <th>Categoría</th>
+              <th>Stock Actual</th>
+              <th>Cantidad a Pedir</th>
+              <th>Fecha Auto-añadido</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ped in data.productos %}
+            <tr>
+              <td class="text-start fw-bold">
+                <i class="bi bi-box-seam me-2 text-warning"></i>{{ ped.producto_nombre }}
+              </td>
+              <td>
+                <span class="badge bg-warning text-dark">{{ ped.categoria or '—' }}</span>
+              </td>
+              <td>
+                {% if ped.stock_actual <= 0 %}
+                <span class="badge bg-danger">Sin stock</span>
+                {% else %}
+                <span class="badge bg-danger">{{ ped.stock_actual }}</span>
+                {% endif %}
+              </td>
+              <td>
+                <form method="POST" action="/productos-para-pedir/actualizar/{{ ped.id }}"
+                      class="d-flex align-items-center justify-content-center gap-2">
+                  <input type="number" name="cantidad" value="{{ ped.cantidad_pedido }}"
+                         min="1" class="form-control form-control-sm bg-dark text-white border-secondary"
+                         style="width:80px">
+                  <button type="submit" class="btn btn-warning btn-sm">
+                    <i class="bi bi-check2"></i>
+                  </button>
+                </form>
+              </td>
+              <td>
+                <small class="text-muted">{{ ped.fecha.strftime('%d/%m/%Y %H:%M') if ped.fecha else '—' }}</small>
+              </td>
+              <td>
+                <a href="/productos-para-pedir/marcar-enviado/{{ ped.id }}"
+                   class="btn btn-success btn-sm"
+                   onclick="return confirm('¿Marcar como enviado?')">
+                  <i class="bi bi-check-circle"></i> Enviado
+                </a>
+                <a href="/productos-para-pedir/eliminar/{{ ped.id }}"
+                   class="btn btn-danger btn-sm"
+                   onclick="return confirm('¿Cancelar este pedido?')">
+                  <i class="bi bi-trash"></i>
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  {% else %}
+  <div class="card border-0 shadow text-center py-5" style="background:#1e1e2e;">
+    <div class="card-body">
+      <i class="bi bi-check-circle-fill display-3 text-success mb-3"></i>
+      <h4 class="text-white">¡Todo en orden!</h4>
+      <p class="text-muted">No hay productos con stock crítico pendientes de pedir.</p>
+      <a href="/admin" class="btn btn-outline-success mt-2">Ver todos los productos</a>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

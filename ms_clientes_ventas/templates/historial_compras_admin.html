@@ -1,0 +1,228 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container-fluid mt-4">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+    <h2 class="mb-0"><i class="bi bi-receipt-cutoff me-2"></i>Historial de Compras</h2>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="/permisos" class="btn btn-outline-warning">
+        <i class="bi bi-shield-lock me-1"></i> Gestionar Permisos
+      </a>
+      <button type="button" class="btn btn-outline-danger" onclick="limpiarHistorial()">
+        <i class="bi bi-trash me-1"></i> Limpiar historial
+      </button>
+    </div>
+  </div>
+
+  <div id="historial-content">
+
+  <!-- TABLA RESUMEN + TOTAL GENERAL -->
+  <div class="card shadow-sm border-0 mb-4" style="background:#1e1e2e;">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0 text-center align-middle">
+          <thead style="background:#12122a;">
+            <tr>
+              <th># Venta</th>
+              <th>Cliente</th>
+              <th>Total</th>
+              <th>Fecha</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for venta in historial %}
+            <tr>
+              <td><span class="badge bg-primary fs-6">#{{ venta.id }}</span></td>
+              <td class="text-start">
+                <span class="text-white">{{ venta.correo }}</span>
+                {% if venta.titular %}
+                <br><small class="text-muted">{{ venta.titular }}{% if venta.documento %} ({{ venta.documento }}){% endif %}</small>
+                {% endif %}
+              </td>
+              <td class="text-success fw-bold">S/ {{ "%.2f"|format(venta.total) }}</td>
+              <td class="text-muted" style="font-size:.85rem;">{{ venta.fecha }}</td>
+              <td>
+                <form method="POST" action="/historial-compras/estado/{{ venta.id }}" style="display:inline;">
+                  <select name="estado" class="form-select form-select-sm bg-dark text-white border-secondary"
+                          onchange="this.form.submit()">
+                    <option value="entregado" {% if venta.estado == 'entregado' %}selected{% endif %}>Entregado</option>
+                    <option value="en espera" {% if venta.estado == 'en espera' %}selected{% endif %}>En espera</option>
+                    <option value="cancelado" {% if venta.estado == 'cancelado' %}selected{% endif %}>Cancelado</option>
+                  </select>
+                </form>
+              </td>
+              <td>
+                <a href="/historial-compras/eliminar/{{ venta.id }}" class="btn btn-danger btn-sm"
+                   onclick="return confirm('¿Eliminar venta #{{ venta.id }}?')">
+                  <i class="bi bi-trash"></i>
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr style="background:#2a2a3d;">
+              <td colspan="2" class="text-end fw-bold text-white fs-5">TOTAL GENERAL</td>
+              <td class="text-success fw-bold fs-5">S/ {{ "%.2f"|format(gran_total) }}</td>
+              <td colspan="3"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- BUSCADOR -->
+  <form method="GET" class="mb-4">
+    <div class="input-group">
+      <span class="input-group-text bg-dark text-white border-secondary">
+        <i class="bi bi-search"></i>
+      </span>
+      <input type="text"
+             name="buscar"
+             class="form-control bg-dark text-white border-secondary"
+             placeholder="Buscar por correo del cliente..."
+             value="{{ buscar }}">
+      <button class="btn btn-primary" type="submit">Buscar</button>
+      {% if buscar %}
+        <a href="/historial-compras" class="btn btn-outline-secondary">Limpiar</a>
+      {% endif %}
+    </div>
+  </form>
+
+  <!-- RESUMEN -->
+  <p class="text-muted mb-3">
+    <strong>{{ historial|length }}</strong> venta(s) encontrada(s)
+    {% if buscar %} para <em>"{{ buscar }}"</em>{% endif %}.
+  </p>
+
+  {% if historial %}
+    {% for venta in historial %}
+    <div class="card mb-3 shadow-sm border-0" style="background:#1e1e2e;">
+
+      <!-- CABECERA -->
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"
+           style="background:#2a2a3d; cursor:pointer;"
+           data-bs-toggle="collapse"
+           data-bs-target="#venta-{{ venta.id }}">
+
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <span class="badge bg-primary fs-6">#{{ venta.id }}</span>
+          <span class="text-white">
+            <i class="bi bi-person-circle me-1 text-info"></i>
+            {{ venta.correo }}
+          </span>
+          {% if venta.titular %}
+          <span class="text-light" style="font-size:.85rem;">
+            <i class="bi bi-card-text me-1 text-warning"></i>
+            {{ venta.titular }}
+            {% if venta.documento %}({{ venta.documento }}){% endif %}
+          </span>
+          {% endif %}
+        </div>
+
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <span class="badge
+            {% if venta.estado == 'entregado' %}bg-success
+            {% elif venta.estado == 'cancelado' %}bg-danger
+            {% else %}bg-warning text-dark{% endif %}">
+            {{ venta.estado }}
+          </span>
+          <span class="text-success fw-bold fs-6">
+            <i class="bi bi-cash-coin me-1"></i>S/ {{ "%.2f"|format(venta.total) }}
+          </span>
+          <span class="text-muted" style="font-size:.85rem;">
+            <i class="bi bi-calendar3 me-1"></i>{{ venta.fecha }}
+          </span>
+          <i class="bi bi-chevron-down text-white"></i>
+        </div>
+      </div>
+
+      <!-- DETALLE COLAPSABLE -->
+      <div id="venta-{{ venta.id }}" class="collapse">
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 text-center align-middle">
+              <thead style="background:#12122a;">
+                <tr>
+                  <th><i class="bi bi-hash"></i> ID Producto</th>
+                  <th>Nombre</th>
+                  <th>Descripción</th>
+                  <th>Cantidad</th>
+                  <th>Precio Unit.</th>
+                  <th>Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in venta.productos %}
+                <tr>
+                  <td>
+                    <span class="badge bg-secondary">{{ p.producto_id }}</span>
+                  </td>
+                  <td class="text-start fw-semibold">{{ p.nombre }}</td>
+                  <td class="text-start text-muted" style="font-size:.85rem;max-width:220px;">
+                    {{ p.descripcion }}
+                  </td>
+                  <td>
+                    <span class="badge bg-info text-dark">{{ p.cantidad }}</span>
+                  </td>
+                  <td>S/ {{ "%.2f"|format(p.precio) }}</td>
+                  <td class="text-success fw-bold">
+                    S/ {{ "%.2f"|format(p.cantidad * p.precio) }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+              <tfoot>
+                <tr style="background:#2a2a3d;">
+                  <td colspan="5" class="text-end fw-bold text-white">TOTAL VENTA</td>
+                  <td class="text-success fw-bold fs-6">
+                    S/ {{ "%.2f"|format(venta.total) }}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    {% endfor %}
+
+  {% else %}
+    <div class="text-center py-5">
+      <i class="bi bi-inbox display-4 text-muted"></i>
+      <p class="text-muted mt-3">No se encontraron compras
+        {% if buscar %}para <em>"{{ buscar }}"</em>{% endif %}.
+      </p>
+    </div>
+  {% endif %}
+
+  </div>
+
+  <!-- ESTADO VACÍO (solo interfaz) -->
+  <div id="historial-vacio" class="text-center py-5" style="display: none;">
+    <i class="bi bi-inbox display-4 text-muted"></i>
+    <p class="text-muted mt-3">No se encontraron compras.</p>
+  </div>
+
+</div>
+
+<script>
+  function limpiarHistorial() {
+    if (!confirm('¿Limpiar el historial de compras de la interfaz? No se eliminarán los datos de la base de datos.')) return;
+    var contenido = document.getElementById('historial-content');
+    var vacio     = document.getElementById('historial-vacio');
+    if (contenido) contenido.style.display = 'none';
+    if (vacio)     vacio.style.display   = 'block';
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var first = document.querySelector('.collapse');
+    if (first) new bootstrap.Collapse(first, { toggle: true });
+  });
+</script>
+{% endblock %}

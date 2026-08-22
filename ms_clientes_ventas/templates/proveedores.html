@@ -1,0 +1,193 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+    <h2 class="mb-0">
+      <i class="bi bi-truck me-2 text-info"></i>Gestión de Proveedores
+    </h2>
+    <a href="/admin" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i> Volver al Panel
+    </a>
+  </div>
+
+  <!-- FORMULARIO AGREGAR / EDITAR -->
+  <div class="card border-0 shadow mb-4" style="background:#1e1e2e;">
+    <div class="card-header" style="background:#2a2a3d;">
+      <span class="text-white fw-bold">
+        <i class="bi bi-person-plus me-2 text-info"></i>
+        {% if editar %}Editar Proveedor: {{ editar.nombre }}{% else %}Agregar Nuevo Proveedor{% endif %}
+      </span>
+    </div>
+    <div class="card-body">
+      <form method="POST" action="{% if editar %}/proveedores/editar/{{ editar.id }}{% else %}/proveedores{% endif %}">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label text-white">Nombre completo *</label>
+            <input name="nombre" class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.nombre if editar else '' }}" required placeholder="Nombre del proveedor">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white">Celular / WhatsApp</label>
+            <div class="input-group">
+              <span class="input-group-text bg-success text-white border-0">
+                <i class="bi bi-whatsapp"></i>
+              </span>
+              <input name="celular" class="form-control bg-dark text-white border-secondary"
+                     value="{{ editar.celular if editar else '' }}" placeholder="Ej: 999888777">
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white">Correo electrónico</label>
+            <input type="email" name="correo" class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.correo if editar else '' }}" placeholder="proveedor@email.com">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label text-white">DNI</label>
+            <input name="dni" class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.dni if editar else '' }}" placeholder="12345678" maxlength="8">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label text-white">RUC</label>
+            <input name="ruc" class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.ruc if editar else '' }}" placeholder="20123456789" maxlength="11">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label text-white">Dirección</label>
+            <input name="direccion" class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.direccion if editar else '' }}" placeholder="Jr. Ejemplo 123, Ciudad">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label text-white">Categoría que provee *</label>
+            <select name="categoria" class="form-control bg-dark text-white border-secondary" required>
+              {% for cat in categorias %}
+              <option value="{{ cat }}"
+                {% if editar and editar.categoria == cat %}selected{% endif %}>
+                {{ cat }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label text-white">Notas</label>
+            <input name="notas" class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.notas if editar else '' }}" placeholder="Info adicional...">
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+          <button type="submit" class="btn btn-info fw-bold">
+            <i class="bi bi-save me-1"></i>
+            {% if editar %}Guardar Cambios{% else %}Agregar Proveedor{% endif %}
+          </button>
+          {% if editar %}
+          <a href="/proveedores" class="btn btn-outline-secondary">Cancelar</a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if not editar %}
+  <!-- BUSCADOR -->
+  <form method="GET" class="mb-4">
+    <div class="row g-2">
+      <div class="col-md-6">
+        <div class="input-group">
+          <span class="input-group-text bg-dark text-white border-secondary">
+            <i class="bi bi-search"></i>
+          </span>
+          <input type="text" name="buscar" class="form-control bg-dark text-white border-secondary"
+                 placeholder="Buscar proveedor..." value="{{ buscar }}">
+        </div>
+      </div>
+      <div class="col-md-4">
+        <select name="categoria" class="form-control bg-dark text-white border-secondary">
+          <option value="">Todas las categorías</option>
+          {% for cat in categorias %}
+          <option value="{{ cat }}" {% if cat_filtro == cat %}selected{% endif %}>{{ cat }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-warning w-100 fw-bold">Filtrar</button>
+      </div>
+    </div>
+  </form>
+
+  <!-- TABLA PROVEEDORES -->
+  <div class="card border-0 shadow" style="background:#1e1e2e;">
+    <div class="card-header" style="background:#2a2a3d;">
+      <span class="text-white fw-bold">
+        <i class="bi bi-people me-2"></i>Proveedores registrados
+        <span class="badge bg-info ms-2">{{ proveedores|length }}</span>
+      </span>
+    </div>
+    <div class="card-body p-0">
+      {% if proveedores %}
+      <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0 align-middle">
+          <thead style="background:#12122a;">
+            <tr>
+              <th>Nombre</th>
+              <th>Categoría</th>
+              <th>WhatsApp</th>
+              <th>Correo</th>
+              <th>DNI/RUC</th>
+              <th>Dirección</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for prov in proveedores %}
+            <tr>
+              <td class="fw-bold">
+                <i class="bi bi-person-circle me-2 text-info"></i>{{ prov.nombre }}
+              </td>
+              <td>
+                <span class="badge bg-warning text-dark">{{ prov.categoria or '—' }}</span>
+              </td>
+              <td>
+                {% if prov.celular %}
+                <a href="https://wa.me/51{{ prov.celular }}" target="_blank"
+                   class="btn btn-success btn-sm">
+                  <i class="bi bi-whatsapp"></i> {{ prov.celular }}
+                </a>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if prov.correo %}
+                <a href="mailto:{{ prov.correo }}" class="text-info">{{ prov.correo }}</a>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if prov.dni %}<small class="text-muted">DNI: {{ prov.dni }}</small>{% endif %}
+                {% if prov.ruc %}<small class="text-muted">RUC: {{ prov.ruc }}</small>{% endif %}
+                {% if not prov.dni and not prov.ruc %}—{% endif %}
+              </td>
+              <td><small>{{ prov.direccion or '—' }}</small></td>
+              <td>
+                <a href="/proveedores/editar/{{ prov.id }}" class="btn btn-warning btn-sm">✏</a>
+                <a href="/proveedores/eliminar/{{ prov.id }}" class="btn btn-danger btn-sm"
+                   onclick="return confirm('¿Eliminar este proveedor?')">🗑</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-center py-5 text-muted">
+        <i class="bi bi-truck display-4 mb-3"></i>
+        <p>No hay proveedores registrados{% if buscar %} para "{{ buscar }}"{% endif %}.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

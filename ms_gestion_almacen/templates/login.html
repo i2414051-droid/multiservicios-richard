@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<div class="container d-flex justify-content-center align-items-center" style="height:80vh;">
+
+    <div class="card shadow p-4" style="width:350px;">
+
+        <h3 class="text-center mb-3">🔐 Login Admin</h3>
+
+        <form method="POST">
+
+            <!-- CAMPO CORREO -->
+            <input type="email"
+                   name="correo"
+                   placeholder="Correo electrónico"
+                   class="form-control mb-3"
+                   required>
+
+            <!-- CAMPO PASSWORD -->
+            <input type="password"
+                   name="password"
+                   placeholder="Contraseña"
+                   class="form-control mb-3"
+                   required>
+
+            <!-- MENSAJES FLASH -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} p-2 text-center">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+
+                {% endif %}
+            {% endwith %}
+
+            <button class="btn btn-primary w-100">
+                Ingresar
+            </button>
+
+        </form>
+
+        <!-- LINK REGISTRO -->
+        <div class="text-center mt-3">
+            <a href="/registro">Crear cuenta</a>
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
