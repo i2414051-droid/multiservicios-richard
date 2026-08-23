@@ -68,10 +68,11 @@ def validate_csrf():
 MAIN_DB = os.environ.get('MYSQL_DB', 'proyecto_multiservicios_richard')
 ALMACEN_DB_NAME = os.environ.get('MYSQL_DB_ALMACEN', 'proyecto_gestion_almacen')
 
+# Conectar directamente a la BD de almacén (ya debe existir en MySQL)
 app.config['MYSQL_HOST']        = os.environ.get('MYSQL_HOST', 'localhost')
 app.config['MYSQL_USER']        = os.environ.get('MYSQL_USER', 'root')
 app.config['MYSQL_PASSWORD']    = os.environ.get('MYSQL_PASSWORD', '')
-app.config['MYSQL_DB']          = MAIN_DB
+app.config['MYSQL_DB']          = ALMACEN_DB_NAME
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 mysql = MySQL(app)
 
@@ -125,33 +126,11 @@ def render_paginated(template, cur, sql_count, sql_data, params, page, extra=Non
 # INIT TABLAS — BD Almacén
 # ─────────────────────────────────────────────
 def init_db():
-    """Crea bd_almacen y sus tablas. Si no puede crear la BD, usa proyecto_multiservicios_richard."""
-    global USE_OWN_DB
+    """Crea todas las tablas de almacén en proyecto_gestion_almacen."""
     try:
         cur = mysql.connection.cursor()
 
-        # ── Paso 1: intentar crear la base de datos dedicada ──
-        try:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{ALMACEN_DB_NAME}` CHARACTER SET utf8mb4")
-            mysql.connection.commit()
-            print(f"[init_db] BD '{ALMACEN_DB_NAME}' creada/verificada OK")
-        except Exception as e:
-            print(f"[init_db] No se pudo crear BD '{ALMACEN_DB_NAME}': {e}")
-            print(f"[init_db] Usando BD principal '{MAIN_DB}' para tablas de almacén")
-            USE_OWN_DB = False
-
-        # ── Paso 2: cambiar a la BD de almacén si se creó ──
-        if USE_OWN_DB:
-            try:
-                cur.execute(f"USE `{ALMACEN_DB_NAME}`")
-                mysql.connection.commit()
-            except Exception:
-                USE_OWN_DB = False
-                print(f"[init_db] No se pudo usar '{ALMACEN_DB_NAME}', usando '{MAIN_DB}'")
-
-        db_prefix = "" if USE_OWN_DB else ""
-
-        # ── Paso 3: crear tablas ──
+        # ── Crear tablas ──
         cur.execute("""
             CREATE TABLE IF NOT EXISTS productos (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -256,7 +235,7 @@ def init_db():
             )
         """)
 
-        # ── Paso 4: migración de datos desde BD principal si tablas vacías ──
+        # ── Migración: copiar datos desde BD principal si tablas vacías ──
         for tabla in ['productos', 'proveedores', 'productos_para_pedir']:
             try:
                 cur.execute(f"SELECT COUNT(*) AS n FROM {tabla}")
@@ -271,10 +250,9 @@ def init_db():
 
         mysql.connection.commit()
         cur.close()
-        db_name = ALMACEN_DB_NAME if USE_OWN_DB else MAIN_DB
-        print(f"[init_db] Tablas de almacén creadas/verificadas OK en '{db_name}'")
+        print(f"[init_db] OK - Todas las tablas creadas en '{ALMACEN_DB_NAME}'")
     except Exception as e:
-        print(f"[init_db] Error creando tablas de almacén: {e}")
+        print(f"[init_db] ERROR: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -441,9 +419,21 @@ def test_db():
 
 @app.route('/init-db')
 def ruta_init_db():
-    init_db()
-    flash('Tablas de almacén creadas/verificadas.', 'success')
-    return redirect('/admin')
+    try:
+        init_db()
+        # Verificar que las tablas se crearon
+        cur = mysql.connection.cursor()
+        cur.execute("SHOW TABLES")
+        tables = [row[list(row.keys())[0]] for row in cur.fetchall()]
+        cur.close()
+        return jsonify({
+            'status': 'ok',
+            'database': ALMACEN_DB_NAME,
+            'tables': tables,
+            'count': len(tables)
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
 # ─────────────────────────────────────────────
