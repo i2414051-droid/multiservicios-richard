@@ -66,7 +66,7 @@ def validate_csrf():
 # MYSQL — intenta BD dedicada, fallback a BD principal
 # ─────────────────────────────────────────────
 MAIN_DB = os.environ.get('MYSQL_DB', 'proyecto_multiservicios_richard')
-ALMACEN_DB_NAME = os.environ.get('MYSQL_DB_ALMACEN', 'bd_almacen')
+ALMACEN_DB_NAME = os.environ.get('MYSQL_DB_ALMACEN', 'proyecto_gestion_almacen')
 
 app.config['MYSQL_HOST']        = os.environ.get('MYSQL_HOST', 'localhost')
 app.config['MYSQL_USER']        = os.environ.get('MYSQL_USER', 'root')
