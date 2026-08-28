@@ -34,6 +34,11 @@ app.config['MYSQL_DB']          = os.environ.get('MYSQL_DB', 'proyecto_multiserv
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 mysql = MySQL(app)
 
+# Base de datos de Gestión de Almacén (ingresos, salidas, detalle_*)
+# Esta conexión apunta a la BD principal; las tablas de almacén se prefijan
+# con ALMACEN_DB para leerlas desde su base dedicada.
+ALMACEN_DB = os.environ.get('MYSQL_DB_ALMACEN', 'proyecto_gestion_almacen')
+
 # URL del microservicio de Almacén
 MS_ALMACEN_URL = os.environ.get('MS_ALMACEN_URL', 'http://localhost:5001')
 
@@ -1703,14 +1708,14 @@ def ingresos():
     buscar = request.args.get('buscar', '')
     page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
-    sql_count = """SELECT COUNT(*) AS total FROM ingresos i
-        LEFT JOIN proveedores p ON i.proveedor_id=p.id
+    sql_count = f"""SELECT COUNT(*) AS total FROM {ALMACEN_DB}.ingresos i
+        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
         WHERE p.nombre LIKE %s"""
-    sql_data = """SELECT i.id, i.fecha, i.notas,
+    sql_data = f"""SELECT i.id, i.fecha, i.notas,
                p.nombre AS proveedor_nombre,
-               (SELECT SUM(di.cantidad) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS total_items
-        FROM ingresos i
-        LEFT JOIN proveedores p ON i.proveedor_id=p.id
+               (SELECT SUM(di.cantidad) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS total_items
+        FROM {ALMACEN_DB}.ingresos i
+        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
         WHERE p.nombre LIKE %s
         ORDER BY i.fecha DESC"""
     items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
@@ -1737,7 +1742,7 @@ def registrar_ingreso():
         cantidades = request.form.getlist('cantidad[]')
         precios = request.form.getlist('precio_compra[]')
         cur = mysql.connection.cursor()
-        cur.execute("INSERT INTO ingresos (proveedor_id, notas) VALUES (%s, %s)", (proveedor_id, notas))
+        cur.execute(f"INSERT INTO {ALMACEN_DB}.ingresos (proveedor_id, notas) VALUES (%s, %s)", (proveedor_id, notas))
         ingreso_id = cur.lastrowid
         for i in range(len(producto_ids)):
             try:
@@ -1747,7 +1752,7 @@ def registrar_ingreso():
             except (ValueError, IndexError):
                 continue
             if cant > 0:
-                cur.execute("INSERT INTO detalle_ingreso (ingreso_id, producto_id, cantidad, precio_compra) VALUES (%s,%s,%s,%s)",
+                cur.execute(f"INSERT INTO {ALMACEN_DB}.detalle_ingreso (ingreso_id, producto_id, cantidad, precio_compra) VALUES (%s,%s,%s,%s)",
                             (ingreso_id, pid, cant, prec))
                 almacen_api(f"/api/productos/{pid}/incrementar-stock", method='POST', data={'cantidad': cant})
         mysql.connection.commit()
@@ -1761,19 +1766,19 @@ def comprobante_ingreso(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("""
+    cur.execute(f"""
         SELECT i.id, i.fecha, i.notas,
                p.nombre AS proveedor_nombre, p.ruc AS proveedor_ruc,
                p.celular AS proveedor_celular, p.correo AS proveedor_correo
-        FROM ingresos i
-        LEFT JOIN proveedores p ON i.proveedor_id=p.id
+        FROM {ALMACEN_DB}.ingresos i
+        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
         WHERE i.id=%s
     """, (id,))
     ingreso = cur.fetchone()
     if not ingreso:
         flash('Ingreso no encontrado.', 'danger')
         return redirect('/ingresos')
-    cur.execute("SELECT producto_id, cantidad, precio_compra FROM detalle_ingreso WHERE ingreso_id=%s", (id,))
+    cur.execute(f"SELECT producto_id, cantidad, precio_compra FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
     detalles = cur.fetchall()
     cur.close()
     items = []
@@ -1792,14 +1797,14 @@ def eliminar_ingreso(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("SELECT producto_id, cantidad FROM detalle_ingreso WHERE ingreso_id=%s", (id,))
+    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
     items = cur.fetchall()
     revertidos = 0
     for item in items:
         almacen_api(f"/api/productos/{item['producto_id']}/descontar-stock", method='POST', data={'cantidad': item['cantidad']})
         revertidos += 1
-    cur.execute("DELETE FROM detalle_ingreso WHERE ingreso_id=%s", (id,))
-    cur.execute("DELETE FROM ingresos WHERE id=%s", (id,))
+    cur.execute(f"DELETE FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
+    cur.execute(f"DELETE FROM {ALMACEN_DB}.ingresos WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     flash(f'Ingreso eliminado y stock revertido ({revertidos} productos).', 'success')
@@ -1815,13 +1820,13 @@ def salidas():
     buscar = request.args.get('buscar', '')
     page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
-    sql_count = """SELECT COUNT(*) AS total FROM salidas s
+    sql_count = f"""SELECT COUNT(*) AS total FROM {ALMACEN_DB}.salidas s
         LEFT JOIN ventas v ON s.venta_id=v.id
         WHERE COALESCE(v.nombre, '') LIKE %s"""
-    sql_data = """SELECT s.id, s.fecha, s.notas,
+    sql_data = f"""SELECT s.id, s.fecha, s.notas,
                v.id AS venta_id, v.nombre AS cliente_nombre, v.total AS venta_total,
-               (SELECT SUM(ds.cantidad) FROM detalle_salida ds WHERE ds.salida_id=s.id) AS total_items
-        FROM salidas s
+               (SELECT SUM(ds.cantidad) FROM {ALMACEN_DB}.detalle_salida ds WHERE ds.salida_id=s.id) AS total_items
+        FROM {ALMACEN_DB}.salidas s
         LEFT JOIN ventas v ON s.venta_id=v.id
         WHERE COALESCE(v.nombre, '') LIKE %s
         ORDER BY s.fecha DESC"""
@@ -1869,7 +1874,7 @@ def registrar_salida():
             flash('No se puede registrar la salida: ' + '; '.join(errores), 'danger')
             return redirect('/registrar-salida')
         cur = mysql.connection.cursor()
-        cur.execute("INSERT INTO salidas (venta_id, notas) VALUES (%s, %s)", (venta_id, notas))
+        cur.execute(f"INSERT INTO {ALMACEN_DB}.salidas (venta_id, notas) VALUES (%s, %s)", (venta_id, notas))
         salida_id = cur.lastrowid
         for i in range(len(producto_ids)):
             try:
@@ -1878,7 +1883,7 @@ def registrar_salida():
             except (ValueError, IndexError):
                 continue
             if cant > 0:
-                cur.execute("INSERT INTO detalle_salida (salida_id, producto_id, cantidad) VALUES (%s,%s,%s)",
+                cur.execute(f"INSERT INTO {ALMACEN_DB}.detalle_salida (salida_id, producto_id, cantidad) VALUES (%s,%s,%s)",
                             (salida_id, pid, cant))
                 almacen_api(f"/api/productos/{pid}/descontar-stock", method='POST', data={'cantidad': cant})
         mysql.connection.commit()
@@ -1892,18 +1897,18 @@ def comprobante_salida(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("""
+    cur.execute(f"""
         SELECT s.id, s.fecha, s.notas,
                v.id AS venta_id, v.nombre AS cliente_nombre, v.documento AS cliente_doc,
                v.total AS venta_total, v.fecha AS venta_fecha
-        FROM salidas s LEFT JOIN ventas v ON s.venta_id=v.id
+        FROM {ALMACEN_DB}.salidas s LEFT JOIN ventas v ON s.venta_id=v.id
         WHERE s.id=%s
     """, (id,))
     salida = cur.fetchone()
     if not salida:
         flash('Salida no encontrada.', 'danger')
         return redirect('/salidas')
-    cur.execute("SELECT producto_id, cantidad FROM detalle_salida WHERE salida_id=%s", (id,))
+    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=%s", (id,))
     detalles = cur.fetchall()
     cur.close()
     items = []
@@ -1919,12 +1924,12 @@ def eliminar_salida(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("SELECT producto_id, cantidad FROM detalle_salida WHERE salida_id=%s", (id,))
+    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=%s", (id,))
     items = cur.fetchall()
     for item in items:
         almacen_api(f"/api/productos/{item['producto_id']}/incrementar-stock", method='POST', data={'cantidad': item['cantidad']})
-    cur.execute("DELETE FROM detalle_salida WHERE salida_id=%s", (id,))
-    cur.execute("DELETE FROM salidas WHERE id=%s", (id,))
+    cur.execute(f"DELETE FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=%s", (id,))
+    cur.execute(f"DELETE FROM {ALMACEN_DB}.salidas WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
     flash('Salida eliminada y stock revertido.', 'success')
@@ -1967,13 +1972,13 @@ def verificar_registros():
     stats['total_ventas'] = cur.fetchone()['n']
     cur.execute("SELECT COUNT(*) AS n FROM detalle_venta")
     stats['total_detalle_ventas'] = cur.fetchone()['n']
-    cur.execute("SELECT COUNT(*) AS n FROM ingresos")
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.ingresos")
     stats['total_ingresos'] = cur.fetchone()['n']
-    cur.execute("SELECT COUNT(*) AS n FROM detalle_ingreso")
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.detalle_ingreso")
     stats['total_detalle_ingresos'] = cur.fetchone()['n']
-    cur.execute("SELECT COUNT(*) AS n FROM salidas")
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.salidas")
     stats['total_salidas'] = cur.fetchone()['n']
-    cur.execute("SELECT COUNT(*) AS n FROM detalle_salida")
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.detalle_salida")
     stats['total_detalle_salidas'] = cur.fetchone()['n']
     cur.execute("SELECT COUNT(*) AS n FROM seguimiento_entregas")
     stats['total_entregas'] = cur.fetchone()['n']
@@ -1995,12 +2000,12 @@ def verificar_registros():
         cur.close()
     elif seccion == 'ingresos':
         cur = mysql.connection.cursor()
-        cur.execute("SELECT i.id, i.fecha, (SELECT SUM(cantidad) FROM detalle_ingreso WHERE ingreso_id=i.id) AS items FROM ingresos i ORDER BY i.fecha DESC LIMIT 50")
+        cur.execute(f"SELECT i.id, i.fecha, (SELECT SUM(cantidad) FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=i.id) AS items FROM {ALMACEN_DB}.ingresos i ORDER BY i.fecha DESC LIMIT 50")
         datos = cur.fetchall()
         cur.close()
     elif seccion == 'salidas':
         cur = mysql.connection.cursor()
-        cur.execute("SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(cantidad) FROM detalle_salida WHERE salida_id=s.id) AS items FROM salidas s LEFT JOIN ventas v ON s.venta_id=v.id ORDER BY s.fecha DESC LIMIT 50")
+        cur.execute(f"SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(cantidad) FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=s.id) AS items FROM {ALMACEN_DB}.salidas s LEFT JOIN ventas v ON s.venta_id=v.id ORDER BY s.fecha DESC LIMIT 50")
         datos = cur.fetchall()
         cur.close()
     elif seccion == 'entregas':
@@ -2031,13 +2036,13 @@ def informe_diario():
     ingresos_ventas = float(cur.fetchone()['total'])
     cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
     num_ventas = cur.fetchone()['n']
-    cur.execute("SELECT i.id, i.fecha, (SELECT SUM(di.cantidad) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS items, (SELECT COALESCE(SUM(di.cantidad*di.precio_compra),0) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS costo FROM ingresos i WHERE DATE(i.fecha)=%s ORDER BY i.fecha", (fecha_str,))
+    cur.execute(f"SELECT i.id, i.fecha, (SELECT SUM(di.cantidad) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS items, (SELECT COALESCE(SUM(di.cantidad*di.precio_compra),0) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS costo FROM {ALMACEN_DB}.ingresos i WHERE DATE(i.fecha)=%s ORDER BY i.fecha", (fecha_str,))
     ingresos_dia = cur.fetchall()
-    cur.execute("SELECT COUNT(*) AS n FROM ingresos WHERE DATE(fecha)=%s", (fecha_str,))
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.ingresos WHERE DATE(fecha)=%s", (fecha_str,))
     num_ingresos = cur.fetchone()['n']
-    cur.execute("SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(ds.cantidad) FROM detalle_salida ds WHERE ds.salida_id=s.id) AS items FROM salidas s LEFT JOIN ventas v ON s.venta_id=v.id WHERE DATE(s.fecha)=%s ORDER BY s.fecha", (fecha_str,))
+    cur.execute(f"SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(ds.cantidad) FROM {ALMACEN_DB}.detalle_salida ds WHERE ds.salida_id=s.id) AS items FROM {ALMACEN_DB}.salidas s LEFT JOIN ventas v ON s.venta_id=v.id WHERE DATE(s.fecha)=%s ORDER BY s.fecha", (fecha_str,))
     salidas_dia = cur.fetchall()
-    cur.execute("SELECT COUNT(*) AS n FROM salidas WHERE DATE(fecha)=%s", (fecha_str,))
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.salidas WHERE DATE(fecha)=%s", (fecha_str,))
     num_salidas = cur.fetchone()['n']
     cur.execute("""
         SELECT e.id, e.estado, e.fecha_entrega, v.nombre AS cliente_nombre, v.total
