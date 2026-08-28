@@ -53,8 +53,12 @@ app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 mysql = MySQL(app)
 
 # Segunda base de datos (Gestión de Almacén): productos, proveedores y para pedir
-ALMACEN_DB = os.environ.get('MYSQL_DB_ALMACEN', 'gestion_de_almacen')
 MAIN_DB = os.environ.get('MYSQL_DB', 'proyecto_multiservicios_richard')
+ALMACEN_DB = os.environ.get('MYSQL_DB_ALMACEN', 'proyecto_gestion_almacen')
+# Guard: la base de almacén NUNCA debe ser la base principal. Si la variable de
+# entorno apunta a la BD principal, se fuerza usar la BD de almacén dedicada.
+if ALMACEN_DB == MAIN_DB:
+    ALMACEN_DB = 'proyecto_gestion_almacen'
 
 # ─────────────────────────────────────────────
 # FLASK-MAIL (env vars para Render)
