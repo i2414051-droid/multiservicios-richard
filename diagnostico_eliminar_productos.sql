@@ -1,4 +1,4 @@
--- ============================================================================
+-- ============================================================================-
 -- DIAGNÓSTICO: ¿qué tablas referencian a `productos` con una FK?
 -- Ejecuta esto en phpMyAdmin (base proyecto_multiservicios_richard).
 -- Si devuelve filas, esas son las FKs que impiden eliminar `productos`.
