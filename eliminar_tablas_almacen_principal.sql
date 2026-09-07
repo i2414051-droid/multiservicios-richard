@@ -1,5 +1,5 @@
 -- ============================================================================
--- ELIMINACIÓN de tablas de almacén de la BD principal
+-- ELIMINACIÓN de tablas de almacén de la BD principalES
 -- ============================================================================
 -- Estas tablas YA fueron migradas a proyecto_gestion_almacen y ahora se
 -- eliminan de proyecto_multiservicios_richard para no duplicar datos.
