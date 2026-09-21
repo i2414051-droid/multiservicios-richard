@@ -636,23 +636,29 @@ def index():
     productos = api_almacen(f'/api/productos/buscar{params}') or []
     return render_template('index.html', productos=productos, categorias=CATEGORIAS)
 
-@app.route('/agregar/<int:id>')
+@app.route('/agregar/<int:id>', methods=['GET', 'POST'])
 def agregar(id):
     try:
         usuario = obtener_usuario()
         # Verificar stock vía API de Almacén
         prod = api_almacen(f'/api/productos/{id}')
         if not prod:
+            if request.method == 'POST':
+                return jsonify({'success': False, 'message': 'Producto no encontrado.'})
             flash('Producto no encontrado.', 'danger')
             return redirect('/')
         stock_disponible = prod.get('stock', 0)
         if stock_disponible <= 0:
+            if request.method == 'POST':
+                return jsonify({'success': False, 'message': 'Producto sin stock disponible.'})
             flash('Producto sin stock disponible.', 'danger')
             return redirect('/')
         cur = mysql.connection.cursor()
         cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
         en_carrito = cur.fetchone()['total'] or 0
         if en_carrito + 1 > stock_disponible:
+            if request.method == 'POST':
+                return jsonify({'success': False, 'message': f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).'})
             flash(f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).', 'danger')
             return redirect('/')
         cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
@@ -662,7 +668,15 @@ def agregar(id):
         else:
             cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
         mysql.connection.commit()
+        
+        # Obtener count del carrito
+        cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s", (usuario,))
+        cart_count = cur.fetchone()['total'] or 0
         cur.close()
+        
+        if request.method == 'POST':
+            return jsonify({'success': True, 'message': 'Producto agregado al carrito', 'cart_count': cart_count})
+        
         flash('Producto agregado al carrito', 'success')
     except Exception as e:
         print(f"[agregar_carrito] {e}")
@@ -670,6 +684,8 @@ def agregar(id):
             mysql.connection.rollback()
         except Exception:
             pass
+        if request.method == 'POST':
+            return jsonify({'success': False, 'message': f'Error: {e}'})
         flash(f'Error: {e}', 'danger')
     return redirect('/')
 
@@ -1441,6 +1457,7 @@ def checkout():
         return redirect('/carrito')
     items = []
     total = 0
+    carrito_producto_ids = set()
     for c in carrito_items:
         data = almacen_api(f"/api/productos/{c['producto_id']}")
         if data and data.get('producto'):
@@ -1448,13 +1465,31 @@ def checkout():
             items.append({'id': c['id'], 'producto_id': c['producto_id'], 'nombre': p['nombre'],
                           'precio': float(p['precio']), 'imagen': p.get('imagen'), 'cantidad': c['cantidad']})
             total += float(p['precio']) * c['cantidad']
+            carrito_producto_ids.add(c['producto_id'])
+    
+    # Obtener productos sugeridos (excluyendo los que ya están en el carrito)
+    productos_sugeridos = []
+    all_products = api_almacen('/api/productos') or []
+    for p in all_products:
+        if p.get('id') not in carrito_producto_ids and p.get('stock', 0) > 0:
+            productos_sugeridos.append({
+                'id': p['id'],
+                'nombre': p['nombre'],
+                'precio': float(p.get('precio', 0)),
+                'imagen': p.get('imagen'),
+                'stock': p.get('stock', 0)
+            })
+            if len(productos_sugeridos) >= 9:  # 3 filas x 3 columnas
+                break
+    
     cur.execute("SELECT * FROM direcciones WHERE usuario_id=%s ORDER BY predeterminada DESC", (user_id,))
     direcciones = cur.fetchall()
     cur.execute("SELECT correo, nombre, apellido, telefono, documento_tipo, documento_numero FROM usuarios WHERE id=%s", (user_id,))
     usuario = cur.fetchone()
     cur.close()
     return render_template('checkout.html', items=items, total=total,
-                           direcciones=direcciones, usuario=usuario)
+                           direcciones=direcciones, usuario=usuario,
+                           productos_sugeridos=productos_sugeridos)
 
 @app.route('/procesar_compra', methods=['POST'])
 def procesar_compra():
@@ -1470,9 +1505,10 @@ def procesar_compra():
     doc_numero = request.form.get('doc_numero', '').strip()
     telefono = request.form.get('telefono', '').strip()
     correo = request.form.get('correo', '').strip()
-    metodo_pago = request.form.get('metodo_pago', 'efectivo')
     direccion_envio = request.form.get('direccion_envio', '')
     notas_entrega = request.form.get('notas_entrega', '').strip()
+    
+    # Validaciones
     if not all([nombres, apellidos, doc_numero, telefono, direccion_envio]):
         flash('Todos los campos son obligatorios.', 'danger')
         return redirect('/checkout')
@@ -1485,18 +1521,10 @@ def procesar_compra():
     if len(telefono) < 9 or not telefono.isdigit():
         flash('Celular debe tener al menos 9 digitos.', 'danger')
         return redirect('/checkout')
-    comprobante_filename = ''
-    if metodo_pago in ['yape', 'plin', 'transferencia']:
-        comprobante = request.files.get('comprobante_pago')
-        if comprobante and comprobante.filename:
-            ext = os.path.splitext(comprobante.filename)[1].lower()
-            if ext in ['.jpg', '.jpeg', '.png', '.webp', '.pdf']:
-                fn = f"comprobante_{user_id}_{int(time.time())}{ext}"
-                comprobante.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
-                comprobante_filename = 'uploads/' + fn
-            else:
-                flash('Formato de comprobante no valido.', 'danger')
-                return redirect('/checkout')
+    
+    # Pago contra entrega (efectivo)
+    metodo_pago = 'efectivo'
+    
     cur = mysql.connection.cursor()
     try:
         cur.execute("SELECT id FROM ventas WHERE cliente_id=%s AND fecha > NOW() - INTERVAL 30 SECOND", (user_id,))
@@ -1521,7 +1549,7 @@ def procesar_compra():
         cur.execute("""INSERT INTO ventas
             (cliente_id, total, metodo_pago, direccion_envio, documento, nombre, apellido, telefono, correo, notas_entrega, comprobante_pago)
             VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (user_id, total, metodo_pago, direccion_envio, doc_numero, nombres, apellidos, telefono, correo, notas_entrega, comprobante_filename or None))
+            (user_id, total, metodo_pago, direccion_envio, doc_numero, nombres, apellidos, telefono, correo, notas_entrega, None))
         venta_id = cur.lastrowid
         for item in items:
             cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
