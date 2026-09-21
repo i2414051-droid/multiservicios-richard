@@ -587,6 +587,7 @@ def ruta_init_db():
 # AUTH
 # ─────────────────────────────────────────────
 @app.route('/login', methods=['GET','POST'])
+@app.route('/Iniciar Sesion', methods=['GET','POST'])
 def login():
     ip = obtener_ip()
     if request.method == 'POST':
@@ -662,9 +663,10 @@ def login():
 
         mysql.connection.commit()
         return redirect('/login')
-    return render_template('login.html')
+    return render_template('Inicio.html')
 
 @app.route('/logout')
+@app.route('/Cerrar Sesion')
 def logout():
     session.clear()
     return redirect('/')
