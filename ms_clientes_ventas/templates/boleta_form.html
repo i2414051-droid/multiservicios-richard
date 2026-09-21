@@ -80,9 +80,17 @@ function consultar(){
     let numero = document.getElementById("numero").value;
     let venta_id = document.getElementById("venta_id").value;
 
+    // Mostrar loading
+    const btn = event ? event.target : document.querySelector('button[onclick="consultar()"]');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Consultando...';
+
     fetch(`/consultar/${tipo}/${numero}?venta_id=${venta_id}`)
     .then(response => response.json())
     .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
 
         if(data.error){
             alert(data.error);
@@ -93,20 +101,45 @@ function consultar(){
             document.getElementById("nombres").value = data.nombres || "";
             document.getElementById("apellidoPaterno").value = data.apellidoPaterno || "";
             document.getElementById("apellidoMaterno").value = data.apellidoMaterno || "";
+            // Bloquear campos después de consulta exitosa
+            document.getElementById("nombres").readOnly = true;
+            document.getElementById("apellidoPaterno").readOnly = true;
+            document.getElementById("apellidoMaterno").readOnly = true;
+            document.getElementById("nombres").style.backgroundColor = '#f8f9fa';
+            document.getElementById("apellidoPaterno").style.backgroundColor = '#f8f9fa';
+            document.getElementById("apellidoMaterno").style.backgroundColor = '#f8f9fa';
         }
 
         if(tipo === "ruc"){
             document.getElementById("razonSocial").value = data.razonSocial || "";
+            document.getElementById("razonSocial").readOnly = true;
+            document.getElementById("razonSocial").style.backgroundColor = '#f8f9fa';
         }
 
+        // Mostrar mensaje de éxito
+        alert('Datos obtenidos correctamente. Los campos de nombre/apellido están bloqueados.');
     })
     .catch(error => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
         alert("Error al consultar");
     });
 }
 
-function vistaPrevia(){
+// Enter key handler para búsqueda DNI/RUC
+document.addEventListener('DOMContentLoaded', function() {
+    const numeroInput = document.getElementById('numero');
+    if (numeroInput) {
+        numeroInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                consultar();
+            }
+        });
+    }
+});
 
+function vistaPrevia(){
     let venta_id = document.getElementById("venta_id").value;
     let tipo = document.getElementById("tipo").value;
     let doc = document.getElementById("numero").value;

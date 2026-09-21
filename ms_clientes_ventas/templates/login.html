@@ -19,11 +19,17 @@
                    required>
 
             <!-- CAMPO PASSWORD -->
-            <input type="password"
-                   name="password"
-                   placeholder="Contraseña"
-                   class="form-control mb-3"
-                   required>
+            <div class="position-relative">
+                <input type="password"
+                       name="password"
+                       placeholder="Contraseña"
+                       class="form-control mb-3"
+                       id="password" required>
+                <button type="button" class="position-absolute top-0 end-0 m-2 btn-link text-secondary py-0" 
+                        onclick="togglePassword()" style="border:none; background:none; cursor:pointer;">
+                    <i id="eye-icon" class="bi bi-eye"></i>
+                </button>
+            </div>
 
             <!-- MENSAJES FLASH -->
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -56,4 +62,33 @@
 
 </div>
 
-{% endblock %}
+<script>
+function togglePassword() {
+    const input = document.getElementById('password');
+    const eyeIcon = document.getElementById('eye-icon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        eyeIcon.classList.remove('bi-eye');
+        eyeIcon.classList.add('bi-eye-slash');
+    } else {
+        input.type = 'password';
+        eyeIcon.classList.remove('bi-eye-slash');
+        eyeIcon.classList.add('bi-eye');
+    }
+}
+
+// Desactivar botones durante envíos AJAX
+document.addEventListener('DOMContentLoaded', function() {
+    // Evitar doble envío de formularios
+    var forms = document.querySelectorAll('.needs-validation')
+    Array.prototype.slice.call(forms).forEach(function(form) {
+        form.addEventListener('submit', function(event) {
+            var btn = form.querySelector(':submit');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = 'Procesando...';
+            }
+        });
+    });
+});
+</script>

@@ -77,6 +77,18 @@ def init_db():
             cur.execute("ALTER TABLE usuarios ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
         except Exception:
             pass
+        # Nuevos campos para registro completo
+        for col, defn in [
+            ('nombres', 'VARCHAR(100)'),
+            ('apellidos', 'VARCHAR(100)'),
+            ('documento_tipo', 'VARCHAR(5)'),
+            ('documento_numero', 'VARCHAR(15)'),
+            ('telefono', 'VARCHAR(20)')
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE usuarios ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS carrito (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -339,7 +351,9 @@ def login():
             session['user_id'] = usuario['id']
             session['correo']   = usuario['correo']
             session['rol']      = usuario['rol'].lower()
-            flash('Bienvenido', 'success')
+            session['nombres']  = usuario.get('nombres', '')
+            session['apellidos'] = usuario.get('apellidos', '')
+            flash(f'Bienvenido, {usuario.get("nombres") or usuario["correo"]}', 'success')
             if session['rol'] in ['admin','administrador']:
                 init_db()
                 return redirect('/dashboard')
@@ -383,18 +397,49 @@ def logout():
 @app.route('/registro', methods=['GET','POST'])
 def registro():
     if request.method == 'POST':
-        correo   = request.form['correo']
-        password = request.form['password']
-        confirmar = request.form['confirmar']
+        documento_tipo   = request.form.get('documento_tipo', '')
+        documento_numero = request.form.get('documento_numero', '').replace(' ', '')
+        nombres          = request.form.get('nombres', '').strip()
+        apellidos        = request.form.get('apellidos', '').strip()
+        telefono         = request.form.get('telefono', '').replace(' ', '')
+        correo           = request.form.get('correo', '').strip()
+        password         = request.form.get('password', '')
+        confirmar        = request.form.get('confirmar', '')
+
+        # Validaciones
         if password != confirmar:
-            return "Contraseñas no coinciden"
+            flash('Las contraseñas no coinciden.', 'danger')
+            return redirect('/registro')
+        
+        if len(password) < 6:
+            flash('La contraseña debe tener al menos 6 caracteres.', 'danger')
+            return redirect('/registro')
+
+        if documento_tipo == 'dni' and len(documento_numero) != 8:
+            flash('El DNI debe tener 8 dígitos.', 'danger')
+            return redirect('/registro')
+        if documento_tipo == 'ruc' and len(documento_numero) != 11:
+            flash('El RUC debe tener 11 dígitos.', 'danger')
+            return redirect('/registro')
+        if documento_tipo not in ['dni', 'ruc']:
+            flash('Seleccione un tipo de documento válido.', 'danger')
+            return redirect('/registro')
+
         cur = mysql.connection.cursor()
         cur.execute("SELECT * FROM usuarios WHERE correo=%s", (correo,))
         if cur.fetchone():
-            return "Usuario ya existe"
+            flash('El correo ya está registrado.', 'danger')
+            return redirect('/registro')
+
         h = bcrypt.generate_password_hash(password).decode('utf-8')
-        cur.execute("INSERT INTO usuarios (correo, password, rol) VALUES (%s,%s,'cliente')", (correo, h))
+        cur.execute("""
+            INSERT INTO usuarios (correo, password, rol, documento_tipo, documento_numero, nombres, apellidos, telefono)
+            VALUES (%s,%s,'cliente',%s,%s,%s,%s,%s)
+        """, (correo, h, documento_tipo, documento_numero, nombres, apellidos, telefono))
         mysql.connection.commit()
+        cur.close()
+        
+        flash('Registro exitoso. Ya puede iniciar sesión.', 'success')
         return redirect('/login')
     return render_template('registro.html')
 
@@ -405,6 +450,11 @@ def registro():
 def dashboard():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+    offset = (page - 1) * per_page
+    
     cur = mysql.connection.cursor()
 
     cur.execute("SELECT COUNT(*) AS total FROM ventas")
@@ -415,7 +465,19 @@ def dashboard():
     total_usuarios = cur.fetchone()['total'] or 0
     cur.execute("SELECT COUNT(*) AS total FROM ventas WHERE estado='en espera'")
     ventas_pendientes = cur.fetchone()['total'] or 0
-    cur.execute("SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento FROM ventas v ORDER BY v.fecha DESC LIMIT 5")
+    
+    # Ventas paginadas
+    cur.execute("SELECT COUNT(*) AS total FROM ventas")
+    total_ventas_count = cur.fetchone()['total'] or 0
+    total_pages = (total_ventas_count + per_page - 1) // per_page
+    page = max(1, min(page, total_pages)) if total_pages > 0 else 1
+    
+    cur.execute("""
+        SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento 
+        FROM ventas v 
+        ORDER BY v.fecha DESC 
+        LIMIT %s OFFSET %s
+    """, (per_page, offset))
     ultimas_ventas = cur.fetchall()
     cur.close()
 
@@ -433,7 +495,9 @@ def dashboard():
                            total_proveedores=stats_almacen.get('total_proveedores', 0),
                            ventas_pendientes=ventas_pendientes,
                            ultimas_ventas=ultimas_ventas,
-                           productos_stock_bajo=productos_stock_bajo)
+                           productos_stock_bajo=productos_stock_bajo,
+                           page=page,
+                           total_pages=total_pages)
 
 @app.route('/admin')
 def admin():
@@ -763,9 +827,43 @@ def boleta_pdf(venta_id):
 @app.route('/confirmacion/<int:id>')
 def confirmacion(id):
     cur = mysql.connection.cursor()
-    cur.execute("SELECT total, fecha FROM ventas WHERE id=%s", (id,))
+    cur.execute("""
+        SELECT v.*, u.correo
+        FROM ventas v
+        JOIN usuarios u ON v.cliente_id = u.id
+        WHERE v.id=%s
+    """, (id,))
     venta = cur.fetchone()
-    return render_template('confirmacion.html', venta=venta, id=id)
+    
+    if not venta:
+        cur.close()
+        flash('Venta no encontrada', 'danger')
+        return redirect('/')
+    
+    # Obtener productos de la venta
+    cur.execute("SELECT producto_id, cantidad, precio FROM detalle_venta WHERE venta_id=%s", (id,))
+    detalles = cur.fetchall()
+    cur.close()
+    
+    productos = []
+    for d in detalles:
+        p = api_almacen(f"/api/productos/{d['producto_id']}")
+        if p:
+            productos.append({
+                'nombre': p['nombre'],
+                'cantidad': d['cantidad'],
+                'precio': d['precio'],
+                'imagen': p.get('imagen', '')
+            })
+        else:
+            productos.append({
+                'nombre': f'Producto #{d["producto_id"]}',
+                'cantidad': d['cantidad'],
+                'precio': d['precio'],
+                'imagen': ''
+            })
+    
+    return render_template('confirmacion.html', venta=venta, productos=productos, id=id)
 
 # ─────────────────────────────────────────────
 # HISTORIAL
@@ -1095,6 +1193,85 @@ def api_ventas():
         if isinstance(v.get('fecha'), datetime):
             v['fecha'] = v['fecha'].isoformat()
     return jsonify(ventas)
+
+# ─────────────────────────────────────────────
+# DASHBOARD CHARTS API
+# ─────────────────────────────────────────────
+@app.route('/api/dashboard/stock-distribution')
+def api_stock_distribution():
+    """Datos para gráficos de distribución de stock."""
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    # Obtener productos del microservicio de almacén
+    productos = api_almacen('/api/productos') or []
+    
+    # Categorías de stock
+    stock_10_mas = sum(1 for p in productos if p.get('stock', 0) >= 10)
+    stock_5_9 = sum(1 for p in productos if 5 <= p.get('stock', 0) <= 9)
+    stock_2_4 = sum(1 for p in productos if 2 <= p.get('stock', 0) <= 4)
+    stock_0_1 = sum(1 for p in productos if 0 <= p.get('stock', 0) <= 1)
+    
+    return jsonify({
+        'labels': ['10+ unidades', '5-9 unidades', '2-4 unidades', '0-1 unidades'],
+        'values': [stock_10_mas, stock_5_9, stock_2_4, stock_0_1],
+        'total_productos': len(productos)
+    })
+
+@app.route('/api/dashboard/weekly-sales')
+def api_weekly_sales():
+    """Datos para gráficos de ventas semanales."""
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return jsonify({'error': 'No autorizado'}), 403
+    
+    from datetime import datetime, timedelta
+    
+    cur = mysql.connection.cursor()
+    
+    # Obtener ventas de la última semana
+    hace_semana = datetime.now() - timedelta(days=7)
+    cur.execute("""
+        SELECT dv.producto_id, dv.cantidad, v.fecha
+        FROM detalle_venta dv
+        JOIN ventas v ON dv.venta_id = v.id
+        WHERE v.fecha >= %s
+    """, (hace_semana,))
+    detalles = cur.fetchall()
+    cur.close()
+    
+    if not detalles:
+        return jsonify({'top_products': [], 'weekly_data': []})
+    
+    # Agrupar por producto
+    productos_ventas = {}
+    for d in detalles:
+        pid = d['producto_id']
+        if pid not in productos_ventas:
+            productos_ventas[pid] = {'total': 0, 'dias': {}}
+        productos_ventas[pid]['total'] += d['cantidad']
+        
+        dia_semana = d['fecha'].strftime('%a') if isinstance(d['fecha'], datetime) else 'Lun'
+        # Normalizar nombres de días
+        dia_map = {'Mon': 'Lun', 'Tue': 'Mar', 'Wed': 'Mié', 'Thu': 'Jue', 'Fri': 'Vie', 'Sat': 'Sáb', 'Sun': 'Dom'}
+        dia_norm = dia_map.get(dia_semana, dia_semana)
+        productos_ventas[pid]['dias'][dia_norm] = productos_ventas[pid]['dias'].get(dia_norm, 0) + d['cantidad']
+    
+    # Obtener nombres de productos del microservicio
+    top_products = []
+    for pid, data in sorted(productos_ventas.items(), key=lambda x: x[1]['total'], reverse=True)[:10]:
+        prod = api_almacen(f'/api/productos/{pid}')
+        nombre = prod['nombre'] if prod else f'Producto #{pid}'
+        top_products.append({
+            'id': pid,
+            'nombre': nombre,
+            'total_vendido': data['total'],
+            'dias': data['dias']
+        })
+    
+    return jsonify({
+        'top_products': top_products,
+        'weekly_data': []
+    })
 
 # ─────────────────────────────────────────────
 # VALIDAR DOCUMENTO (para checkout - clientes)

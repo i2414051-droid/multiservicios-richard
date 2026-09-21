@@ -173,7 +173,59 @@
                     {% else %}
                     <div class="empty-msg"><i class="bi bi-inbox"></i> No hay ventas registradas</div>
                     {% endif %}
+                
+                <!-- PAGINACIÓN -->
+                {% if total_pages > 1 %}
+                <div class="d-flex justify-content-center gap-2 p-3" style="border-top:1px solid var(--border-subtle)">
+                    <nav aria-label="Paginación ventas">
+                        <ul class="pagination pagination-sm mb-0">
+                            {% if page > 1 %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page - 1 }}" style="background:var(--bg-card);border-color:var(--border-card);color:var(--text-primary)">
+                                    <i class="bi bi-chevron-left"></i>
+                                </a>
+                            </li>
+                            {% else %}
+                            <li class="page-item disabled">
+                                <span class="page-link" style="background:var(--bg-card);border-color:var(--border-card);color:var(--text-muted)">
+                                    <i class="bi bi-chevron-left"></i>
+                                </span>
+                            </li>
+                            {% endif %}
+                            
+                            {% for p in range(1, total_pages + 1) %}
+                                {% if p == page %}
+                                <li class="page-item active">
+                                    <span class="page-link" style="background:#f39c12;border-color:#f39c12">{{ p }}</span>
+                                </li>
+                                {% elif p == 1 or p == total_pages or (p >= page - 1 and p <= page + 1) %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ p }}" style="background:var(--bg-card);border-color:var(--border-card);color:var(--text-primary)">{{ p }}</a>
+                                </li>
+                                {% elif p == page - 2 or p == page + 2 %}
+                                <li class="page-item disabled">
+                                    <span class="page-link" style="background:var(--bg-card);border-color:var(--border-card);color:var(--text-muted)">...</span>
+                                </li>
+                                {% endif %}
+                            {% endfor %}
+                            
+                            {% if page < total_pages %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page + 1 }}" style="background:var(--bg-card);border-color:var(--border-card);color:var(--text-primary)">
+                                    <i class="bi bi-chevron-right"></i>
+                                </a>
+                            </li>
+                            {% else %}
+                            <li class="page-item disabled">
+                                <span class="page-link" style="background:var(--bg-card);border-color:var(--border-card);color:var(--text-muted)">
+                                    <i class="bi bi-chevron-right"></i>
+                                </span>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
                 </div>
+                {% endif %}
             </div>
         </div>
 
@@ -228,4 +280,303 @@
     </div>
 
 </div>
+
+    <!-- GRÁFICOS ESTADÍSTICOS -->
+    <div class="row g-4 mt-4">
+        
+        <!-- STOCK DISTRIBUCIÓN -->
+        <div class="col-lg-6">
+            <div class="dash-section">
+                <div class="sec-header">
+                    <h5><i class="bi bi-graph-up"></i> Distribución de Stock</h5>
+                </div>
+                <div class="sec-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3 mb-md-0">
+                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Gráfico de Dona</h6>
+                            <canvas id="stockDoughnutChart" height="200"></canvas>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Barras Apiladas</h6>
+                            <canvas id="stockStackedBarChart" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VENTAS SEMANALES -->
+        <div class="col-lg-6">
+            <div class="dash-section">
+                <div class="sec-header">
+                    <h5><i class="bi bi-bar-chart"></i> Ventas Semanales (Top Productos)</h5>
+                </div>
+                <div class="sec-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3 mb-md-0">
+                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Gráfico de Dona</h6>
+                            <canvas id="salesDoughnutChart" height="200"></canvas>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Barras Apiladas</h6>
+                            <canvas id="salesStackedBarChart" height="200"></canvas>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <h6 class="text-center mb-2" style="color:var(--text-secondary)">Gráfico de Áreas (Tendencia)</h6>
+                        <canvas id="salesAreaChart" height="180"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- CHART.JS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+    // Colores consistentes con el tema
+    const chartColors = {
+        primary: '#f39c12',
+        success: '#00ff6a',
+        warning: '#ffc107',
+        danger: '#ff4d4d',
+        info: '#3498db',
+        purple: '#9b59b6',
+        teal: '#1abc9c',
+        gray: '#6c757d'
+    };
+
+    const getCSSVar = (name) => {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#ffffff';
+    };
+
+    // Función para obtener colores del tema actual
+    function getThemeColors() {
+        return {
+            bg: getCSSVar('--bg-main') || '#ffffff',
+            cardBg: getCSSVar('--bg-card') || '#ffffff',
+            textPrimary: getCSSVar('--text-primary') || '#212529',
+            textMuted: getCSSVar('--text-muted') || '#6c757d',
+            border: getCSSVar('--border-card') || '#dee2e6'
+        };
+    }
+
+    // GRÁFICO DE DONA - STOCK
+    async function cargarGraficosStock() {
+        try {
+            const response = await fetch('/api/dashboard/stock-distribution');
+            const data = await response.json();
+            
+            if (!data || data.error) {
+                console.warn('No se pudieron cargar datos de stock');
+                return;
+            }
+
+            const theme = getThemeColors();
+            
+            // Gráfico de Dona - Stock
+            new Chart(document.getElementById('stockDoughnutChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: data.labels,
+                    datasets: [{
+                        data: data.values,
+                        backgroundColor: [
+                            chartColors.success,    // 10+
+                            chartColors.info,       // 5-9
+                            chartColors.warning,    // 2-4
+                            chartColors.danger      // 0-1
+                        ],
+                        borderWidth: 2,
+                        borderColor: theme.cardBg
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: theme.textPrimary, font: { size: 11 } }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${ctx.raw} productos`
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Gráfico de Barras Apiladas - Stock
+            new Chart(document.getElementById('stockStackedBarChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['Productos'],
+                    datasets: [
+                        { label: '10+', data: [data.values[0] || 0], backgroundColor: chartColors.success },
+                        { label: '5-9', data: [data.values[1] || 0], backgroundColor: chartColors.info },
+                        { label: '2-4', data: [data.values[2] || 0], backgroundColor: chartColors.warning },
+                        { label: '0-1', data: [data.values[3] || 0], backgroundColor: chartColors.danger }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    indexAxis: 'y',
+                    scales: {
+                        x: { 
+                            stacked: true, 
+                            grid: { color: theme.border },
+                            ticks: { color: theme.textMuted }
+                        },
+                        y: { 
+                            stacked: true, 
+                            grid: { display: false },
+                            ticks: { color: theme.textMuted }
+                        }
+                    },
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: theme.textPrimary, font: { size: 11 } } },
+                        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.raw} productos` } }
+                    }
+                }
+            });
+        } catch (e) {
+            console.error('Error cargando gráficos de stock:', e);
+        }
+    }
+
+    // GRÁFICOS DE VENTAS SEMANALES
+    async function cargarGraficosVentas() {
+        try {
+            const response = await fetch('/api/dashboard/weekly-sales');
+            const data = await response.json();
+            
+            if (!data || data.error) {
+                console.warn('No se pudieron cargar datos de ventas semanales');
+                return;
+            }
+
+            const theme = getThemeColors();
+            const topProducts = data.top_products || [];
+            const weeklyData = data.weekly_data || [];
+
+            // Gráfico de Dona - Top Productos
+            if (topProducts.length > 0) {
+                const labels = topProducts.map(p => p.nombre.length > 15 ? p.nombre.substring(0,15)+'...' : p.nombre);
+                const values = topProducts.map(p => p.total_vendido);
+                
+                new Chart(document.getElementById('salesDoughnutChart'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: values,
+                            backgroundColor: [
+                                '#f39c12', '#e74c3c', '#3498db', '#2ecc71', '#9b59b6',
+                                '#1abc9c', '#e67e22', '#34495e', '#16a085', '#c0392b'
+                            ].slice(0, topProducts.length),
+                            borderWidth: 2,
+                            borderColor: theme.cardBg
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: { position: 'bottom', labels: { color: theme.textPrimary, font: { size: 10 } } },
+                            tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw} unidades` } }
+                        }
+                    }
+                });
+            }
+
+            // Gráfico de Barras Apiladas - Ventas por día de la semana
+            if (weeklyData.length > 0) {
+                const dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+                const productosTop = topProducts.slice(0, 5);
+                
+                const datasets = productosTop.map((p, i) => ({
+                    label: p.nombre.length > 12 ? p.nombre.substring(0,12)+'...' : p.nombre,
+                    data: dias.map(d => p.dias?.[d] || 0),
+                    backgroundColor: [
+                        '#f39c12', '#e74c3c', '#3498db', '#2ecc71', '#9b59b6'
+                    ][i]
+                }));
+
+                new Chart(document.getElementById('salesStackedBarChart'), {
+                    type: 'bar',
+                    data: { labels: dias, datasets: datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        scales: {
+                            x: { stacked: true, grid: { color: theme.border }, ticks: { color: theme.textMuted } },
+                            y: { stacked: true, beginAtZero: true, grid: { color: theme.border }, ticks: { color: theme.textMuted } }
+                        },
+                        plugins: {
+                            legend: { position: 'bottom', labels: { color: theme.textPrimary, font: { size: 10 } } }
+                        }
+                    }
+                });
+            }
+
+            // Gráfico de Áreas - Tendencia semanal total
+            const totalesSemana = dias.map(d => 
+                (productosTop.reduce((sum, p) => sum + (p.dias?.[d] || 0), 0))
+            );
+
+            new Chart(document.getElementById('salesAreaChart'), {
+                type: 'line',
+                data: {
+                    labels: dias,
+                    datasets: [{
+                        label: 'Unidades vendidas',
+                        data: totalesSemana,
+                        fill: true,
+                        borderColor: chartColors.primary,
+                        backgroundColor: 'rgba(243, 156, 18, 0.15)',
+                        tension: 0.4,
+                        pointBackgroundColor: chartColors.primary,
+                        pointBorderColor: theme.cardBg,
+                        pointBorderWidth: 2,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        x: { grid: { color: theme.border }, ticks: { color: theme.textMuted } },
+                        y: { beginAtZero: true, grid: { color: theme.border }, ticks: { color: theme.textMuted } }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        } catch (e) {
+            console.error('Error cargando gráficos de ventas:', e);
+        }
+    }
+
+    // Inicializar gráficos cuando el DOM esté listo
+    document.addEventListener('DOMContentLoaded', function() {
+        cargarGraficosStock();
+        cargarGraficosVentas();
+        
+        // Recargar al cambiar tema
+        const observer = new MutationObserver(() => {
+            document.querySelectorAll('canvas').forEach(c => {
+                const chart = Chart.getChart(c);
+                if (chart) chart.destroy();
+            });
+            cargarGraficosStock();
+            cargarGraficosVentas();
+        });
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    });
+    </script>
 {% endblock %}
