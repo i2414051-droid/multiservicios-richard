@@ -1,4 +1,4 @@
-import os, uuid, io, threading, requests as http_requests
+import os, uuid, io, threading, secrets, requests as http_requests
 from datetime import datetime, timedelta
 from functools import wraps
 
@@ -156,6 +156,60 @@ def init_db():
                 created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Columnas para recuperacion de contrasena
+        for col, defn in [
+            ('recuperacion_token', 'VARCHAR(255)'),
+            ('recuperacion_expira', 'DATETIME')
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE usuarios ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
+        # Columnas completas de la venta (por checkout / boleta)
+        for col, defn in [
+            ('metodo_pago', "VARCHAR(20) DEFAULT 'efectivo'"),
+            ('direccion_envio', 'VARCHAR(255)'),
+            ('apellido', 'VARCHAR(100)'),
+            ('telefono', 'VARCHAR(20)'),
+            ('correo', 'VARCHAR(200)'),
+            ('notas_entrega', 'TEXT'),
+            ('comprobante_pago', 'VARCHAR(20)')
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE ventas ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS direcciones (
+                id             INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id     INT NOT NULL,
+                direccion      VARCHAR(255) NOT NULL,
+                distrito       VARCHAR(100),
+                referencia     VARCHAR(255),
+                predeterminada TINYINT(1) DEFAULT 0,
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS seguimiento_entregas (
+                id             INT AUTO_INCREMENT PRIMARY KEY,
+                venta_id       INT NOT NULL,
+                estado         VARCHAR(20) DEFAULT 'pendiente',
+                direccion_envio VARCHAR(255),
+                fecha_estimada DATE,
+                fecha_entrega  DATETIME,
+                notas          TEXT,
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entrega_productos (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                entrega_id  INT NOT NULL,
+                producto_id INT NOT NULL,
+                cantidad    INT DEFAULT 1
+            )
+        """)
         mysql.connection.commit()
         print("[MS Clientes/Ventas] Tablas creadas/verificadas OK")
     except Exception as e:
@@ -174,25 +228,75 @@ def obtener_usuario():
         session['guest_id'] = str(uuid.uuid4())
     return session['guest_id']
 
-def api_almacen(endpoint):
-    """Llama a la API del microservicio de Almacén."""
-    try:
-        r = http_requests.get(f"{MS_ALMACEN_URL}{endpoint}", timeout=5)
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        print(f"[api_almacen] Error {endpoint}: {e}")
+# Clave interna compartida con el MS de Almacén
+INTERNAL_API_KEY = os.environ.get('INTERNAL_API_KEY', 'clave-interna-ms-almacen-2026')
+
+# Endpoints internos de este MS que solo puede consumir el MS de Almacén (5001)
+# (las rutas de tablas son internas del MS Ventas/Clientes)
+
+@app.before_request
+def _seguridad_ms():
+    path = request.path
+    if path.startswith('/api/ventas') or path.startswith('/api/usuarios') or \
+       path.startswith('/api/detalle-venta') or path == '/api/entregas':
+        if request.headers.get('X-Internal-Key') != INTERNAL_API_KEY:
+            return jsonify({'error': 'No autorizado'}), 401
     return None
 
-def api_almacen_post(endpoint, data=None):
-    """Llama POST a la API del microservicio de Almacén."""
+def almacen_api(endpoint, method='GET', data=None):
+    """Llama a la API del microservicio de Almacén (5001) con clave interna."""
     try:
-        r = http_requests.post(f"{MS_ALMACEN_URL}{endpoint}", json=data, timeout=5)
+        headers = {'X-Internal-Key': INTERNAL_API_KEY}
+        url = f"{MS_ALMACEN_URL}{endpoint}"
+        if method in ('POST', 'PUT', 'DELETE'):
+            r = http_requests.request(method, url, json=data, headers=headers, timeout=10)
+        else:
+            r = http_requests.get(url, headers=headers, timeout=10)
         if r.status_code == 200:
             return r.json()
+        print(f"[almacen_api] {method} {endpoint} -> {r.status_code} {r.text[:200]}")
     except Exception as e:
-        print(f"[api_almacen_post] Error {endpoint}: {e}")
+        print(f"[almacen_api] Error {method} {endpoint}: {e}")
     return None
+
+def api_almacen(endpoint):
+    """Alias GET — llama a la API del microservicio de Almacén."""
+    return almacen_api(endpoint, method='GET')
+
+def api_almacen_post(endpoint, data=None):
+    """Alias POST — llama a la API del microservicio de Almacén."""
+    return almacen_api(endpoint, method='POST', data=data)
+
+# ─────────────────────────────────────────────
+# CSRF
+# ─────────────────────────────────────────────
+def generate_csrf_token():
+    if '_csrf_token' not in session:
+        session['_csrf_token'] = secrets.token_hex(32)
+    return session['_csrf_token']
+
+app.jinja_env.globals['csrf_token'] = generate_csrf_token
+
+def validate_csrf():
+    token = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token')
+    if not token or token != session.get('_csrf_token'):
+        return False
+    return True
+
+# ─────────────────────────────────────────────
+# PAGINACIÓN (para listados propios)
+# ─────────────────────────────────────────────
+PER_PAGE = 15
+
+def paginate_query(cur, sql_count, sql_data, params, page, per_page=PER_PAGE):
+    cur.execute(sql_count, params)
+    total = cur.fetchone()['total']
+    total_pages = max(1, -(-total // per_page))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+    cur.execute(sql_data + " LIMIT %s OFFSET %s", params + (per_page, offset))
+    items = cur.fetchall()
+    return items, total, page, total_pages
 
 def generar_boleta_pdf(venta_id):
     cur = mysql.connection.cursor()
@@ -1210,6 +1314,38 @@ def api_ventas():
             v['fecha'] = v['fecha'].isoformat()
     return jsonify(ventas)
 
+@app.route('/api/detalle-ventas')
+def api_detalle_ventas():
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT dv.venta_id, dv.producto_id, dv.cantidad, dv.precio FROM detalle_venta dv")
+    detalle = cur.fetchall()
+    cur.close()
+    return jsonify(detalle)
+
+@app.route('/api/detalle-venta/<int:venta_id>')
+def api_detalle_venta(venta_id):
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT dv.venta_id, dv.producto_id, dv.cantidad, dv.precio FROM detalle_venta dv WHERE dv.venta_id=%s", (venta_id,))
+    detalle = cur.fetchall()
+    cur.close()
+    return jsonify(detalle)
+
+@app.route('/api/entregas')
+def api_entregas():
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT COUNT(*) AS n FROM seguimiento_entregas")
+    n = cur.fetchone()['n']
+    cur.close()
+    return jsonify({'total': n})
+
+@app.route('/api/usuarios')
+def api_usuarios():
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, correo, rol, estado FROM usuarios ORDER BY id")
+    usuarios = cur.fetchall()
+    cur.close()
+    return jsonify(usuarios)
+
 # ─────────────────────────────────────────────
 # DASHBOARD CHARTS API
 # ─────────────────────────────────────────────
@@ -1347,10 +1483,10 @@ def api_validar_documento():
 @app.route('/producto/<int:id>')
 def detalle_producto(id):
     data = almacen_api(f"/api/productos/{id}")
-    if not data or not data.get('producto'):
+    if not data or data.get('error'):
         flash('Producto no encontrado.', 'danger')
         return redirect('/')
-    return render_template('producto_detalle.html', producto=data['producto'])
+    return render_template('producto_detalle.html', producto=data)
 
 # ─────────────────────────────────────────────
 # DIRECCIONES DEL CLIENTE
@@ -1460,8 +1596,8 @@ def checkout():
     carrito_producto_ids = set()
     for c in carrito_items:
         data = almacen_api(f"/api/productos/{c['producto_id']}")
-        if data and data.get('producto'):
-            p = data['producto']
+        if data and not data.get('error'):
+            p = data
             items.append({'id': c['id'], 'producto_id': c['producto_id'], 'nombre': p['nombre'],
                           'precio': float(p['precio']), 'imagen': p.get('imagen'), 'cantidad': c['cantidad']})
             total += float(p['precio']) * c['cantidad']
@@ -1484,7 +1620,7 @@ def checkout():
     
     cur.execute("SELECT * FROM direcciones WHERE usuario_id=%s ORDER BY predeterminada DESC", (user_id,))
     direcciones = cur.fetchall()
-    cur.execute("SELECT correo, nombre, apellido, telefono, documento_tipo, documento_numero FROM usuarios WHERE id=%s", (user_id,))
+    cur.execute("SELECT correo, nombres, apellidos, telefono, documento_tipo, documento_numero FROM usuarios WHERE id=%s", (user_id,))
     usuario = cur.fetchone()
     cur.close()
     return render_template('checkout.html', items=items, total=total,
@@ -1539,8 +1675,8 @@ def procesar_compra():
         total = 0
         for c in carrito_items:
             data = almacen_api(f"/api/productos/{c['producto_id']}")
-            if data and data.get('producto'):
-                p = data['producto']
+            if data and not data.get('error'):
+                p = data
                 items.append({'id': c['producto_id'], 'precio': float(p['precio']), 'cantidad': c['cantidad'], 'nombre': p['nombre']})
                 if int(p.get('stock', 0)) < c['cantidad']:
                     flash(f'Stock insuficiente para: {p["nombre"]}. Solo quedan {p["stock"]} unidad(es).', 'danger')
@@ -1557,7 +1693,7 @@ def procesar_compra():
             almacen_api(f"/api/productos/{item['id']}/descontar-stock", method='POST', data={'cantidad': item['cantidad']})
         cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
         cur.execute("""UPDATE usuarios SET
-            nombre=IFNULL(nombre,%s), apellido=IFNULL(apellido,%s),
+            nombres=IFNULL(nombres,%s), apellidos=IFNULL(apellidos,%s),
             telefono=IFNULL(telefono,%s), documento_tipo=IFNULL(documento_tipo,%s),
             documento_numero=IFNULL(documento_numero,%s)
             WHERE id=%s""",
@@ -1819,8 +1955,8 @@ def detalle_entrega(id):
     productos = []
     for d in detalles:
         data = almacen_api(f"/api/productos/{d['producto_id']}")
-        nombre = data['producto']['nombre'] if data and data.get('producto') else f'Producto #{d["producto_id"]}'
-        imagen = data['producto'].get('imagen') if data and data.get('producto') else None
+        nombre = data.get('nombre') if data and not data.get('error') else f'Producto #{d["producto_id"]}'
+        imagen = data.get('imagen') if data and not data.get('error') else None
         productos.append({'nombre': nombre, 'imagen': imagen, 'cantidad': d['cantidad'], 'precio': d['precio']})
     return render_template('detalle_entrega.html', entrega=entrega, productos=productos)
 
@@ -1871,8 +2007,8 @@ def asignar_entrega(venta_id):
     productos_venta = []
     for d in detalles:
         data = almacen_api(f"/api/productos/{d['producto_id']}")
-        nombre = data['producto']['nombre'] if data and data.get('producto') else f'Producto #{d["producto_id"]}'
-        imagen = data['producto'].get('imagen') if data and data.get('producto') else None
+        nombre = data.get('nombre') if data and not data.get('error') else f'Producto #{d["producto_id"]}'
+        imagen = data.get('imagen') if data and not data.get('error') else None
         productos_venta.append({'producto_id': d['producto_id'], 'nombre': nombre, 'imagen': imagen,
                                 'cantidad': d['cantidad'], 'precio': d['precio']})
     if request.method == 'POST':
@@ -1904,39 +2040,36 @@ def asignar_entrega(venta_id):
     return render_template('asignar_entrega.html', venta=venta, productos_venta=productos_venta, direcciones=direcciones)
 
 # ─────────────────────────────────────────────
-# INGRESOS DE PRODUCTOS
+# INGRESOS DE PRODUCTOS (datos vía API del MS Almacén)
 # ─────────────────────────────────────────────
 @app.route('/ingresos')
 def ingresos():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
-    cur = mysql.connection.cursor()
-    sql_count = f"""SELECT COUNT(*) AS total FROM {ALMACEN_DB}.ingresos i
-        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
-        WHERE p.nombre LIKE %s"""
-    sql_data = f"""SELECT i.id, i.fecha, i.notas,
-               p.nombre AS proveedor_nombre,
-               (SELECT SUM(di.cantidad) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS total_items
-        FROM {ALMACEN_DB}.ingresos i
-        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
-        WHERE p.nombre LIKE %s
-        ORDER BY i.fecha DESC"""
-    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
-    cur.close()
-    return render_template('ingresos.html', ingresos=items, buscar=buscar,
-                           page=page, total_pages=total_pages, total=total,
-                           has_prev=page > 1, has_next=page < total_pages)
+    page = request.args.get('page', 1)
+    data = almacen_api(f"/api/ingresos?buscar={buscar}&page={page}")
+    if not data:
+        flash('No se pudo consultar el servicio de Almacén (5001).', 'danger')
+        return render_template('ingresos.html', ingresos=[], buscar=buscar,
+                               page=1, total_pages=1, total=0, has_prev=False, has_next=False)
+    return render_template('ingresos.html', ingresos=data.get('ingresos', []), buscar=buscar,
+                           page=data.get('page', 1), total_pages=data.get('total_pages', 1),
+                           total=data.get('total', 0),
+                           has_prev=data.get('has_prev', False), has_next=data.get('has_next', False))
 
 @app.route('/registrar-ingreso', methods=['GET','POST'])
 def registrar_ingreso():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    data_prod = almacen_api("/api/productos?page=1000") or {}
-    productos = data_prod.get('productos', [])
-    data_prov = almacen_api("/api/proveedores") or {}
-    proveedores = data_prov.get('proveedores', [])
+    data_prod = almacen_api("/api/productos?per_page=1000") or []
+    if not isinstance(data_prod, list):
+        data_prod = []
+    productos = data_prod
+    data_prov = almacen_api("/api/proveedores") or []
+    if not isinstance(data_prov, list):
+        data_prov = []
+    proveedores = data_prov
     if request.method == 'POST':
         if not validate_csrf():
             flash('Token CSRF invalido.', 'danger')
@@ -1946,9 +2079,7 @@ def registrar_ingreso():
         producto_ids = request.form.getlist('producto_id[]')
         cantidades = request.form.getlist('cantidad[]')
         precios = request.form.getlist('precio_compra[]')
-        cur = mysql.connection.cursor()
-        cur.execute(f"INSERT INTO {ALMACEN_DB}.ingresos (proveedor_id, notas) VALUES (%s, %s)", (proveedor_id, notas))
-        ingreso_id = cur.lastrowid
+        items = []
         for i in range(len(producto_ids)):
             try:
                 pid = int(producto_ids[i])
@@ -1957,11 +2088,16 @@ def registrar_ingreso():
             except (ValueError, IndexError):
                 continue
             if cant > 0:
-                cur.execute(f"INSERT INTO {ALMACEN_DB}.detalle_ingreso (ingreso_id, producto_id, cantidad, precio_compra) VALUES (%s,%s,%s,%s)",
-                            (ingreso_id, pid, cant, prec))
-                almacen_api(f"/api/productos/{pid}/incrementar-stock", method='POST', data={'cantidad': cant})
-        mysql.connection.commit()
-        cur.close()
+                items.append({'producto_id': pid, 'cantidad': cant, 'precio_compra': prec})
+        if not items:
+            flash('Agrega al menos un producto con cantidad.', 'danger')
+            return redirect('/registrar-ingreso')
+        res = almacen_api('/api/ingresos', method='POST',
+                          data={'proveedor_id': proveedor_id, 'notas': notas, 'items': items})
+        if not res or res.get('error'):
+            flash('Error al registrar el ingreso en Almacén (5001).', 'danger')
+            return redirect('/registrar-ingreso')
+        ingreso_id = res.get('id')
         flash(f'Ingreso #{ingreso_id} registrado correctamente.', 'success')
         return redirect(f'/comprobante-ingreso/{ingreso_id}')
     return render_template('registrar_ingreso.html', productos=productos, proveedores=proveedores)
@@ -1970,76 +2106,59 @@ def registrar_ingreso():
 def comprobante_ingreso(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    cur = mysql.connection.cursor()
-    cur.execute(f"""
-        SELECT i.id, i.fecha, i.notas,
-               p.nombre AS proveedor_nombre, p.ruc AS proveedor_ruc,
-               p.celular AS proveedor_celular, p.correo AS proveedor_correo
-        FROM {ALMACEN_DB}.ingresos i
-        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
-        WHERE i.id=%s
-    """, (id,))
-    ingreso = cur.fetchone()
-    if not ingreso:
+    data = almacen_api(f"/api/ingresos/{id}")
+    if not data or data.get('error'):
         flash('Ingreso no encontrado.', 'danger')
         return redirect('/ingresos')
-    cur.execute(f"SELECT producto_id, cantidad, precio_compra FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
-    detalles = cur.fetchall()
-    cur.close()
-    items = []
-    total_general = 0
-    for d in detalles:
-        data = almacen_api(f"/api/productos/{d['producto_id']}")
-        nombre = data['producto']['nombre'] if data and data.get('producto') else f'Producto #{d["producto_id"]}'
-        stock = data['producto'].get('stock', 0) if data and data.get('producto') else 0
-        precio = float(d['precio_compra'])
-        items.append({'cantidad': d['cantidad'], 'precio_compra': precio, 'producto_nombre': nombre, 'stock_actual': stock})
-        total_general += d['cantidad'] * precio
-    return render_template('comprobante_ingreso.html', ingreso=ingreso, items=items, total_general=total_general)
+    return render_template('comprobante_ingreso.html',
+                           ingreso=data.get('ingreso', {}),
+                           items=data.get('items', []),
+                           total_general=data.get('total_general', 0))
 
 @app.route('/eliminar-ingreso/<int:id>')
 def eliminar_ingreso(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    cur = mysql.connection.cursor()
-    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
-    items = cur.fetchall()
-    revertidos = 0
-    for item in items:
-        almacen_api(f"/api/productos/{item['producto_id']}/descontar-stock", method='POST', data={'cantidad': item['cantidad']})
-        revertidos += 1
-    cur.execute(f"DELETE FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
-    cur.execute(f"DELETE FROM {ALMACEN_DB}.ingresos WHERE id=%s", (id,))
-    mysql.connection.commit()
-    cur.close()
-    flash(f'Ingreso eliminado y stock revertido ({revertidos} productos).', 'success')
+    res = almacen_api(f"/api/ingresos/{id}", method='DELETE')
+    if not res or res.get('error'):
+        flash('No se pudo eliminar el ingreso en Almacén (5001).', 'danger')
+        return redirect('/ingresos')
+    flash(f'Ingreso eliminado y stock revertido ({res.get("revertidos", 0)} productos).', 'success')
     return redirect('/ingresos')
 
 # ─────────────────────────────────────────────
-# SALIDAS DE PRODUCTOS
+# SALIDAS DE PRODUCTOS (datos vía API del MS Almacén)
 # ─────────────────────────────────────────────
 @app.route('/salidas')
 def salidas():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
-    cur = mysql.connection.cursor()
-    sql_count = f"""SELECT COUNT(*) AS total FROM {ALMACEN_DB}.salidas s
-        LEFT JOIN ventas v ON s.venta_id=v.id
-        WHERE COALESCE(v.nombre, '') LIKE %s"""
-    sql_data = f"""SELECT s.id, s.fecha, s.notas,
-               v.id AS venta_id, v.nombre AS cliente_nombre, v.total AS venta_total,
-               (SELECT SUM(ds.cantidad) FROM {ALMACEN_DB}.detalle_salida ds WHERE ds.salida_id=s.id) AS total_items
-        FROM {ALMACEN_DB}.salidas s
-        LEFT JOIN ventas v ON s.venta_id=v.id
-        WHERE COALESCE(v.nombre, '') LIKE %s
-        ORDER BY s.fecha DESC"""
-    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
-    cur.close()
-    return render_template('salidas.html', salidas=items, buscar=buscar,
-                           page=page, total_pages=total_pages, total=total,
-                           has_prev=page > 1, has_next=page < total_pages)
+    page = request.args.get('page', 1)
+    data = almacen_api(f"/api/salidas?buscar={buscar}&page={page}")
+    if not data:
+        flash('No se pudo consultar el servicio de Almacén (5001).', 'danger')
+        return render_template('salidas.html', salidas=[], buscar=buscar,
+                               page=1, total_pages=1, total=0, has_prev=False, has_next=False)
+    salidas_lista = data.get('salidas', [])
+    # Enriquecer con datos de la venta desde BD local (las ventas viven en este servicio)
+    venta_ids = {s.get('venta_id') for s in salidas_lista if s.get('venta_id')}
+    ventas_map = {}
+    if venta_ids:
+        cur = mysql.connection.cursor()
+        ids = ','.join(str(v) for v in venta_ids)
+        cur.execute(f"SELECT id, nombre, total FROM ventas WHERE id IN ({ids})")
+        for fila in cur.fetchall():
+            ventas_map[fila['id']] = fila
+        cur.close()
+    for s in salidas_lista:
+        venta = ventas_map.get(s.get('venta_id'))
+        s['cliente_nombre'] = venta['nombre'] if venta else None
+        s['venta_total'] = venta['total'] if venta else None
+    return render_template('salidas.html', salidas=salidas_lista, buscar=buscar,
+                           page=data.get('page', 1), total_pages=data.get('total_pages', 1),
+                           total=data.get('total', 0),
+                           has_prev=data.get('has_prev', False), has_next=data.get('has_next', False))
 
 @app.route('/registrar-salida', methods=['GET','POST'])
 def registrar_salida():
@@ -2053,8 +2172,10 @@ def registrar_salida():
     """)
     ventas = cur.fetchall()
     cur.close()
-    data_prod = almacen_api("/api/productos?page=1000") or {}
-    productos = data_prod.get('productos', [])
+    data_prod = almacen_api("/api/productos?per_page=1000") or []
+    if not isinstance(data_prod, list):
+        data_prod = []
+    productos = data_prod
     if request.method == 'POST':
         if not validate_csrf():
             flash('Token CSRF invalido.', 'danger')
@@ -2063,7 +2184,7 @@ def registrar_salida():
         notas = request.form.get('notas', '')
         producto_ids = request.form.getlist('producto_id[]')
         cantidades = request.form.getlist('cantidad[]')
-        errores = []
+        items = []
         for i in range(len(producto_ids)):
             try:
                 pid = int(producto_ids[i])
@@ -2071,28 +2192,16 @@ def registrar_salida():
             except (ValueError, IndexError):
                 continue
             if cant > 0:
-                data = almacen_api(f"/api/productos/{pid}/stock")
-                stock_actual = data.get('stock', 0) if data else 0
-                if stock_actual < cant:
-                    errores.append(f'Producto #{pid}: stock insuficiente (hay {stock_actual}, necesitas {cant})')
-        if errores:
-            flash('No se puede registrar la salida: ' + '; '.join(errores), 'danger')
+                items.append({'producto_id': pid, 'cantidad': cant})
+        if not items:
+            flash('Agrega al menos un producto con cantidad.', 'danger')
             return redirect('/registrar-salida')
-        cur = mysql.connection.cursor()
-        cur.execute(f"INSERT INTO {ALMACEN_DB}.salidas (venta_id, notas) VALUES (%s, %s)", (venta_id, notas))
-        salida_id = cur.lastrowid
-        for i in range(len(producto_ids)):
-            try:
-                pid = int(producto_ids[i])
-                cant = int(cantidades[i])
-            except (ValueError, IndexError):
-                continue
-            if cant > 0:
-                cur.execute(f"INSERT INTO {ALMACEN_DB}.detalle_salida (salida_id, producto_id, cantidad) VALUES (%s,%s,%s)",
-                            (salida_id, pid, cant))
-                almacen_api(f"/api/productos/{pid}/descontar-stock", method='POST', data={'cantidad': cant})
-        mysql.connection.commit()
-        cur.close()
+        res = almacen_api('/api/salidas', method='POST',
+                          data={'venta_id': venta_id, 'notas': notas, 'items': items})
+        if not res or res.get('error'):
+            flash(f'No se puede registrar la salida: {res.get("error", "error en Almacén (5001)")}', 'danger')
+            return redirect('/registrar-salida')
+        salida_id = res.get('id')
         flash(f'Salida #{salida_id} registrada correctamente.', 'success')
         return redirect(f'/comprobante-salida/{salida_id}')
     return render_template('registrar_salida.html', ventas=ventas, productos=productos)
@@ -2101,47 +2210,38 @@ def registrar_salida():
 def comprobante_salida(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    cur = mysql.connection.cursor()
-    cur.execute(f"""
-        SELECT s.id, s.fecha, s.notas,
-               v.id AS venta_id, v.nombre AS cliente_nombre, v.documento AS cliente_doc,
-               v.total AS venta_total, v.fecha AS venta_fecha
-        FROM {ALMACEN_DB}.salidas s LEFT JOIN ventas v ON s.venta_id=v.id
-        WHERE s.id=%s
-    """, (id,))
-    salida = cur.fetchone()
-    if not salida:
+    data = almacen_api(f"/api/salidas/{id}")
+    if not data or data.get('error'):
         flash('Salida no encontrada.', 'danger')
         return redirect('/salidas')
-    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=%s", (id,))
-    detalles = cur.fetchall()
-    cur.close()
-    items = []
-    for d in detalles:
-        data = almacen_api(f"/api/productos/{d['producto_id']}")
-        nombre = data['producto']['nombre'] if data and data.get('producto') else f'Producto #{d["producto_id"]}'
-        stock = data['producto'].get('stock', 0) if data and data.get('producto') else 0
-        items.append({'cantidad': d['cantidad'], 'producto_nombre': nombre, 'stock_actual': stock})
+    salida = data.get('salida', {})
+    items = data.get('items', [])
+    # Enriquecer con datos de la venta desde BD local
+    if salida.get('venta_id'):
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT nombre AS cliente_nombre, documento AS cliente_doc, total AS venta_total, fecha AS venta_fecha FROM ventas WHERE id=%s", (salida['venta_id'],))
+        venta = cur.fetchone()
+        cur.close()
+        if venta:
+            salida['cliente_nombre'] = venta['cliente_nombre']
+            salida['cliente_doc'] = venta['cliente_doc']
+            salida['venta_total'] = venta['venta_total']
+            salida['venta_fecha'] = venta['venta_fecha']
     return render_template('comprobante_salida.html', salida=salida, items=items)
 
 @app.route('/eliminar-salida/<int:id>')
 def eliminar_salida(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    cur = mysql.connection.cursor()
-    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=%s", (id,))
-    items = cur.fetchall()
-    for item in items:
-        almacen_api(f"/api/productos/{item['producto_id']}/incrementar-stock", method='POST', data={'cantidad': item['cantidad']})
-    cur.execute(f"DELETE FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=%s", (id,))
-    cur.execute(f"DELETE FROM {ALMACEN_DB}.salidas WHERE id=%s", (id,))
-    mysql.connection.commit()
-    cur.close()
+    res = almacen_api(f"/api/salidas/{id}", method='DELETE')
+    if not res or res.get('error'):
+        flash('No se pudo eliminar la salida en Almacén (5001).', 'danger')
+        return redirect('/salidas')
     flash('Salida eliminada y stock revertido.', 'success')
     return redirect('/salidas')
 
 # ─────────────────────────────────────────────
-# VERIFICAR INVENTARIO POR CANTIDAD
+# VERIFICAR INVENTARIO POR CANTIDAD (vía API 5001)
 # ─────────────────────────────────────────────
 @app.route('/verificar-inventario')
 def verificar_inventario():
@@ -2149,8 +2249,9 @@ def verificar_inventario():
         return redirect('/login')
     filtro = request.args.get('filtro', 'todos')
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
-    data = almacen_api(f"/api/verificar-inventario?filtro={filtro}&buscar={buscar}&page={page}")
+    page = request.args.get('page', 1)
+    from urllib.parse import quote
+    data = almacen_api(f"/api/verificar-inventario?filtro={quote(filtro)}&buscar={quote(buscar)}&page={page}")
     if data:
         return render_template('verificar_inventario.html',
                                productos=data.get('productos', []), filtro=filtro, buscar=buscar,
@@ -2177,52 +2278,35 @@ def verificar_registros():
     stats['total_ventas'] = cur.fetchone()['n']
     cur.execute("SELECT COUNT(*) AS n FROM detalle_venta")
     stats['total_detalle_ventas'] = cur.fetchone()['n']
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.ingresos")
-    stats['total_ingresos'] = cur.fetchone()['n']
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.detalle_ingreso")
-    stats['total_detalle_ingresos'] = cur.fetchone()['n']
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.salidas")
-    stats['total_salidas'] = cur.fetchone()['n']
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.detalle_salida")
-    stats['total_detalle_salidas'] = cur.fetchone()['n']
     cur.execute("SELECT COUNT(*) AS n FROM seguimiento_entregas")
     stats['total_entregas'] = cur.fetchone()['n']
     cur.execute("SELECT COUNT(*) AS n FROM usuarios")
     stats['total_usuarios'] = cur.fetchone()['n']
-    cur.close()
     api_stats = almacen_api("/api/verificar-registros")
-    if api_stats:
-        stats['total_productos'] = api_stats.get('total_productos', 0)
-        stats['total_proveedores'] = api_stats.get('total_proveedores', 0)
-        stats['total_pedidos'] = api_stats.get('total_pedidos', 0)
-    else:
-        stats['total_productos'] = stats['total_proveedores'] = stats['total_pedidos'] = 0
+    stats['total_ingresos'] = api_stats.get('total_ingresos', 0) if api_stats else 0
+    stats['total_detalle_ingresos'] = api_stats.get('total_detalle_ingresos', 0) if api_stats else 0
+    stats['total_salidas'] = api_stats.get('total_salidas', 0) if api_stats else 0
+    stats['total_detalle_salidas'] = api_stats.get('total_detalle_salidas', 0) if api_stats else 0
+    stats['total_productos'] = api_stats.get('total_productos', 0) if api_stats else 0
+    stats['total_proveedores'] = api_stats.get('total_proveedores', 0) if api_stats else 0
+    stats['total_pedidos'] = api_stats.get('total_pedidos', 0) if api_stats else 0
     datos = []
     if seccion == 'ventas':
-        cur = mysql.connection.cursor()
         cur.execute("SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento, u.correo FROM ventas v LEFT JOIN usuarios u ON v.cliente_id=u.id ORDER BY v.fecha DESC LIMIT 50")
         datos = cur.fetchall()
-        cur.close()
     elif seccion == 'ingresos':
-        cur = mysql.connection.cursor()
-        cur.execute(f"SELECT i.id, i.fecha, (SELECT SUM(cantidad) FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=i.id) AS items FROM {ALMACEN_DB}.ingresos i ORDER BY i.fecha DESC LIMIT 50")
-        datos = cur.fetchall()
-        cur.close()
+        data_api = almacen_api('/api/ingresos')
+        datos = data_api.get('ingresos', []) if data_api else []
     elif seccion == 'salidas':
-        cur = mysql.connection.cursor()
-        cur.execute(f"SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(cantidad) FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=s.id) AS items FROM {ALMACEN_DB}.salidas s LEFT JOIN ventas v ON s.venta_id=v.id ORDER BY s.fecha DESC LIMIT 50")
-        datos = cur.fetchall()
-        cur.close()
+        data_api = almacen_api('/api/salidas')
+        datos = data_api.get('salidas', []) if data_api else []
     elif seccion == 'entregas':
-        cur = mysql.connection.cursor()
         cur.execute("SELECT e.id, e.estado, e.fecha_entrega, v.nombre AS cliente_nombre, v.total FROM seguimiento_entregas e JOIN ventas v ON e.venta_id=v.id ORDER BY e.created_at DESC LIMIT 50")
         datos = cur.fetchall()
-        cur.close()
     elif seccion == 'usuarios':
-        cur = mysql.connection.cursor()
         cur.execute("SELECT id, correo, rol, estado, created_at FROM usuarios ORDER BY created_at DESC LIMIT 50")
         datos = cur.fetchall()
-        cur.close()
+    cur.close()
     return render_template('verificar_registros.html', stats=stats, seccion=seccion, datos=datos)
 
 # ─────────────────────────────────────────────
@@ -2241,14 +2325,6 @@ def informe_diario():
     ingresos_ventas = float(cur.fetchone()['total'])
     cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
     num_ventas = cur.fetchone()['n']
-    cur.execute(f"SELECT i.id, i.fecha, (SELECT SUM(di.cantidad) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS items, (SELECT COALESCE(SUM(di.cantidad*di.precio_compra),0) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS costo FROM {ALMACEN_DB}.ingresos i WHERE DATE(i.fecha)=%s ORDER BY i.fecha", (fecha_str,))
-    ingresos_dia = cur.fetchall()
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.ingresos WHERE DATE(fecha)=%s", (fecha_str,))
-    num_ingresos = cur.fetchone()['n']
-    cur.execute(f"SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(ds.cantidad) FROM {ALMACEN_DB}.detalle_salida ds WHERE ds.salida_id=s.id) AS items FROM {ALMACEN_DB}.salidas s LEFT JOIN ventas v ON s.venta_id=v.id WHERE DATE(s.fecha)=%s ORDER BY s.fecha", (fecha_str,))
-    salidas_dia = cur.fetchall()
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.salidas WHERE DATE(fecha)=%s", (fecha_str,))
-    num_salidas = cur.fetchone()['n']
     cur.execute("""
         SELECT e.id, e.estado, e.fecha_entrega, v.nombre AS cliente_nombre, v.total
         FROM seguimiento_entregas e JOIN ventas v ON e.venta_id=v.id
@@ -2259,6 +2335,11 @@ def informe_diario():
     num_entregadas = sum(1 for e in entregas_dia if e['estado'] == 'entregado')
     num_pendientes = sum(1 for e in entregas_dia if e['estado'] != 'entregado')
     cur.close()
+    api_info = almacen_api(f'/api/informe-diario?fecha={fecha_str}')
+    ingresos_dia = api_info.get('ingresos_dia', []) if api_info else []
+    num_ingresos = api_info.get('num_ingresos', 0) if api_info else 0
+    salidas_dia = api_info.get('salidas_dia', []) if api_info else []
+    num_salidas = api_info.get('num_salidas', 0) if api_info else 0
     return render_template('informe_diario.html',
                            fecha=fecha_str,
                            ventas_dia=ventas_dia, ingresos_ventas=ingresos_ventas, num_ventas=num_ventas,

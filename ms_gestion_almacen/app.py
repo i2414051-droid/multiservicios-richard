@@ -63,9 +63,8 @@ def validate_csrf():
     return True
 
 # ─────────────────────────────────────────────
-# MYSQL — intenta BD dedicada, fallback a BD principal
+# MYSQL — BD exclusiva de Almacén (particionada)
 # ─────────────────────────────────────────────
-MAIN_DB = os.environ.get('MYSQL_DB', 'proyecto_multiservicios_richard')
 ALMACEN_DB_NAME = os.environ.get('MYSQL_DB_ALMACEN', 'proyecto_gestion_almacen')
 
 # Conectar directamente a la BD de almacén (ya debe existir en MySQL)
@@ -98,6 +97,14 @@ mail = Mail(app)
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
 PER_PAGE = 15
+
+
+def int_err(valor, por_defecto=1):
+    """Convierte a int con fallback seguro."""
+    try:
+        return int(valor)
+    except (ValueError, TypeError):
+        return por_defecto
 
 
 def paginate_query(cur, sql_count, sql_data, params, page, per_page=PER_PAGE):
@@ -235,19 +242,6 @@ def init_db():
             )
         """)
 
-        # ── Migración: copiar datos desde BD principal si tablas vacías ──
-        for tabla in ['productos', 'proveedores', 'productos_para_pedir']:
-            try:
-                cur.execute(f"SELECT COUNT(*) AS n FROM {tabla}")
-                n_local = cur.fetchone()['n']
-                cur.execute(f"SELECT COUNT(*) AS n FROM `{MAIN_DB}`.{tabla}")
-                n_orig = cur.fetchone()['n']
-                if n_orig and not n_local:
-                    cur.execute(f"INSERT INTO {tabla} SELECT * FROM `{MAIN_DB}`.{tabla}")
-                    print(f"[init_db] Migrados {n_orig} registros de '{tabla}' desde BD principal")
-            except Exception:
-                pass
-
         mysql.connection.commit()
         cur.close()
         print(f"[init_db] OK - Todas las tablas creadas en '{ALMACEN_DB_NAME}'")
@@ -261,7 +255,8 @@ def init_db():
 def api_ventas(endpoint):
     """Llama GET a la API del microservicio de Ventas (BD principal)."""
     try:
-        r = http_requests.get(f"{MS_VENTAS_URL}{endpoint}", timeout=5)
+        headers = {'X-Internal-Key': INTERNAL_API_KEY}
+        r = http_requests.get(f"{MS_VENTAS_URL}{endpoint}", headers=headers, timeout=5)
         if r.status_code == 200:
             return r.json()
     except Exception as e:
@@ -442,7 +437,7 @@ def ruta_init_db():
 @app.route('/admin')
 def admin():
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
+    page = int_err(request.args.get('page', 1), 1)
     cur = mysql.connection.cursor()
 
     where = "WHERE p.nombre LIKE %s"
@@ -631,7 +626,7 @@ def proveedores():
 
     buscar = request.args.get('buscar','')
     cat_filtro = request.args.get('categoria','')
-    page = int(request.args.get('page', 1))
+    page = int_err(request.args.get('page', 1), 1)
     where = "WHERE nombre LIKE %s"
     vals = [f'%{buscar}%']
     if cat_filtro:
@@ -804,7 +799,7 @@ def enviar_email_a_proveedor(proveedor_id):
 @app.route('/ingresos')
 def ingresos():
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
+    page = int_err(request.args.get('page', 1), 1)
     cur = mysql.connection.cursor()
     sql_count = """SELECT COUNT(*) AS total FROM ingresos i
         LEFT JOIN proveedores p ON i.proveedor_id=p.id
@@ -937,7 +932,7 @@ def eliminar_ingreso(id):
 @app.route('/salidas')
 def salidas():
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
+    page = int_err(request.args.get('page', 1), 1)
     cur = mysql.connection.cursor()
     sql_count = "SELECT COUNT(*) AS total FROM salidas s WHERE s.notas LIKE %s OR %s=''"
     sql_data = """SELECT s.id, s.fecha, s.notas, s.venta_id,
@@ -1098,7 +1093,7 @@ def eliminar_salida(id):
 def verificar_inventario():
     filtro = request.args.get('filtro', 'todos')
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
+    page = int_err(request.args.get('page', 1), 1)
     cur = mysql.connection.cursor()
     where = "WHERE p.nombre LIKE %s"
     params = [f'%{buscar}%']
@@ -1865,13 +1860,262 @@ def api_pedidos_proveedor(proveedor_id):
 
 
 # ─────────────────────────────────────────────
+# REST API — INGRESOS (para MS Clientes/Ventas)
+# ─────────────────────────────────────────────
+@app.route('/api/ingresos')
+def api_ingresos():
+    buscar = request.args.get('buscar', '')
+    page_arg = request.args.get('page')
+    cur = mysql.connection.cursor()
+    sql_count = """SELECT COUNT(*) AS total FROM ingresos i
+        LEFT JOIN proveedores p ON i.proveedor_id=p.id
+        WHERE COALESCE(p.nombre, '') LIKE %s"""
+    sql_data = """SELECT i.id, i.fecha, i.notas,
+           p.nombre AS proveedor_nombre,
+           (SELECT SUM(di.cantidad) FROM detalle_ingreso di WHERE di.ingreso_id=i.id) AS total_items
+        FROM ingresos i
+        LEFT JOIN proveedores p ON i.proveedor_id=p.id
+        WHERE COALESCE(p.nombre, '') LIKE %s
+        ORDER BY i.fecha DESC"""
+    params = (f'%{buscar}%',)
+    if page_arg:
+        items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, params, int_err(page_arg))
+        cur.close()
+        return jsonify({'ingresos': _serial_ingresos(items), 'total': total,
+                        'page': page, 'total_pages': total_pages,
+                        'has_prev': page > 1, 'has_next': page < total_pages})
+    cur.execute(sql_data, params)
+    items = cur.fetchall()
+    cur.close()
+    return jsonify({'ingresos': _serial_ingresos(items)})
+
+
+def _serial_ingresos(items):
+    for i in items:
+        if isinstance(i.get('fecha'), datetime):
+            i['fecha'] = i['fecha'].isoformat()
+    return items
+
+
+@app.route('/api/ingresos/<int:ingreso_id>')
+def api_ingreso(ingreso_id):
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT i.id, i.fecha, i.notas,
+               p.nombre AS proveedor_nombre, p.ruc AS proveedor_ruc,
+               p.celular AS proveedor_celular, p.correo AS proveedor_correo
+        FROM ingresos i
+        LEFT JOIN proveedores p ON i.proveedor_id=p.id
+        WHERE i.id=%s
+    """, (ingreso_id,))
+    ingreso = cur.fetchone()
+    if not ingreso:
+        cur.close()
+        return jsonify({'error': 'Ingreso no encontrado'}), 404
+    cur.execute("""
+        SELECT di.producto_id, di.cantidad, di.precio_compra, pr.nombre AS producto_nombre, pr.stock AS stock_actual
+        FROM detalle_ingreso di JOIN productos pr ON di.producto_id=pr.id
+        WHERE di.ingreso_id=%s
+    """, (ingreso_id,))
+    items = cur.fetchall()
+    total_general = sum(float(i['cantidad']) * float(i['precio_compra']) for i in items)
+    cur.close()
+    if isinstance(ingreso.get('fecha'), datetime):
+        ingreso['fecha'] = ingreso['fecha'].isoformat()
+    return jsonify({'ingreso': ingreso, 'items': items, 'total_general': total_general})
+
+
+@app.route('/api/ingresos', methods=['POST'])
+def api_ingreso_crear():
+    data = request.get_json(silent=True) or {}
+    proveedor_id = data.get('proveedor_id') or None
+    notas = data.get('notas', '')
+    items_in = data.get('items', []) or []
+    cur = mysql.connection.cursor()
+    cur.execute("INSERT INTO ingresos (proveedor_id, notas) VALUES (%s, %s)", (proveedor_id, notas))
+    ingreso_id = cur.lastrowid
+    for item in items_in:
+        try:
+            pid = int(item.get('producto_id'))
+            cant = int(item.get('cantidad', 0))
+            prec = float(item.get('precio_compra', 0) or 0)
+        except (ValueError, TypeError):
+            continue
+        if cant > 0:
+            cur.execute("SELECT stock FROM productos WHERE id=%s", (pid,))
+            previo = cur.fetchone()
+            stock_anterior = previo['stock'] if previo else 0
+            cur.execute("INSERT INTO detalle_ingreso (ingreso_id, producto_id, cantidad, precio_compra) VALUES (%s,%s,%s,%s)",
+                        (ingreso_id, pid, cant, prec))
+            cur.execute("UPDATE productos SET stock=stock+%s WHERE id=%s", (cant, pid))
+            registrar_cambio_stock(cur, pid, stock_anterior, stock_anterior + cant, 'entrada',
+                                   referencia_tipo='ingreso', referencia_id=ingreso_id,
+                                   notas=f'Ingreso #{ingreso_id}')
+            verificar_stock_bajo(cur, pid)
+    mysql.connection.commit()
+    cur.close()
+    return jsonify({'ok': True, 'id': ingreso_id})
+
+
+@app.route('/api/ingresos/<int:ingreso_id>', methods=['DELETE'])
+def api_ingreso_eliminar(ingreso_id):
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT producto_id, cantidad FROM detalle_ingreso WHERE ingreso_id=%s", (ingreso_id,))
+    items = cur.fetchall()
+    revertidos = 0
+    for item in items:
+        cur.execute("SELECT stock FROM productos WHERE id=%s", (item['producto_id'],))
+        prod = cur.fetchone()
+        stock_actual = prod['stock'] if prod else 0
+        if stock_actual >= item['cantidad']:
+            cur.execute("UPDATE productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['producto_id']))
+            registrar_cambio_stock(cur, item['producto_id'], stock_actual, stock_actual - item['cantidad'], 'salida',
+                                   referencia_tipo='ingreso_eliminado', referencia_id=ingreso_id,
+                                   notas=f'Reversión de ingreso #{ingreso_id}')
+        else:
+            cur.execute("UPDATE productos SET stock=0 WHERE id=%s", (item['producto_id'],))
+            registrar_cambio_stock(cur, item['producto_id'], stock_actual, 0, 'ajuste',
+                                   referencia_tipo='ingreso_eliminado', referencia_id=ingreso_id,
+                                   notas=f'Reversión de ingreso #{ingreso_id} (stock insuficiente)')
+        revertidos += 1
+    cur.execute("DELETE FROM detalle_ingreso WHERE ingreso_id=%s", (ingreso_id,))
+    cur.execute("DELETE FROM ingresos WHERE id=%s", (ingreso_id,))
+    mysql.connection.commit()
+    cur.close()
+    return jsonify({'ok': True, 'revertidos': revertidos})
+
+
+# ─────────────────────────────────────────────
+# REST API — SALIDAS (para MS Clientes/Ventas)
+# ─────────────────────────────────────────────
+@app.route('/api/salidas')
+def api_salidas():
+    buscar = request.args.get('buscar', '')
+    page_arg = request.args.get('page')
+    cur = mysql.connection.cursor()
+    sql_count = """SELECT COUNT(*) AS total FROM salidas s
+        WHERE s.notas LIKE %s OR %s=''"""
+    sql_data = """SELECT s.id, s.fecha, s.notas, s.venta_id,
+           (SELECT SUM(ds.cantidad) FROM detalle_salida ds WHERE ds.salida_id=s.id) AS total_items
+        FROM salidas s
+        WHERE s.notas LIKE %s OR %s=''
+        ORDER BY s.fecha DESC"""
+    params = (f'%{buscar}%', buscar)
+    if page_arg:
+        items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, params, int_err(page_arg))
+        cur.close()
+        return jsonify({'salidas': _serial_salidas(items), 'total': total,
+                        'page': page, 'total_pages': total_pages,
+                        'has_prev': page > 1, 'has_next': page < total_pages})
+    cur.execute(sql_data, params)
+    items = cur.fetchall()
+    cur.close()
+    return jsonify({'salidas': _serial_salidas(items)})
+
+
+def _serial_salidas(items):
+    for s in items:
+        if isinstance(s.get('fecha'), datetime):
+            s['fecha'] = s['fecha'].isoformat()
+    return items
+
+
+@app.route('/api/salidas/<int:salida_id>')
+def api_salida(salida_id):
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, fecha, notas, venta_id FROM salidas WHERE id=%s", (salida_id,))
+    salida = cur.fetchone()
+    if not salida:
+        cur.close()
+        return jsonify({'error': 'Salida no encontrada'}), 404
+    cur.execute("""
+        SELECT ds.producto_id, ds.cantidad, pr.nombre AS producto_nombre, pr.stock AS stock_actual
+        FROM detalle_salida ds JOIN productos pr ON ds.producto_id=pr.id
+        WHERE ds.salida_id=%s
+    """, (salida_id,))
+    items = cur.fetchall()
+    cur.close()
+    if isinstance(salida.get('fecha'), datetime):
+        salida['fecha'] = salida['fecha'].isoformat()
+    return jsonify({'salida': salida, 'items': items})
+
+
+@app.route('/api/salidas', methods=['POST'])
+def api_salida_crear():
+    data = request.get_json(silent=True) or {}
+    venta_id = data.get('venta_id') or None
+    notas = data.get('notas', '')
+    items_in = data.get('items', []) or []
+    cur = mysql.connection.cursor()
+    errores = []
+    for item in items_in:
+        try:
+            pid = int(item.get('producto_id'))
+            cant = int(item.get('cantidad', 0))
+        except (ValueError, TypeError):
+            continue
+        if cant > 0:
+            cur.execute("SELECT stock, nombre FROM productos WHERE id=%s", (pid,))
+            prod = cur.fetchone()
+            stock_actual = prod['stock'] if prod else 0
+            if stock_actual < cant:
+                nombre_prod = prod['nombre'] if prod else f'ID {pid}'
+                errores.append(f'{nombre_prod}: stock insuficiente (hay {stock_actual}, necesitas {cant})')
+    if errores:
+        cur.close()
+        return jsonify({'error': '; '.join(errores)}), 400
+    cur.execute("INSERT INTO salidas (venta_id, notas) VALUES (%s, %s)", (venta_id, notas))
+    salida_id = cur.lastrowid
+    for item in items_in:
+        try:
+            pid = int(item.get('producto_id'))
+            cant = int(item.get('cantidad', 0))
+        except (ValueError, TypeError):
+            continue
+        if cant > 0:
+            cur.execute("INSERT INTO detalle_salida (salida_id, producto_id, cantidad) VALUES (%s,%s,%s)",
+                        (salida_id, pid, cant))
+            cur.execute("SELECT stock FROM productos WHERE id=%s", (pid,))
+            previo = cur.fetchone()
+            stock_anterior = previo['stock'] if previo else 0
+            cur.execute("UPDATE productos SET stock=stock-%s WHERE id=%s AND stock>=%s", (cant, pid, cant))
+            registrar_cambio_stock(cur, pid, stock_anterior, stock_anterior - cant, 'salida',
+                                   referencia_tipo='salida', referencia_id=salida_id,
+                                   notas=f'Salida #{salida_id}')
+            verificar_stock_bajo(cur, pid)
+    mysql.connection.commit()
+    cur.close()
+    return jsonify({'ok': True, 'id': salida_id})
+
+
+@app.route('/api/salidas/<int:salida_id>', methods=['DELETE'])
+def api_salida_eliminar(salida_id):
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT producto_id, cantidad FROM detalle_salida WHERE salida_id=%s", (salida_id,))
+    items = cur.fetchall()
+    for item in items:
+        cur.execute("SELECT stock FROM productos WHERE id=%s", (item['producto_id'],))
+        previo = cur.fetchone()
+        stock_anterior = previo['stock'] if previo else 0
+        cur.execute("UPDATE productos SET stock=stock+%s WHERE id=%s", (item['cantidad'], item['producto_id']))
+        registrar_cambio_stock(cur, item['producto_id'], stock_anterior, stock_anterior + item['cantidad'], 'entrada',
+                               referencia_tipo='salida_eliminada', referencia_id=salida_id,
+                               notas=f'Reversión de salida #{salida_id}')
+    cur.execute("DELETE FROM detalle_salida WHERE salida_id=%s", (salida_id,))
+    cur.execute("DELETE FROM salidas WHERE id=%s", (salida_id,))
+    mysql.connection.commit()
+    cur.close()
+    return jsonify({'ok': True})
+
+
+# ─────────────────────────────────────────────
 # REST API — VERIFICACIONES E INFORMES
 # ─────────────────────────────────────────────
 @app.route('/api/verificar-inventario')
 def api_verificar_inventario():
     filtro = request.args.get('filtro', 'todos')
     buscar = request.args.get('buscar', '')
-    page = int(request.args.get('page', 1))
+    page = int_err(request.args.get('page', 1), 1)
     cur = mysql.connection.cursor()
     where = "WHERE p.nombre LIKE %s"
     params = [f'%{buscar}%']
@@ -2002,6 +2246,52 @@ def manejar_error(e):
 # INIT DB EN PRIMER REQUEST (MySQL request-scoped en Flask-MySQLdb)
 # ─────────────────────────────────────────────
 _db_initialized = False
+
+
+# ─────────────────────────────────────────────
+# SEGURIDAD: clave interna entre microservicios
+# ─────────────────────────────────────────────
+INTERNAL_API_KEY = os.environ.get('INTERNAL_API_KEY', 'clave-interna-ms-almacen-2026')
+
+PUBLIC_API_PATHS = ('/api/productos',)
+
+
+def _es_admin():
+    return session.get('rol') in ('admin', 'administrador')
+
+
+def _tiene_clave_interna():
+    return request.headers.get('X-Internal-Key') == INTERNAL_API_KEY
+
+
+@app.before_request
+def _seguridad():
+    """Protege la API (mutaciones y datos sensibles) y las páginas HTML admin."""
+    path = request.path
+
+    # ── API 5001 ──
+    if path.startswith('/api/'):
+        # Lectura pública de catálogo de productos (la tienda del 5000 la usa sin login)
+        if request.method == 'GET' and (path == '/api/productos' or path.startswith('/api/productos')):
+            return None
+        # El resto de la API requiere clave interna (llamadas desde el MS Ventas)
+        if not _tiene_clave_interna():
+            return jsonify({'error': 'No autorizado'}), 401
+        return None
+
+    # ── HTML admin ──
+    if path in ('/', '/test_db', '/init-db'):
+        return None
+    if not _es_admin() and not _tiene_clave_interna():
+        return redirect('http://localhost:5000/login')
+
+
+# ─────────────────────────────────────────────
+# CONTEXT PROCESSOR (para que las plantillas admin no fallen)
+# ─────────────────────────────────────────────
+@app.context_processor
+def admin_context():
+    return dict(cantidad_carrito=0, categorias=CATEGORIAS)
 
 
 @app.before_request
