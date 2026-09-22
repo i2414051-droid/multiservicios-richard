@@ -674,9 +674,14 @@ def logout():
 @app.route('/registro', methods=['GET','POST'])
 def registro():
     if request.method == 'POST':
-        correo   = request.form['correo']
-        password = request.form['password']
-        confirmar = request.form['confirmar']
+        correo           = request.form['correo']
+        password         = request.form['password']
+        confirmar        = request.form['confirmar']
+        nombres          = request.form.get('nombres', '').strip()
+        apellidos        = request.form.get('apellidos', '').strip()
+        documento_tipo   = request.form.get('documento_tipo', 'dni')
+        documento_numero = request.form.get('documento_numero', '').strip()
+        telefono         = request.form.get('telefono', '').strip()
         if password != confirmar:
             flash('Las contraseñas no coinciden.', 'danger')
             return redirect('/registro')
@@ -686,7 +691,8 @@ def registro():
             flash('Ya existe una cuenta con ese correo.', 'danger')
             return redirect('/registro')
         h = bcrypt.generate_password_hash(password).decode('utf-8')
-        cur.execute("INSERT INTO usuarios (correo, password, rol) VALUES (%s,%s,'cliente')", (correo, h))
+        cur.execute("INSERT INTO usuarios (correo, password, rol, documento_tipo, documento_numero, nombres, apellidos, telefono) VALUES (%s,%s,'cliente',%s,%s,%s,%s,%s)",
+                    (correo, h, documento_tipo, documento_numero, nombres, apellidos, telefono))
         mysql.connection.commit()
         return redirect('/login')
     return render_template('registro.html')
