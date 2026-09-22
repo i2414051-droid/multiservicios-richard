@@ -10,3 +10,6 @@ static/boleta_*.pdf
 # Logs locales de prueba
 arrancar/*.log
 
+_fijar_ojo.py
+_ojofix.py
+app_test*.log
