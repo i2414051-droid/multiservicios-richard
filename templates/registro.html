@@ -6,7 +6,7 @@
 
     <div class="card shadow p-4" style="width:400px;">
 
-        <h3 class="text-center mb-3">ðŸ“ Registrarse</h3>
+        <h3 class="text-center mb-3">📝 Registrarse</h3>
 
         <form method="POST">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -25,13 +25,13 @@
 
             <!-- CORREO -->
             <div class="mb-3">
-                <label class="form-label">Correo electrÃ³nico</label>
+                <label class="form-label">Correo electrónico</label>
                 <input type="email" name="correo" class="form-control" required>
             </div>
 
-            <!-- CONTRASEÃ‘A CON OJO -->
+            <!-- CONTRASEÑA CON OJO -->
             <div class="mb-3">
-                <label class="form-label">ContraseÃ±a</label>
+                <label class="form-label">Contraseña</label>
                 <div class="position-relative">
                     <input type="password" name="password" id="password" class="form-control pe-5" required>
                     <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
@@ -42,9 +42,9 @@
                 </div>
             </div>
 
-            <!-- CONFIRMAR CONTRASEÃ‘A CON OJO -->
+            <!-- CONFIRMAR CONTRASEÑA CON OJO -->
             <div class="mb-3">
-                <label class="form-label">Confirmar contraseÃ±a</label>
+                <label class="form-label">Confirmar contraseña</label>
                 <div class="position-relative">
                     <input type="password" name="confirmar" id="confirmar" class="form-control pe-5" required>
                     <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
@@ -62,7 +62,7 @@
         </form>
 
         <div class="text-center mt-3">
-            <a href="/login">Â¿Ya tienes cuenta? Inicia sesiÃ³n</a>
+            <a href="/login">¿Ya tienes cuenta? Inicia sesión</a>
         </div>
 
     </div>
