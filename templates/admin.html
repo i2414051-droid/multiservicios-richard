@@ -4,7 +4,6 @@
 {# El bloque de KPIs trae su propia hoja de estilos, acotada con .kpi-panel
    para no interferir con el resto de la pagina. #}
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/kpi.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kpi_biz.css') }}">
 {% endblock %}
 
@@ -42,12 +41,6 @@
             <i class="bi bi-fullscreen"></i> KPIs completos
         </a>
     </div>
-
-    {# ── KPIs técnicos del sistema ──
-       Va antes del formulario: es la parte que explica como se comporta la
-       aplicacion, y arriba es donde se lee sin tener que bajar hasta el
-       final de una pagina larga. #}
-    {% include 'kpi/_bloque.html' %}
 
     {# ── KPIs de Ventas y Almacen (NEGOCIO) ── #}
     {% include 'kpi_biz/_bloque.html' %}
