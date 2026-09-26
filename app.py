@@ -2593,30 +2593,29 @@ def agregar(id):
 # INIT DB EN PRIMER REQUEST (MySQL request-scoped en Flask-MySQLdb)
 # ─────────────────────────────────────────────
 _db_initialized = False
+_kpi_initialized = False
 
 @app.before_request
-def _ensure_db():
-    global _db_initialized
+def _ensure_db_and_kpi():
+    global _db_initialized, _kpi_initialized
+    
+    # 1. DB first
     if not _db_initialized:
         _db_initialized = True
         try:
             init_db()
         except Exception as e:
             print(f"[before_request init_db] {e}")
-
-# ─────────────────────────────────────────────
-# INICIALIZACIÓN KPIs (al arrancar la app)
-# ─────────────────────────────────────────────
-def _init_kpis():
-    try:
-        with app.app_context():
+    
+    # 2. KPIs after DB is ready
+    if not _kpi_initialized:
+        _kpi_initialized = True
+        try:
             init_kpi(app, ensure_schema_fn=init_db)
             init_kpi_biz(app)
-        app.logger.info('KPIs: módulos inicializados correctamente')
-    except Exception as e:
-        app.logger.error(f'KPIs: error en inicialización: {e}')
-
-_init_kpis()
+            app.logger.info('KPIs: módulos inicializados correctamente')
+        except Exception as e:
+            app.logger.error(f'KPIs: error en inicialización: {e}')
 
 # ─────────────────────────────────────────────
 # RUN
