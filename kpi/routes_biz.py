@@ -70,7 +70,7 @@ def _json_safe(valor):
 def get_snapshot():
     """Punto unico de construccion del snapshot de negocio.
 
-    Nunca lanza excepciones: si algo falla, devuelve estructura vacía
+    Nunca lanza excepciones: si algo falla, devuelve estructura vacia
     para que el panel muestre "sin datos" en lugar de 500.
     """
     try:
@@ -79,7 +79,7 @@ def get_snapshot():
         return snapshot
     except Exception as exc:
         current_app.logger.warning('KPI-BIZ get_snapshot fallo: %s', exc)
-        # Estructura mínima que la plantilla espera
+        # Estructura minima que la plantilla espera
         return {
             'periodo': {'preset': '30d', 'dias': 30},
             'exito': {},

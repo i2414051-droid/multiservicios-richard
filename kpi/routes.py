@@ -84,7 +84,7 @@ def get_snapshot():
     Lo consumen el context processor de /admin y el endpoint del fragmento; el
     coste se paga una sola vez por peticion porque Flask reutiliza el contexto.
 
-    Nunca lanza excepciones: devuelve estructura vacía en caso de fallo.
+    Nunca lanza excepciones: devuelve estructura vacia en caso de fallo.
     """
     try:
         periodo = service.resolve_period(request.args)
@@ -218,7 +218,7 @@ def init_kpi(app, ensure_schema_fn=None):
     ensure_schema_fn permite que app.py reutilice su init_db() ya existente
     en lugar de crear un segundo camino de inicializacion de la BD.
     """
-    # Crear tablas UNA SOLA VEZ al arrancar (síncrono, sin before_request)
+    # Crear tablas UNA SOLA VEZ al arrancar (sin before_request)
     try:
         with app.app_context():
             if ensure_schema_fn is not None:
