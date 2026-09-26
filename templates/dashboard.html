@@ -1,27 +1,60 @@
 {% extends 'base.html' %}
-{% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/kpi.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/kpi_biz.css') }}">
-{% endblock %}
 
 {% block content %}
+
+<style>
+.dashboard-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin-bottom:35px}
+.dash-card{background:var(--bg-card);border:1px solid var(--border-card);border-radius:18px;padding:25px 20px;display:flex;align-items:center;gap:18px;transition:background .3s,border-color .3s,transform .3s}
+.dash-card:hover{transform:translateY(-5px);box-shadow:0 0 25px rgba(243,156,18,.35)}
+.dash-card .icon-box{width:60px;height:60px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0}
+.dash-card .info h3{font-size:28px;font-weight:800;color:var(--text-primary);margin:0}
+.dash-card .info p{font-size:13px;color:var(--text-muted);margin:0}
+.icon-ventas{background:rgba(243,156,18,.15);color:#f39c12}
+.icon-ingresos{background:rgba(0,255,106,.12);color:#00ff6a}
+.icon-productos{background:rgba(52,152,219,.15);color:#3498db}
+.icon-stock{background:rgba(255,77,77,.15);color:#ff4d4d}
+.icon-usuarios{background:rgba(155,89,182,.15);color:#9b59b6}
+.icon-pedidos{background:rgba(255,165,0,.15);color:#ffa500}
+.icon-proveedores{background:rgba(26,188,156,.15);color:#1abc9c}
+.icon-pendientes{background:rgba(241,196,15,.15);color:#f1c40f}
+
+.quick-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin-bottom:35px}
+.quick-link{display:flex;flex-direction:column;align-items:center;gap:10px;padding:22px 15px;background:var(--bg-card);border:1px solid var(--border-card);border-radius:16px;text-decoration:none;color:var(--text-primary);transition:background .3s,border-color .3s,transform .3s}
+.quick-link:hover{transform:translateY(-5px);box-shadow:0 0 20px rgba(243,156,18,.4);border-color:#f39c12;color:var(--text-primary)}
+.quick-link i{font-size:30px;color:#f39c12}
+.quick-link span{font-size:13px;font-weight:600}
+
+.dash-section{background:var(--bg-card);border:1px solid var(--border-card);border-radius:18px;overflow:hidden;margin-bottom:30px}
+.dash-section .sec-header{padding:18px 25px;border-bottom:1px solid var(--border-main);display:flex;justify-content:space-between;align-items:center}
+.dash-section .sec-header h5{margin:0;font-weight:700;color:#f39c12;font-size:16px}
+.dash-section .sec-body{padding:20px 25px}
+.dash-table{width:100%;border-collapse:collapse}
+.dash-table th{background:rgba(243,156,18,.1);color:#f39c12;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:10px 12px;text-align:left}
+.dash-table td{padding:10px 12px;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);font-size:14px}
+.dash-table tr:hover td{background:rgba(243,156,18,.05)}
+.stock-badge{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700}
+.stock-ok{background:rgba(0,255,106,.12);color:#00ff6a}
+.stock-warn{background:rgba(255,193,7,.15);color:#ffc107}
+.stock-crit{background:rgba(255,77,77,.15);color:#ff4d4d}
+.estado-badge{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.estado-entregado{background:rgba(0,255,106,.12);color:#00ff6a}
+.estado-espera{background:rgba(241,196,15,.15);color:#f1c40f}
+.estado-cancelado{background:rgba(255,77,77,.15);color:#ff4d4d}
+.empty-msg{text-align:center;color:var(--text-muted);padding:30px;font-size:14px}
+</style>
+
 <div class="container-fluid px-4">
 
-    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 style="color:#f39c12;font-weight:800;margin:0">
             <i class="bi bi-speedometer2"></i> Dashboard
         </h2>
-        <div class="d-flex gap-2">
-            <a href="/admin" class="btn" style="background:#f39c12;font-weight:bold;border-radius:20px">
-                <i class="bi bi-box-seam"></i> Gestionar Productos
-            </a>
-            <a href="{{ url_for('kpi_biz.panel_completo') }}" class="btn btn-outline-warning" target="_blank">
-                <i class="bi bi-fullscreen"></i> KPIs Ventas/Almacén
-            </a>
-        </div>
+        <a href="/admin" class="btn" style="background:#f39c12;font-weight:bold;border-radius:20px">
+            <i class="bi bi-box-seam"></i> Gestionar Productos
+        </a>
     </div>
 
-    <!-- RESUMEN EJECUTIVO -->
+    <!-- RESUMEN -->
     <div class="dashboard-grid">
         <div class="dash-card">
             <div class="icon-box icon-ventas"><i class="bi bi-receipt"></i></div>
@@ -62,20 +95,43 @@
         Accesos Rápidos
     </h5>
     <div class="quick-links">
-        <a href="/admin" class="quick-link"><i class="bi bi-box-seam"></i><span>Productos</span></a>
-        <a href="/ingresos" class="quick-link"><i class="bi bi-box-arrow-in-down"></i><span>Ingresos</span></a>
-        <a href="/salidas" class="quick-link"><i class="bi bi-box-arrow-up"></i><span>Salidas</span></a>
-        <a href="/entregas" class="quick-link"><i class="bi bi-truck"></i><span>Entregas</span></a>
-        <a href="/historial-compras" class="quick-link"><i class="bi bi-clock-history"></i><span>Historial</span></a>
-        <a href="/productos-para-pedir" class="quick-link"><i class="bi bi-cart-dash"></i><span>Pedidos</span></a>
-        <a href="/verificar-inventario" class="quick-link"><i class="bi bi-clipboard-check"></i><span>Inventario</span></a>
-        <a href="/verificar-registros" class="quick-link"><i class="bi bi-clipboard-data"></i><span>Auditoría</span></a>
-        <a href="/informe-diario" class="quick-link"><i class="bi bi-calendar-check"></i><span>Informe Día</span></a>
-        <a href="/proveedores" class="quick-link"><i class="bi bi-truck"></i><span>Proveedores</span></a>
-        <a href="/permisos" class="quick-link"><i class="bi bi-shield-lock"></i><span>Permisos</span></a>
+        <a href="/admin" class="quick-link">
+            <i class="bi bi-box-seam"></i><span>Productos</span>
+        </a>
+        <a href="/ingresos" class="quick-link">
+            <i class="bi bi-box-arrow-in-down"></i><span>Ingresos</span>
+        </a>
+        <a href="/salidas" class="quick-link">
+            <i class="bi bi-box-arrow-up"></i><span>Salidas</span>
+        </a>
+        <a href="/entregas" class="quick-link">
+            <i class="bi bi-truck"></i><span>Entregas</span>
+        </a>
+        <a href="/historial-compras" class="quick-link">
+            <i class="bi bi-clock-history"></i><span>Historial</span>
+        </a>
+        <a href="/productos-para-pedir" class="quick-link">
+            <i class="bi bi-cart-dash"></i><span>Pedidos</span>
+        </a>
+        <a href="/verificar-inventario" class="quick-link">
+            <i class="bi bi-clipboard-check"></i><span>Inventario</span>
+        </a>
+        <a href="/verificar-registros" class="quick-link">
+            <i class="bi bi-clipboard-data"></i><span>Auditoría</span>
+        </a>
+        <a href="/informe-diario" class="quick-link">
+            <i class="bi bi-calendar-check"></i><span>Informe Día</span>
+        </a>
+        <a href="/proveedores" class="quick-link">
+            <i class="bi bi-truck"></i><span>Proveedores</span>
+        </a>
+        <a href="/permisos" class="quick-link">
+            <i class="bi bi-shield-lock"></i><span>Permisos</span>
+        </a>
     </div>
 
     <div class="row g-4">
+
         <!-- ÚLTIMAS VENTAS -->
         <div class="col-lg-7">
             <div class="dash-section">
@@ -87,7 +143,13 @@
                     {% if ultimas_ventas %}
                     <table class="dash-table">
                         <thead>
-                            <tr><th>#</th><th>Cliente</th><th>Total</th><th>Estado</th><th>Fecha</th></tr>
+                            <tr>
+                                <th>#</th>
+                                <th>Cliente</th>
+                                <th>Total</th>
+                                <th>Estado</th>
+                                <th>Fecha</th>
+                            </tr>
                         </thead>
                         <tbody>
                             {% for v in ultimas_ventas %}
@@ -125,18 +187,32 @@
                 <div class="sec-body p-0">
                     {% if productos_stock_bajo %}
                     <table class="dash-table">
-                        <thead><tr><th>Producto</th><th>Stock</th><th>Categoría</th></tr></thead>
+                        <thead>
+                            <tr>
+                                <th>Producto</th>
+                                <th>Stock</th>
+                                <th>Categoría</th>
+                            </tr>
+                        </thead>
                         <tbody>
                             {% for p in productos_stock_bajo %}
                             <tr>
-                                <td><div class="d-flex align-items-center gap-2">
-                                    {% if p.imagen %}<img src="{{ url_for('static', filename=p.imagen) }}" width="35" height="35" style="border-radius:8px;object-fit:cover">{% endif %}
-                                    {{ p.nombre }}
-                                </div></td>
                                 <td>
-                                    {% if p.stock <= 1 %}<span class="stock-badge stock-crit">{{ p.stock }} &#128276;</span>
-                                    {% elif p.stock <= 3 %}<span class="stock-badge stock-crit">{{ p.stock }}</span>
-                                    {% else %}<span class="stock-badge stock-warn">{{ p.stock }}</span>{% endif %}
+                                    <div class="d-flex align-items-center gap-2">
+                                        {% if p.imagen %}
+                                        <img src="{{ url_for('static', filename=p.imagen) }}" width="35" height="35" style="border-radius:8px;object-fit:cover">
+                                        {% endif %}
+                                        {{ p.nombre }}
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if p.stock <= 1 %}
+                                        <span class="stock-badge stock-crit">{{ p.stock }} &#128276;</span>
+                                    {% elif p.stock <= 3 %}
+                                        <span class="stock-badge stock-crit">{{ p.stock }}</span>
+                                    {% else %}
+                                        <span class="stock-badge stock-warn">{{ p.stock }}</span>
+                                    {% endif %}
                                 </td>
                                 <td><span style="color:var(--text-muted)">{{ p.categoria or '-' }}</span></td>
                             </tr>
@@ -149,346 +225,8 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- ============================================================
-         SECCIÓN KPIs — Técnicos + Negocio
-         ============================================================ -->
-    <div class="dash-section" style="margin-top:40px">
-        <div class="sec-header">
-            <h5 style="margin:0"><i class="bi bi-graph-up-arrow"></i> KPIs del Sistema</h5>
-            <div class="d-flex gap-2">
-                <a href="/kpi-biz/panel" class="btn btn-sm btn-outline-warning" target="_blank">
-                    <i class="bi bi-fullscreen"></i> Ventana completa
-                </a>
-            </div>
-        </div>
-        <div class="sec-body">
-
-            <!-- TABS DE KPIs -->
-            <ul class="nav nav-tabs kpi-tabs mb-3" id="kpiTabs" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="tab-ejecutivo" data-bs-toggle="tab" data-bs-target="#kpiEjecutivo" role="tab">
-                        <i class="bi bi-speedometer2"></i> Resumen Ejecutivo
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="tab-tecnicos" data-bs-toggle="tab" data-bs-target="#kpiTecnicos" role="tab">
-                        <i class="bi bi-cpu"></i> KPIs Técnicos
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="tab-negocio" data-bs-toggle="tab" data-bs-target="#kpiNegocio" role="tab">
-                        <i class="bi bi-graph-up-arrow"></i> KPIs de Negocio
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="tab-tendencias" data-bs-toggle="tab" data-bs-target="#kpiTendencias" role="tab">
-                        <i class="bi bi-bar-chart"></i> Tendencias & Gráficos
-                    </button>
-                </li>
-            </ul>
-
-            <div class="tab-content" id="kpiTabsContent">
-
-                <!-- TAB 1: RESUMEN EJECUTIVO -->
-                <div class="tab-pane fade show active" id="kpiEjecutivo" role="tabpanel">
-                    <div class="row g-3">
-                        <!-- Technical KPIs Summary (if available) -->
-                        {% if kpis and kpis.disponibilidad is defined %}
-                        {% set kt = kpis %}
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box" style="background:rgba({{ kt.disponibilidad.semaforo == 'ok' and '0,255,106' or (kt.disponibilidad.semaforo == 'aviso' and '255,193,7' or '255,77,77') }},.15);color:{{ kt.disponibilidad.semaforo == 'ok' and '#00ff6a' or (kt.disponibilidad.semaforo == 'aviso' and '#ffc107' or '#ff4d4d') }}"><i class="bi bi-activity"></i></div>
-                                <div class="info"><h3>{{ kt.disponibilidad.valor }}%</h3><p>Disponibilidad</p></div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box" style="background:rgba({{ kt.rendimiento.semaforo == 'ok' and '0,255,106' or (kt.rendimiento.semaforo == 'aviso' and '255,193,7' or '255,77,77') }},.15);color:{{ kt.rendimiento.semaforo == 'ok' and '#00ff6a' or (kt.rendimiento.semaforo == 'aviso' and '#ffc107' or '#ff4d4d') }}"><i class="bi bi-speedometer"></i></div>
-                                <div class="info"><h3>{{ kt.rendimiento.p95_ms }}ms</h3><p>Latencia p95</p></div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box" style="background:rgba({{ kt.estabilidad.semaforo == 'ok' and '0,255,106' or (kt.estabilidad.semaforo == 'aviso' and '255,193,7' or '255,77,77') }},.15);color:{{ kt.estabilidad.semaforo == 'ok' and '#00ff6a' or (kt.estabilidad.semaforo == 'aviso' and '#ffc107' or '#ff4d4d') }}"><i class="bi bi-bug"></i></div>
-                                <div class="info"><h3>{{ kt.estabilidad.errores }}</h3><p>Excepciones</p></div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box" style="background:rgba({{ kt.seguridad.semaforo == 'ok' and '0,255,106' or (kt.seguridad.semaforo == 'aviso' and '255,193,7' or '255,77,77') }},.15);color:{{ kt.seguridad.semaforo == 'ok' and '#00ff6a' or (kt.seguridad.semaforo == 'aviso' and '#ffc107' or '#ff4d4d') }}"><i class="bi bi-shield-lock"></i></div>
-                                <div class="info"><h3>{{ kt.seguridad.puntuacion }}/100</h3><p>Seguridad</p></div>
-                            </div>
-                        </div>
-                        {% elif kpis %}
-                        <div class="col-12"><div class="empty-msg">KPIs técnicos no disponibles</div></div>
-                        {% endif %}
-
-                        <!-- Business KPIs Summary -->
-                        {% if kpis_biz and kpis_biz.exito is defined %}
-                        {% set kb = kpis_biz %}
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box icon-ventas"><i class="bi bi-cash-stack"></i></div>
-                                <div class="info"><h3>{{ kb.exito.ventas_netas.valor }}</h3><p>Ventas Netas</p></div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box" style="background:rgba(0,255,106,.15);color:#00ff6a"><i class="bi bi-award"></i></div>
-                                <div class="info"><h3>{{ kb.exito.pedidos_perfectos.valor }}%</h3><p>Pedidos Perfectos</p></div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box" style="background:rgba(52,152,219,.15);color:#3498db"><i class="bi bi-truck"></i></div>
-                                <div class="info"><h3>{{ kb.exito.otif.valor }}%</h3><p>OTIF</p></div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="dash-card">
-                                <div class="icon-box icon-stock"><i class="bi bi-exclamation-triangle"></i></div>
-                                <div class="info"><h3>{{ kb.cancelaciones.tasa_cancelacion.valor }}%</h3><p>Tasa Cancelación</p></div>
-                            </div>
-                        </div>
-                        {% elif kpis_biz %}
-                        <div class="col-12"><div class="empty-msg">KPIs de negocio no disponibles</div></div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <!-- TAB 2: KPIs TÉCNICOS -->
-                <div class="tab-pane fade" id="kpiTecnicos" role="tabpanel">
-                    {% if kpis %}
-                    {% include 'kpi/_bloque.html' %}
-                    {% else %}
-                    <div class="kpi-panel" id="kpiPanel">
-                        <div class="kpi-toolbar">
-                            <h2 class="kpi-titulo"><i class="bi bi-cpu"></i> KPIs Técnicos del Sistema</h2>
-                        </div>
-                        <div class="kpi-error visible">
-                            <i class="bi bi-database-exclamation"></i>
-                            No se pudieron calcular los indicadores técnicos ahora mismo.
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-
-                <!-- TAB 3: KPIs DE NEGOCIO -->
-                <div class="tab-pane fade" id="kpiNegocio" role="tabpanel">
-                    {% if kpis_biz %}
-                    {% include 'kpi_biz/_bloque.html' %}
-                    {% else %}
-                    <div class="kpi-biz-panel" id="kpiBizPanel">
-                        <div class="kpi-biz-toolbar">
-                            <h2 class="kpi-biz-titulo mb-0"><i class="bi bi-graph-up-arrow"></i> KPIs de Ventas y Almacén</h2>
-                            <a href="{{ url_for('kpi_biz.panel_completo') }}" class="btn btn-sm btn-outline-warning" target="_blank">
-                                <i class="bi bi-fullscreen"></i> Pantalla completa
-                            </a>
-                        </div>
-                        <div class="kpi-biz-error visible">
-                            <i class="bi bi-database-exclamation"></i>
-                            No se pudieron calcular los indicadores de negocio ahora mismo.
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-
-                <!-- TAB 4: TENDENCIAS Y GRÁFICOS -->
-                <div class="tab-pane fade" id="kpiTendencias" role="tabpanel">
-                    <div class="row g-4">
-                        <!-- Stock Distribution -->
-                        <div class="col-lg-6">
-                            <div class="dash-section">
-                                <div class="sec-header"><h5><i class="bi bi-graph-up"></i> Distribución de Stock</h5></div>
-                                <div class="sec-body">
-                                    <div class="row">
-                                        <div class="col-md-6 mb-3 mb-md-0">
-                                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Gráfico de Dona</h6>
-                                            <canvas id="stockDoughnutChart" height="200"></canvas>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Barras Apiladas</h6>
-                                            <canvas id="stockStackedBarChart" height="200"></canvas>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Weekly Sales -->
-                        <div class="col-lg-6">
-                            <div class="dash-section">
-                                <div class="sec-header"><h5><i class="bi bi-bar-chart"></i> Ventas Semanales (Top Productos)</h5></div>
-                                <div class="sec-body">
-                                    <div class="row">
-                                        <div class="col-md-6 mb-3 mb-md-0">
-                                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Gráfico de Dona</h6>
-                                            <canvas id="salesDoughnutChart" height="200"></canvas>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <h6 class="text-center mb-2" style="color:var(--text-secondary)">Barras Apiladas</h6>
-                                            <canvas id="salesStackedBarChart" height="200"></canvas>
-                                        </div>
-                                    </div>
-                                    <div class="mt-3">
-                                        <h6 class="text-center mb-2" style="color:var(--text-secondary)">Gráfico de Áreas (Tendencia)</h6>
-                                        <canvas id="salesAreaChart" height="180"></canvas>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Technical Trends -->
-                        <div class="col-lg-6">
-                            <div class="dash-section">
-                                <div class="sec-header"><h5><i class="bi bi-activity"></i> Tráfico Técnico (p95 & Errores)</h5></div>
-                                <div class="sec-body">
-                                    <canvas id="techTrendsChart" height="250"></canvas>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Business Trends -->
-                        <div class="col-lg-6">
-                            <div class="dash-section">
-                                <div class="sec-header"><h5><i class="bi bi-graph-up-arrow"></i> Tendencias de Negocio</h5></div>
-                                <div class="sec-body">
-                                    <canvas id="bizTrendsChart" height="250"></canvas>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-
-        </div>
     </div>
 
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/kpi-dashboard.js') }}"></script>
-<script src="{{ url_for('static', filename='js/kpi-biz-dashboard.js') }}"></script>
-<script>
-// Cargar gráficos de tendencias técnicas
-async function cargarTendenciasTecnicas() {
-    try {
-        const res = await fetch('/api/kpis');
-        const data = await res.json();
-        if (!data.ok || !data.kpis?.tendencia) return;
-        
-        const tendencia = data.kpis.tendencia;
-        const theme = getThemeColors();
-        
-        const labels = tendencia.map(d => d.dia ? new Date(d.dia).toLocaleDateString('es-ES', {day:'2-digit',month:'2-digit'}) : '');
-        const peticiones = tendencia.map(d => d.peticiones || 0);
-        const errores = tendencia.map(d => d.errores_5xx || 0);
-        
-        new Chart(document.getElementById('techTrendsChart'), {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Peticiones/día',
-                        data: peticiones,
-                        borderColor: '#f39c12',
-                        backgroundColor: 'rgba(243,156,18,0.1)',
-                        fill: true,
-                        tension: 0.3,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'Errores 5xx',
-                        data: errores,
-                        borderColor: '#ff4d4d',
-                        backgroundColor: 'rgba(255,77,77,0.1)',
-                        fill: true,
-                        tension: 0.3,
-                        yAxisID: 'y1'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                interaction: { mode: 'index', intersect: false },
-                scales: {
-                    x: { grid: { color: theme.border }, ticks: { color: theme.textMuted } },
-                    y: { type: 'linear', position: 'left', grid: { color: theme.border }, ticks: { color: theme.textMuted } },
-                    y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: theme.textMuted } }
-                },
-                plugins: { legend: { labels: { color: theme.textPrimary } } }
-            }
-        });
-    } catch (e) { console.warn('Tendencias técnicas:', e); }
-}
-
-// Cargar tendencias de negocio
-async function cargarTendenciasNegocio() {
-    try {
-        const res = await fetch('/api/kpi-biz');
-        const data = await res.json();
-        if (!data.ok || !data.kpis?.tendencia) return;
-        
-        const tendencia = data.kpis.tendencia;
-        const theme = getThemeColors();
-        
-        const labels = tendencia.map(d => d.dia ? new Date(d.dia).toLocaleDateString('es-ES', {day:'2-digit',month:'2-digit'}) : '');
-        const ventas = tendencia.map(d => d.ventas_netas || 0);
-        const cancelaciones = tendencia.map(d => d.cancelaciones || 0);
-        const devoluciones = tendencia.map(d => d.devoluciones || 0);
-        
-        new Chart(document.getElementById('bizTrendsChart'), {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [
-                    { label: 'Ventas netas', data: ventas, borderColor: '#00ff6a', backgroundColor: 'rgba(0,255,106,0.1)', fill: true, tension: 0.3 },
-                    { label: 'Cancelaciones', data: cancelaciones, borderColor: '#ff4d4d', backgroundColor: 'rgba(255,77,77,0.1)', fill: true, tension: 0.3 },
-                    { label: 'Devoluciones', data: devoluciones, borderColor: '#ffc107', backgroundColor: 'rgba(255,193,7,0.1)', fill: true, tension: 0.3 }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                interaction: { mode: 'index', intersect: false },
-                scales: { x: { grid: { color: theme.border }, ticks: { color: theme.textMuted } }, y: { beginAtZero: true, grid: { color: theme.border }, ticks: { color: theme.textMuted } } },
-                plugins: { legend: { labels: { color: theme.textPrimary } } }
-            }
-        });
-    } catch (e) { console.warn('Tendencias negocio:', e); }
-}
-
-function getThemeColors() {
-    const cs = getComputedStyle(document.documentElement);
-    return {
-        bg: cs.getPropertyValue('--bg-card') || '#ffffff',
-        textPrimary: cs.getPropertyValue('--text-primary') || '#212529',
-        textMuted: cs.getPropertyValue('--text-muted') || '#6c757d',
-        border: cs.getPropertyValue('--border-card') || '#dee2e6'
-    };
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    // Los gráficos de stock/ventas ya los carga kpi-biz-dashboard.js
-    cargarTendenciasTecnicas();
-    cargarTendenciasNegocio();
-    
-    // Recrear al cambiar tema
-    const observer = new MutationObserver(() => {
-        document.querySelectorAll('#techTrendsChart, #bizTrendsChart').forEach(c => {
-            const chart = Chart.getChart(c); if (chart) chart.destroy();
-        });
-        cargarTendenciasTecnicas();
-        cargarTendenciasNegocio();
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-});
-</script>
 {% endblock %}

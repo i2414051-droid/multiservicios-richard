@@ -749,39 +749,6 @@ def dashboard():
     productos_stock_bajo = cur.fetchall()
 
     cur.close()
-
-    # ── KPIs snapshots para el Dashboard ───────────────────────
-    kpis = None
-    kpis_biz = None
-    try:
-        from kpi.routes import get_snapshot as get_kpi_snapshot
-        from kpi.routes_biz import get_snapshot as get_kpi_biz_snapshot
-        # Usar request.args para el periodo (o default 30d)
-        from flask import request
-        # Mock request.args para get_snapshot
-        class MockArgs:
-            def get(self, k, default=None):
-                return request.args.get(k, default)
-        orig_args = request.args
-        request.args = MockArgs()
-        kpis = get_kpi_snapshot()
-        kpis_biz = get_kpi_biz_snapshot()
-        request.args = orig_args
-        app.logger.info(f'Dashboard KPIs loaded: kpis={kpis is not None}, kpis_biz={kpis_biz is not None}')
-    except Exception as e:
-        app.logger.error(f'Dashboard KPIs snapshot error: {e}', exc_info=True)
-        # Provide safe fallback structures so template doesn't crash
-        kpis = {
-            'disponibilidad': {'valor': None, 'semaforo': 'sin_datos'},
-            'rendimiento': {'p95_ms': None, 'semaforo': 'sin_datos'},
-            'estabilidad': {'errores': 0, 'semaforo': 'sin_datos'},
-            'seguridad': {'puntuacion': 0, 'semaforo': 'sin_datos'},
-        }
-        kpis_biz = {
-            'exito': {'ventas_netas': {'valor': 0}, 'pedidos_perfectos': {'valor': 0}, 'otif': {'valor': 0}},
-            'cancelaciones': {'tasa_cancelacion': {'valor': 0}},
-        }
-
     return render_template('dashboard.html',
                            total_ventas=total_ventas,
                            ingresos_totales=ingresos_totales,
@@ -792,9 +759,7 @@ def dashboard():
                            total_proveedores=total_proveedores,
                            ventas_pendientes=ventas_pendientes,
                            ultimas_ventas=ultimas_ventas,
-                           productos_stock_bajo=productos_stock_bajo,
-                           kpis=kpis,
-                           kpis_biz=kpis_biz)
+                           productos_stock_bajo=productos_stock_bajo)
 
 @app.route('/admin')
 def admin():
