@@ -1,0 +1,78 @@
+﻿{% extends 'base.html' %}
+
+{% block content %}
+
+<div class="container d-flex justify-content-center align-items-center" style="height:90vh;">
+
+    <div class="card shadow p-4" style="width:400px;">
+
+        <h3 class="text-center mb-3">Iniciar Sesión</h3>
+
+        <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+            <!-- CORREO -->
+            <div class="mb-3">
+                <label class="form-label">Correo electrónico</label>
+                <input type="email" name="correo" class="form-control" required>
+            </div>
+
+            <!-- CONTRASEÑA CON OJO -->
+            <div class="mb-3">
+                <label class="form-label">Contraseña</label>
+                <div class="position-relative">
+                    <input type="password" name="password" id="password" class="form-control pe-5" required>
+                    <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
+                            onclick="togglePassword()"
+                            style="border:none; background:none; cursor:pointer; z-index:5;">
+                        <i id="eye-icon" class="bi bi-eye" style="color: var(--color-ojo);"></i>
+                    </button>
+                </div>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} p-2 text-center">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+
+                {% endif %}
+            {% endwith %}
+
+            <button class="btn btn-primary w-100">
+                Ingresar
+            </button>
+
+        </form>
+
+        <div class="text-center mt-3">
+            <a href="/registro">Crear cuenta</a>
+        </div>
+        <div class="text-center mt-2">
+            <a href="/recuperar-password" style="color:#f39c12;font-size:13px">¿Olvidaste tu contraseña?</a>
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+function togglePassword() {
+    const input = document.getElementById('password');
+    const icon  = document.getElementById('eye-icon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.remove('bi-eye');
+        icon.classList.add('bi-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.remove('bi-eye-slash');
+        icon.classList.add('bi-eye');
+    }
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,523 @@
+{# 
+  Bloque de KPIs de Ventas y Almacen, reutilizable.
+
+  Este archivo no extiende ninguna pagina: es un fragmento que se incrusta en
+  el panel de administracion (/admin) con `{% include %}`. El servidor sigue
+  siendo el unico que pinta los datos.
+
+  Contrato de datos: recibe `kpis_biz`, el snapshot ya calculado por
+  kpi.routes_biz.get_snapshot(). Si no llega, la variable no viene definida y
+  se muestra un aviso en vez de nada.
+
+  Para el cambio de periodo el script vuelve a pedir el fragmento al endpoint
+  que lo produce y sustituye este bloque. No se reconstruye nada en el
+  navegador, asi que no hay dos implementaciones del mismo render que se
+  puedan desincronizar.
+#}
+{% from 'kpi_biz/macros/kpi_card.html' import tarjeta, variacion, fila_motivo, vacio, semaforo_badge %}
+
+{% if kpis_biz %}
+{% set k = kpis_biz %}
+
+<div class="kpi-biz-panel" id="kpiBizPanel" data-kpi-url="{{ url_for('kpi_biz.api_panel') }}">
+
+  {# ── Aviso de error de la API ── #}
+  <div class="kpi-biz-error" id="kpiBizError"></div>
+
+  {# ── Cabecera y filtros ── #}
+  <div class="kpi-biz-toolbar">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <h2 class="kpi-biz-titulo mb-0">
+        <i class="bi bi-graph-up-arrow"></i> KPIs de Ventas y Almacen
+      </h2>
+      <a href="{{ url_for('kpi_biz.panel_completo') }}" class="btn btn-sm btn-outline-warning" target="_blank" title="Abrir en ventana completa">
+        <i class="bi bi-fullscreen"></i> Pantalla completa
+      </a>
+    </div>
+
+    <form method="GET" id="kpiBizFiltros" class="kpi-biz-filtros">
+      {% set propios = ('preset', 'desde', 'hasta') %}
+      {% for clave in request.args.keys() if clave not in propios %}
+        <input type="hidden" name="{{ clave }}" value="{{ request.args[clave] }}">
+      {% endfor %}
+
+      <div>
+        <label for="kpiBizPreset">Periodo</label>
+        <select name="preset" id="kpiBizPreset" class="form-select form-select-sm">
+          {% for valor, texto in [('hoy', 'Hoy'), ('7d', 'Ultimos 7 dias'),
+                                  ('30d', 'Ultimos 30 dias'), ('mes', 'Mes actual'),
+                                  ('personalizado', 'Personalizado')] %}
+            <option value="{{ valor }}"
+              {% if k.periodo.preset == valor %}selected{% endif %}>{{ texto }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="kpiBizDesde">Desde</label>
+        <input type="text" name="desde" id="kpiBizDesde" class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa" autocomplete="off">
+      </div>
+      <div>
+        <label for="kpiBizHasta">Hasta</label>
+        <input type="text" name="hasta" id="kpiBizHasta" class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa" autocomplete="off">
+      </div>
+      <button type="submit" class="btn kpi-biz-btn">Aplicar</button>
+      <button type="button" class="btn kpi-biz-btn-ghost" id="kpiBizActualizar">
+        <i class="bi bi-arrow-clockwise"></i> Actualizar
+      </button>
+    </form>
+  </div>
+
+  {# ── Periodo comparado ── #}
+  {% if k.periodo %}
+  <p class="kpi-biz-periodo-nota">
+    Del <strong>{{ k.periodo.desde.strftime('%d/%m/%Y %H:%M') }}</strong>
+    al <strong>{{ k.periodo.hasta.strftime('%d/%m/%Y %H:%M') }}</strong>
+    <span class="d-none d-md-inline">· {{ k.periodo.dias }} dia(s)</span>
+    · comparado con el periodo equivalente anterior
+  </p>
+  {% endif %}
+
+  {# ── 1. EXITO ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-check-circle-fill text-success"></i> 1. Exito — Ventas y Despachos Correctos</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Lo que salio bien y genero ingresos reales sin contratiempos</span>
+    </div>
+    <div class="kpi-biz-sec-body">
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Ventas Netas',
+            'icono': 'bi-cash-stack',
+            'valor': k.exito.ventas_netas.valor,
+            'unidad': 'pedidos',
+            'pie': k.exito.ventas_netas.pie,
+            'variacion': k.exito.ventas_netas.variacion,
+            'mejor_si_sube': k.exito.ventas_netas.mejor_si_sube,
+            'semaforo': k.exito.ventas_netas.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Pedidos Perfectos',
+            'icono': 'bi-award',
+            'valor': k.exito.pedidos_perfectos.valor,
+            'unidad': '%',
+            'pie': k.exito.pedidos_perfectos.pie,
+            'variacion': k.exito.pedidos_perfectos.variacion,
+            'mejor_si_sube': k.exito.pedidos_perfectos.mejor_si_sube,
+            'semaforo': k.exito.pedidos_perfectos.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'OTIF (On Time In Full)',
+            'icono': 'bi-truck',
+            'valor': k.exito.otif.valor,
+            'unidad': '%',
+            'pie': k.exito.otif.pie,
+            'variacion': k.exito.otif.variacion,
+            'mejor_si_sube': k.exito.otif.mejor_si_sube,
+            'semaforo': k.exito.otif.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Sell-Through',
+            'icono': 'bi-arrow-repeat',
+            'valor': k.exito.sell_through.valor,
+            'unidad': '%',
+            'pie': k.exito.sell_through.pie,
+            'variacion': k.exito.sell_through.variacion,
+            'mejor_si_sube': k.exito.sell_through.mejor_si_sube,
+            'semaforo': k.exito.sell_through.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Ticket Promedio',
+            'icono': 'bi-currency-dollar',
+            'valor': k.exito.ticket_promedio.valor,
+            'unidad': 'S/',
+            'pie': k.exito.ticket_promedio.pie,
+            'variacion': k.exito.ticket_promedio.variacion,
+            'mejor_si_sube': k.exito.ticket_promedio.mejor_si_sube,
+            'semaforo': k.exito.ticket_promedio.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Unidades x Transaccion',
+            'icono': 'bi-box-seam',
+            'valor': k.exito.upt.valor,
+            'unidad': 'und',
+            'pie': k.exito.upt.pie,
+            'variacion': k.exito.upt.variacion,
+            'mejor_si_sube': k.exito.upt.mejor_si_sube,
+            'semaforo': k.exito.upt.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Margen Bruto',
+            'icono': 'bi-graph-up',
+            'valor': k.exito.margen_bruto.valor,
+            'unidad': 'S/',
+            'pie': k.exito.margen_bruto.pie,
+            'variacion': k.exito.margen_bruto.variacion,
+            'mejor_si_sube': k.exito.margen_bruto.mejor_si_sube,
+            'semaforo': k.exito.margen_bruto.semaforo,
+        }) }}
+      </div>
+
+      {% if k.exito.pedidos_perfectos.detalle or k.exito.otif.detalle %}
+      <div class="table-responsive mt-3">
+        <table class="kpi-biz-tabla">
+          <thead><tr><th>Detalle</th><th class="num">Valor</th></tr></thead>
+          <tbody>
+            {% for etiqueta, valor in (k.exito.pedidos_perfectos.detalle or []) + (k.exito.otif.detalle or []) %}
+              {% if valor %}
+              <tr><td>{{ etiqueta }}</td><td class="num">{{ valor }}</td></tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── 2. CANCELACIONES ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-x-circle-fill text-danger"></i> 2. Cancelaciones — Ventas Perdidas</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Interes que no llego a facturarse o que se cayo antes de salir</span>
+    </div>
+    <div class="kpi-biz-sec-body">
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Tasa de Cancelacion',
+            'icono': 'bi-slash-circle',
+            'valor': k.cancelaciones.tasa_cancelacion.valor,
+            'unidad': '%',
+            'pie': k.cancelaciones.tasa_cancelacion.pie,
+            'variacion': k.cancelaciones.tasa_cancelacion.variacion,
+            'mejor_si_sube': k.cancelaciones.tasa_cancelacion.mejor_si_sube,
+            'semaforo': k.cancelaciones.tasa_cancelacion.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Abandono Carrito',
+            'icono': 'bi-cart-x',
+            'valor': k.cancelaciones.abandono_carrito.valor,
+            'unidad': '%',
+            'pie': k.cancelaciones.abandono_carrito.pie,
+            'variacion': k.cancelaciones.abandono_carrito.variacion,
+            'mejor_si_sube': k.cancelaciones.abandono_carrito.mejor_si_sube,
+            'semaforo': k.cancelaciones.abandono_carrito.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Cancelacion Proveedor',
+            'icono': 'bi-truck-flatbed',
+            'valor': k.cancelaciones.cancelacion_proveedor.valor,
+            'unidad': '%',
+            'pie': k.cancelaciones.cancelacion_proveedor.pie,
+            'variacion': k.cancelaciones.cancelacion_proveedor.variacion,
+            'mejor_si_sube': k.cancelaciones.cancelacion_proveedor.mejor_si_sube,
+            'semaforo': k.cancelaciones.cancelacion_proveedor.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Tasa de Conversion',
+            'icono': 'bi-funnel',
+            'valor': k.cancelaciones.tasa_conversion.valor,
+            'unidad': '%',
+            'pie': k.cancelaciones.tasa_conversion.pie,
+            'variacion': k.cancelaciones.tasa_conversion.variacion,
+            'mejor_si_sube': k.cancelaciones.tasa_conversion.mejor_si_sube,
+            'semaforo': k.cancelaciones.tasa_conversion.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Contratos Perdidos (B2B)',
+            'icono': 'bi-file-earmark-x',
+            'valor': k.cancelaciones.contratos_perdidos.valor,
+            'unidad': '',
+            'pie': k.cancelaciones.contratos_perdidos.pie,
+            'variacion': k.cancelaciones.contratos_perdidos.variacion,
+            'mejor_si_sube': k.cancelaciones.contratos_perdidos.mejor_si_sube,
+            'semaforo': k.cancelaciones.contratos_perdidos.semaforo,
+        }) }}
+      </div>
+
+      {% if k.cancelaciones.contratos_perdidos.detalle %}
+      <div class="table-responsive mt-3">
+        <table class="kpi-biz-tabla">
+          <thead><tr><th>Detalle</th><th class="num">Valor</th></tr></thead>
+          <tbody>
+            {% for etiqueta, valor in k.cancelaciones.contratos_perdidos.detalle %}
+              {% if valor %}
+              <tr><td>{{ etiqueta }}</td><td class="num">{{ valor }}</td></tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── 3. PROBLEMAS ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-exclamation-triangle-fill text-warning"></i> 3. Problemas — Incidencias, Retrasos y Errores</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Fallos de proceso que cuestan dinero, dañan la reputacion y causan friccion</span>
+    </div>
+    <div class="kpi-biz-sec-body">
+
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Tasa de Devoluciones',
+            'icono': 'bi-arrow-counterclockwise',
+            'valor': k.problemas.devoluciones.valor if k.problemas.devoluciones.valor is not none else '—',
+            'unidad': '%',
+            'pie': k.problemas.devoluciones.pie,
+            'variacion': k.problemas.devoluciones.variacion,
+            'mejor_si_sube': k.problemas.devoluciones.mejor_si_sube,
+            'semaforo': k.problemas.devoluciones.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Backorder Rate',
+            'icono': 'bi-box-seam',
+            'valor': k.problemas.backorder.valor,
+            'unidad': '%',
+            'pie': k.problemas.backorder.pie,
+            'variacion': k.problemas.backorder.variacion,
+            'mejor_si_sube': k.problemas.backorder.mejor_si_sube,
+            'semaforo': k.problemas.backorder.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Incidencias Picking',
+            'icono': 'bi-box-seam',
+            'valor': k.problemas.picking.valor,
+            'unidad': '%',
+            'pie': k.problemas.picking.pie,
+            'variacion': k.problemas.picking.variacion,
+            'mejor_si_sube': k.problemas.picking.mejor_si_sube,
+            'semaforo': k.problemas.picking.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Mermas / Contraccion',
+            'icono': 'bi-box-arrow-down',
+            'valor': k.problemas.mermas.valor,
+            'unidad': '',
+            'pie': k.problemas.mermas.pie,
+            'variacion': k.problemas.mermas.variacion,
+            'mejor_si_sube': k.problemas.mermas.mejor_si_sube,
+            'semaforo': k.problemas.mermas.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Incidencias Transporte',
+            'icono': 'bi-truck',
+            'valor': k.problemas.transporte.valor if k.problemas.transporte.valor is not none else '—',
+            'unidad': '%',
+            'pie': k.problemas.transporte.pie,
+            'variacion': k.problemas.transporte.variacion,
+            'mejor_si_sube': k.problemas.transporte.mejor_si_sube,
+            'semaforo': k.problemas.transporte.semaforo,
+        }) }}
+      </div>
+
+      {# ── Detalle Devoluciones ── #}
+      {% if k.problemas.devoluciones.motivos %}
+      <div class="row mt-4">
+        <div class="col-md-6">
+          <h6 class="text-muted">Motivos de devolucion</h6>
+          <div class="table-responsive">
+            <table class="kpi-biz-tabla">
+              <thead><tr><th>Motivo</th><th class="num">Casos</th><th class="num">Unidades</th></tr></thead>
+              <tbody>
+                {% for m in k.problemas.devoluciones.motivos %}
+                  {{ fila_motivo(m) }}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <h6 class="text-muted">Motivos de transporte</h6>
+          <div class="table-responsive">
+            <table class="kpi-biz-tabla">
+              <thead><tr><th>Motivo</th><th class="num">Casos</th></tr></thead>
+              <tbody>
+                {% for m in k.problemas.transporte.motivos %}
+                  <tr><td>{{ m.etiqueta }}</td><td class="num">{{ m.n }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {# ── Detalle Picking ── #}
+      {% if k.problemas.picking.detalle %}
+      <div class="mt-4">
+        <h6 class="text-muted">Detalle de picking</h6>
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead><tr><th>Detalle</th><th class="num">Valor</th></tr></thead>
+            <tbody>
+              {% for etiqueta, valor in k.problemas.picking.detalle %}
+                {% if valor %}
+                <tr><td>{{ etiqueta }}</td><td class="num">{{ valor }}</td></tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+
+      {# ── Detalle Mermas ── #}
+      {% if k.problemas.mermas.detalle %}
+      <div class="mt-4">
+        <h6 class="text-muted">Detalle de mermas</h6>
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead><tr><th>Detalle</th><th class="num">Valor</th></tr></thead>
+            <tbody>
+              {% for etiqueta, valor in k.problemas.mermas.detalle %}
+                {% if valor %}
+                <tr><td>{{ etiqueta }}</td><td class="num">{{ valor }}</td></tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── RESUMEN Y ALMACEN ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-speedometer2"></i> Resumen y Estado del Almacen</h5>
+    </div>
+    <div class="kpi-biz-sec-body">
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Pedidos del Periodo',
+            'icono': 'bi-receipt',
+            'valor': k.resumen.pedidos,
+            'unidad': '',
+            'pie': '',
+            'variacion': k.resumen.variacion_pedidos,
+            'mejor_si_sube': True,
+            'semaforo': 'is-ok' if (k.resumen.variacion_pedidos or 0) >= 0 else 'is-aviso',
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Facturado Entregado',
+            'icono': 'bi-currency-dollar',
+            'valor': k.resumen.monto,
+            'unidad': 'S/',
+            'pie': 'Ticket medio: S/ {{ "%.2f"|format(k.resumen.ticket_medio) }}',
+            'variacion': k.resumen.variacion_monto,
+            'mejor_si_sube': True,
+            'semaforo': 'is-ok' if (k.resumen.variacion_monto or 0) >= 0 else 'is-aviso',
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Clientes Recurrentes',
+            'icono': 'bi-people',
+            'valor': k.resumen.clientes_recurrentes,
+            'unidad': '',
+            'pie': k.resumen.tasa_recurrentes | string ~ '% de ' ~ k.resumen.total_clientes | string ~ ' clientes',
+            'variacion': None,
+            'mejor_si_sube': True,
+            'semaforo': 'is-ok' if (k.resumen.tasa_recurrentes or 0) >= 20 else 'is-aviso',
+        }) }}
+        {% if k.almacen.inventario %}
+        {{ tarjeta({
+            'titulo': 'Productos Activos',
+            'icono': 'bi-box-seam',
+            'valor': k.almacen.inventario.productos,
+            'unidad': '',
+            'pie': '{{ k.almacen.inventario.unidades }} unidades · Valor: S/ {{ "%.2f"|format(k.almacen.inventario.valor) }}',
+            'variacion': None,
+            'mejor_si_sube': True,
+            'semaforo': 'is-ok',
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Stock Critico',
+            'icono': 'bi-exclamation-triangle',
+            'valor': k.almacen.inventario.agotados + k.almacen.inventario.criticos,
+            'unidad': '',
+            'pie': '{{ k.almacen.inventario.agotados }} agotados · {{ k.almacen.inventario.criticos }} criticos',
+            'variacion': None,
+            'mejor_si_sube': False,
+            'semaforo': 'is-critico' if k.almacen.inventario.agotados > 0 else ('is-aviso' if k.almacen.inventario.criticos > 0 else 'is-ok'),
+        }) }}
+        {% if k.almacen.rotacion_inventario is not none %}
+        {{ tarjeta({
+            'titulo': 'Rotacion Inventario',
+            'icono': 'bi-arrow-clockwise',
+            'valor': k.almacen.rotacion_inventario,
+            'unidad': 'x',
+            'pie': k.almacen.rotacion_inventario | string ~ ' rotaciones/periodo',
+            'variacion': None,
+            'mejor_si_sube': True,
+            'semaforo': 'is-ok' if k.almacen.rotacion_inventario >= 4 else 'is-aviso',
+        }) }}
+        {% endif %}
+        {% if k.almacen.doh is not none %}
+        {{ tarjeta({
+            'titulo': 'Dias de Inventario',
+            'icono': 'bi-calendar-event',
+            'valor': k.almacen.doh,
+            'unidad': 'dias',
+            'pie': 'Dias promedio en almacen',
+            'variacion': None,
+            'mejor_si_sube': False,
+            'semaforo': 'is-ok' if k.almacen.doh <= 30 else ('is-aviso' if k.almacen.doh <= 60 else 'is-critico'),
+        }) }}
+        {% endif %}
+        {% endif %}
+      </div>
+
+      {% if k.almacen.reposiciones %}
+      <div class="mt-4">
+        <h6 class="text-muted">Reposiciones pendientes (cola de trabajo)</h6>
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead>
+              <tr><th>Producto</th><th>Stock</th><th>Pedida</th><th>Proveedor</th><th>Desde</th></tr>
+            </thead>
+            <tbody>
+              {% for r in k.almacen.reposiciones %}
+              <tr>
+                <td>{{ r.nombre }}</td>
+                <td class="num">
+                  {% if r.stock <= 0 %}<span class="badge bg-danger">{{ r.stock }}</span>
+                  {% elif r.stock <= 5 %}<span class="badge bg-warning text-dark">{{ r.stock }}</span>
+                  {% else %}<span class="badge bg-success">{{ r.stock }}</span>{% endif %}
+                </td>
+                <td class="num">{{ r.cantidad_pedido }}</td>
+                <td>{{ r.proveedor or '—' }}</td>
+                <td style="white-space:nowrap">{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+{% else %}
+{# Degradacion: el snapshot no llego. #}
+<div class="kpi-biz-panel" id="kpiBizPanel">
+  <div class="kpi-biz-toolbar">
+    <h2 class="kpi-biz-titulo mb-0">
+      <i class="bi bi-graph-up-arrow"></i> KPIs de Ventas y Almacen
+    </h2>
+    <a href="{{ url_for('kpi_biz.panel_completo') }}" class="btn btn-sm btn-outline-warning" target="_blank">
+      <i class="bi bi-fullscreen"></i> Pantalla completa
+    </a>
+  </div>
+  <div class="kpi-biz-error visible">
+    <i class="bi bi-database-exclamation"></i>
+    No se pudieron calcular los indicadores ahora mismo. El resto del panel
+    sigue funcionando con normalidad.
+  </div>
+</div>
+{% endif %}

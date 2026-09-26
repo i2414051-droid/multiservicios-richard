@@ -1,0 +1,102 @@
+﻿{% extends 'base.html' %}
+
+{% block content %}
+
+<div class="container d-flex justify-content-center align-items-center" style="height:90vh;">
+
+    <div class="card shadow p-4" style="width:400px;">
+
+        <h3 class="text-center mb-3">📝 Registrarse</h3>
+
+        <form method="POST">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+            <!-- NOMBRES -->
+            <div class="mb-3">
+                <label class="form-label">Nombres</label>
+                <input type="text" name="nombres" class="form-control" required>
+            </div>
+
+            <!-- APELLIDOS -->
+            <div class="mb-3">
+                <label class="form-label">Apellidos</label>
+                <input type="text" name="apellidos" class="form-control" required>
+            </div>
+
+            <!-- CORREO -->
+            <div class="mb-3">
+                <label class="form-label">Correo electrónico</label>
+                <input type="email" name="correo" class="form-control" required>
+            </div>
+
+            <!-- CONTRASEÑA CON OJO -->
+            <div class="mb-3">
+                <label class="form-label">Contraseña</label>
+                <div class="position-relative">
+                    <input type="password" name="password" id="password" class="form-control pe-5" required>
+                    <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
+                            onclick="togglePassword()"
+                            style="border:none; background:none; cursor:pointer; z-index:5;">
+                        <i id="eye-icon" class="bi bi-eye" style="color: var(--color-ojo);"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- CONFIRMAR CONTRASEÑA CON OJO -->
+            <div class="mb-3">
+                <label class="form-label">Confirmar contraseña</label>
+                <div class="position-relative">
+                    <input type="password" name="confirmar" id="confirmar" class="form-control pe-5" required>
+                    <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
+                            onclick="toggleConfirmPassword()"
+                            style="border:none; background:none; cursor:pointer; z-index:5;">
+                        <i id="eye-icon-confirm" class="bi bi-eye" style="color: var(--color-ojo);"></i>
+                    </button>
+                </div>
+            </div>
+
+            <button class="btn btn-success w-100">
+                Registrarse
+            </button>
+
+        </form>
+
+        <div class="text-center mt-3">
+            <a href="/login">¿Ya tienes cuenta? Inicia sesión</a>
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+function togglePassword() {
+    const input = document.getElementById('password');
+    const icon  = document.getElementById('eye-icon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.remove('bi-eye');
+        icon.classList.add('bi-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.remove('bi-eye-slash');
+        icon.classList.add('bi-eye');
+    }
+}
+
+function toggleConfirmPassword() {
+    const input = document.getElementById('confirmar');
+    const icon  = document.getElementById('eye-icon-confirm');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.remove('bi-eye');
+        icon.classList.add('bi-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.remove('bi-eye-slash');
+        icon.classList.add('bi-eye');
+    }
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+static/uploads/*.jpg
+static/uploads/*.png
+static/uploads/*.webp
+static/boleta_*.pdf
+# Logs locales de prueba
+arrancar/*.log
+
+_fijar_ojo.py
+_ojofix.py
+app_test*.log
