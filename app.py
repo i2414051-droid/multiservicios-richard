@@ -3,12 +3,17 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (Flask, render_template, request, redirect,
-                   url_for, session, jsonify, flash, send_file)
+                    url_for, session, jsonify, flash, send_file)
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail, Message
 from werkzeug.utils import secure_filename
 import requests
+
+# ─────────────────────────────────────────────
+# MÓDULO KPIs (técnicos + negocio)
+# ─────────────────────────────────────────────
+from kpi import init_kpi, init_kpi_biz
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
@@ -745,6 +750,28 @@ def dashboard():
     productos_stock_bajo = cur.fetchall()
 
     cur.close()
+
+    # ── KPIs snapshots para el Dashboard ───────────────────────
+    kpis = None
+    kpis_biz = None
+    try:
+        from kpi.routes import get_snapshot as get_kpi_snapshot
+        from kpi.routes_biz import get_snapshot as get_kpi_biz_snapshot
+        # Usar request.args para el periodo (o default 30d)
+        from flask import request
+        from types import SimpleNamespace
+        # Mock request.args para get_snapshot
+        class MockArgs:
+            def get(self, k, default=None):
+                return request.args.get(k, default)
+        orig_args = request.args
+        request.args = MockArgs()
+        kpis = get_kpi_snapshot()
+        kpis_biz = get_kpi_biz_snapshot()
+        request.args = orig_args
+    except Exception as e:
+        app.logger.warning(f'Dashboard KPIs snapshot falló: {e}')
+
     return render_template('dashboard.html',
                            total_ventas=total_ventas,
                            ingresos_totales=ingresos_totales,
@@ -755,7 +782,9 @@ def dashboard():
                            total_proveedores=total_proveedores,
                            ventas_pendientes=ventas_pendientes,
                            ultimas_ventas=ultimas_ventas,
-                           productos_stock_bajo=productos_stock_bajo)
+                           productos_stock_bajo=productos_stock_bajo,
+                           kpis=kpis,
+                           kpis_biz=kpis_biz)
 
 @app.route('/admin')
 def admin():
@@ -2573,6 +2602,23 @@ def _ensure_db():
             init_db()
         except Exception as e:
             print(f"[before_request init_db] {e}")
+
+# ─────────────────────────────────────────────
+# INICIALIZACIÓN KPIs (una sola vez al arrancar)
+# ─────────────────────────────────────────────
+_kpi_initialized = False
+
+@app.before_request
+def _ensure_kpi():
+    global _kpi_initialized
+    if not _kpi_initialized:
+        _kpi_initialized = True
+        try:
+            init_kpi(app, ensure_schema_fn=init_db)
+            init_kpi_biz(app)
+            app.logger.info('KPIs: módulos inicializados')
+        except Exception as e:
+            app.logger.warning(f'KPIs: inicialización falló: {e}')
 
 # ─────────────────────────────────────────────
 # RUN
