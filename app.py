@@ -769,8 +769,9 @@ def dashboard():
         kpis = get_kpi_snapshot()
         kpis_biz = get_kpi_biz_snapshot()
         request.args = orig_args
+        app.logger.info(f'Dashboard KPIs loaded: kpis={kpis is not None}, kpis_biz={kpis_biz is not None}')
     except Exception as e:
-        app.logger.warning(f'Dashboard KPIs snapshot falló: {e}')
+        app.logger.error(f'Dashboard KPIs snapshot error: {e}', exc_info=True)
 
     return render_template('dashboard.html',
                            total_ventas=total_ventas,
@@ -2604,21 +2605,18 @@ def _ensure_db():
             print(f"[before_request init_db] {e}")
 
 # ─────────────────────────────────────────────
-# INICIALIZACIÓN KPIs (una sola vez al arrancar)
+# INICIALIZACIÓN KPIs (al arrancar la app)
 # ─────────────────────────────────────────────
-_kpi_initialized = False
-
-@app.before_request
-def _ensure_kpi():
-    global _kpi_initialized
-    if not _kpi_initialized:
-        _kpi_initialized = True
-        try:
+def _init_kpis():
+    try:
+        with app.app_context():
             init_kpi(app, ensure_schema_fn=init_db)
             init_kpi_biz(app)
-            app.logger.info('KPIs: módulos inicializados')
-        except Exception as e:
-            app.logger.warning(f'KPIs: inicialización falló: {e}')
+        app.logger.info('KPIs: módulos inicializados correctamente')
+    except Exception as e:
+        app.logger.error(f'KPIs: error en inicialización: {e}')
+
+_init_kpis()
 
 # ─────────────────────────────────────────────
 # RUN
