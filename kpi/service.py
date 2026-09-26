@@ -135,7 +135,7 @@ def _variacion(actual, anterior):
     return round((actual - anterior) / abs(anterior) * 100.0, 2)
 
 
-def _indicador(clave, valor, pie='', variacion=None, detalle=None):
+def _indicador(clave, valor, pie='', variacion=None, detalle=None, motivos=None):
     """
     Envoltura comun de todos los indicadores.
 
@@ -152,6 +152,7 @@ def _indicador(clave, valor, pie='', variacion=None, detalle=None):
         'mejor_si_sube': settings.mejor_si_sube(clave),
         'umbral': settings.UMBRALES.get(clave, {}).get('ok'),
         'detalle': detalle or [],
+        'motivos': motivos or [],
     }
 
 

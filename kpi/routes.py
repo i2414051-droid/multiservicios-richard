@@ -90,6 +90,9 @@ def get_snapshot():
         periodo = service.resolve_period(request.args)
         snapshot = service.build_snapshot(periodo)
         snapshot['retention'] = retention.describe_retention()
+        for key in ('disponibilidad', 'rendimiento', 'estabilidad',
+                    'seguridad', 'salud', 'operaciones'):
+            snapshot.setdefault(key, {})
         return snapshot
     except Exception as exc:
         current_app.logger.warning('KPI get_snapshot fallo: %s', exc)

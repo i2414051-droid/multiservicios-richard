@@ -165,6 +165,9 @@ ETIQUETAS_MOTIVO = {
 }
 
 
+# Rutas excluidas del seguimiento de KPIs.
+EXCLUDED_PATHS = ('/static', '/test_db', '/init-db', '/login', '/registro')
+
 # Alias para compatibilidad con codigo existente
 RETENTION_DAYS = METRIC_RETENTION_DAYS
 HEALTH_RETENTION_DAYS = HEALTH_RETENTION_DAYS

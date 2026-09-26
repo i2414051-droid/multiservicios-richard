@@ -75,7 +75,7 @@ def _abrir_conexion(config):
     if nombre_cursor:
         argumentos['cursorclass'] = getattr(mysql_cursors, nombre_cursor)
 
-    return MySQLdb.connect(**argumentos)
+    return MySQLdb.connect(**argumentos, autocommit=True)
 
 
 # Las conexiones se cachean por hilo y por app. Por hilo porque el
