@@ -759,7 +759,6 @@ def dashboard():
         from kpi.routes_biz import get_snapshot as get_kpi_biz_snapshot
         # Usar request.args para el periodo (o default 30d)
         from flask import request
-        from types import SimpleNamespace
         # Mock request.args para get_snapshot
         class MockArgs:
             def get(self, k, default=None):
@@ -772,6 +771,17 @@ def dashboard():
         app.logger.info(f'Dashboard KPIs loaded: kpis={kpis is not None}, kpis_biz={kpis_biz is not None}')
     except Exception as e:
         app.logger.error(f'Dashboard KPIs snapshot error: {e}', exc_info=True)
+        # Provide safe fallback structures so template doesn't crash
+        kpis = {
+            'disponibilidad': {'valor': None, 'semaforo': 'sin_datos'},
+            'rendimiento': {'p95_ms': None, 'semaforo': 'sin_datos'},
+            'estabilidad': {'errores': 0, 'semaforo': 'sin_datos'},
+            'seguridad': {'puntuacion': 0, 'semaforo': 'sin_datos'},
+        }
+        kpis_biz = {
+            'exito': {'ventas_netas': {'valor': 0}, 'pedidos_perfectos': {'valor': 0}, 'otif': {'valor': 0}},
+            'cancelaciones': {'tasa_cancelacion': {'valor': 0}},
+        }
 
     return render_template('dashboard.html',
                            total_ventas=total_ventas,

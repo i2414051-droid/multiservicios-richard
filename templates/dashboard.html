@@ -194,8 +194,8 @@
                 <!-- TAB 1: RESUMEN EJECUTIVO -->
                 <div class="tab-pane fade show active" id="kpiEjecutivo" role="tabpanel">
                     <div class="row g-3">
-                        <!-- Technical KPIs Summary -->
-                        {% if kpis %}
+                        <!-- Technical KPIs Summary (if available) -->
+                        {% if kpis and kpis.disponibilidad is defined %}
                         {% set kt = kpis %}
                         <div class="col-md-3">
                             <div class="dash-card">
@@ -221,12 +221,12 @@
                                 <div class="info"><h3>{{ kt.seguridad.puntuacion }}/100</h3><p>Seguridad</p></div>
                             </div>
                         </div>
-                        {% else %}
+                        {% elif kpis %}
                         <div class="col-12"><div class="empty-msg">KPIs técnicos no disponibles</div></div>
                         {% endif %}
 
                         <!-- Business KPIs Summary -->
-                        {% if kpis_biz %}
+                        {% if kpis_biz and kpis_biz.exito is defined %}
                         {% set kb = kpis_biz %}
                         <div class="col-md-3">
                             <div class="dash-card">
@@ -252,7 +252,7 @@
                                 <div class="info"><h3>{{ kb.cancelaciones.tasa_cancelacion.valor }}%</h3><p>Tasa Cancelación</p></div>
                             </div>
                         </div>
-                        {% else %}
+                        {% elif kpis_biz %}
                         <div class="col-12"><div class="empty-msg">KPIs de negocio no disponibles</div></div>
                         {% endif %}
                     </div>
