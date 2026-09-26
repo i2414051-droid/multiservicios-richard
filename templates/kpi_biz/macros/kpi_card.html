@@ -1,0 +1,89 @@
+{#
+  Macros del panel de KPIs de Ventas y Almacen.
+
+  Se separan del resto para poder usar las mismas piezas tanto en el bloque
+  que se incrusta en /admin como en el panel completo. Ninguna macro consulta
+  datos: todas reciben el snapshot ya calculado.
+#}
+
+{#
+  Flecha de variacion frente al periodo anterior equivalente.
+
+  mejor_si_sube indica el sentido en que la variacion es buena: lo lee del
+  indicador (viene de settings.UMBRALES) para que la tarjeta y la flecha nunca
+  discrepen.
+#}
+{% macro variacion(valor, mejor_si_sube=true, sufijo='%') %}
+  {% if valor is none %}
+    <span class="kpi-biz-var nuevo" title="El periodo anterior no tiene datos con los que comparar">
+      <i class="bi bi-stars"></i> nuevo
+    </span>
+  {% else %}
+    {% set clase = 'igual' if valor == 0 else ('sube' if valor > 0 else 'baja') %}
+    {# Cuando el numero es malo, se invierte el color para que verde = mejor. #}
+    {% if valor != 0 and (valor > 0) != mejor_si_sube %}
+      {% set clase = 'baja' if valor > 0 else 'sube' %}
+    {% endif %}
+    <span class="kpi-biz-var {{ clase }}" title="Frente al periodo anterior equivalente">
+      <i class="bi bi-arrow-{{ 'up' if valor > 0 else ('down' if valor < 0 else 'right') }}"></i>
+      {{ valor }}{{ sufijo }}
+    </span>
+  {% endif %}
+{% endmacro %}
+
+
+{#
+  Tarjeta de indicador.
+
+  Requiere el diccionario que devuelve service._indicador (clave, valor, pie,
+  variacion, semaforo, mejor_si_sube). Estado es una de: is-ok, is-aviso,
+  is-critico, is-sin-datos.
+#}
+{% macro tarjeta(kpi) %}
+  <div class="kpi-biz-card {{ kpi.semaforo|default('is-sin-datos') }}">
+    <div class="kpi-biz-cab"><i class="bi {{ kpi.icono|default('bi-graph-up') }}"></i>{{ kpi.titulo }}</div>
+    <div class="kpi-biz-valor" data-kpi-valor>
+      {% if kpi.valor is none %}
+        <span class="text-muted">—</span>
+      {% else %}
+        {{ kpi.valor }}{% if kpi.unidad %}<small> {{ kpi.unidad }}</small>{% endif %}
+      {% endif %}
+    </div>
+    <div class="kpi-biz-pie">
+      {% if kpi.variacion is not none %}
+        {{ variacion(kpi.variacion, kpi.mejor_si_sube) }}
+      {% endif %}
+      {% if kpi.pie %}<span>{{ kpi.pie }}</span>{% endif %}
+    </div>
+  </div>
+{% endmacro %}
+
+
+{#
+  Fila simple para la lista de incidencias por motivo.
+#}
+{% macro fila_motivo(m) %}
+  <tr>
+    <td>{{ m.etiqueta }}</td>
+    <td class="num">{{ m.n }}</td>
+    <td class="num">{{ m.unidades }}</td>
+  </tr>
+{% endmacro %}
+
+
+{#
+  Estado vacio unificado.
+#}
+{% macro vacio(icono='bi-inbox', texto='Sin datos todavia') %}
+  <div class="kpi-biz-vacio">
+    <i class="bi {{ icono }}"></i>{{ texto }}
+  </div>
+{% endmacro %}
+
+
+{#
+  Badge de semaforo reutilizable.
+#}
+{% macro semaforo_badge(estado) %}
+  <span class="kpi-biz-badge {{ estado }}">{{ estado }}</span>
+{% endmacro %}

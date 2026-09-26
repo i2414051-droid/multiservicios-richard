@@ -1,0 +1,119 @@
+{#
+  Macros del panel de KPIs.
+
+  Se separan del resto para poder usar las mismas piezas tanto en el bloque
+  que se incrusta en /admin como en el fragmento que devuelve el endpoint de
+  recarga. Ninguna macro consulta datos: todas reciben el snapshot ya
+  calculado, de modo que el render no puede fallar por acceso a la base.
+#}
+
+{#
+  Flecha de variacion frente al periodo anterior equivalente.
+
+  mejor_si_sube indica el sentido en que la variacion es buena, porque no es
+  lo mismo en todos los indicadores: que suba el p95 es una mala noticia y
+  que bajen los errores tambien.
+#}
+{% macro variacion(valor, mejor_si_sube=true, sufijo='%') %}
+  {% if valor is none %}
+    <span class="kpi-var nuevo" title="El periodo anterior no tiene datos con los que comparar">
+      <i class="bi bi-stars"></i> nuevo
+    </span>
+  {% else %}
+    {% set clase = 'igual' if valor == 0 else ('sube' if valor > 0 else 'baja') %}
+    {# Cuando el numero es malo, se invierte el color para que verde = mejor. #}
+    {% if valor != 0 and (valor > 0) != mejor_si_sube %}
+      {% set clase = 'baja' if valor > 0 else 'sube' %}
+    {% endif %}
+    <span class="kpi-var {{ clase }}" title="Frente al periodo anterior equivalente">
+      <i class="bi bi-arrow-{{ 'up' if valor > 0 else ('down' if valor < 0 else 'right') }}"></i>
+      {{ valor }}{{ sufijo }}
+    </span>
+  {% endif %}
+{% endmacro %}
+
+
+{#
+  Barra de percentil con su media como marca de referencia.
+
+  techo_ms fija el 100% de la pista para que dos periodos distintos sean
+  comparables visualmente en lugar de aparecer cada uno a media pista.
+#}
+{% macro barra_percentil(etiqueta, valor_ms, techo_ms=3000, media_ms=none, semaforo='sin_datos') %}
+  {% if valor_ms and valor_ms > 0 %}
+    {% set ancho = [[(valor_ms / techo_ms * 100)|round|int, 100]|min, 2]|max %}
+    <div class="kpi-barra">
+      <div class="kpi-barra-cab">
+        <span>{{ etiqueta }}</span>
+        <strong>{{ valor_ms }} ms</strong>
+      </div>
+      <div class="kpi-barra-pista">
+        <div class="kpi-barra-relleno {{ semaforo }}" style="width: {{ ancho }}%"></div>
+      </div>
+      {% if media_ms and media_ms > 0 %}
+        {% set pos = [[(media_ms / techo_ms * 100)|round|int, 100]|min, 0]|max %}
+        <div class="kpi-barra-ref">
+          <span style="left: {{ pos }}%" title="Media del periodo: {{ media_ms }} ms"></span>
+        </div>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="kpi-barra">
+      <div class="kpi-barra-cab">
+        <span>{{ etiqueta }}</span>
+        <strong class="text-muted">sin datos</strong>
+      </div>
+      <div class="kpi-barra-pista">
+        <div class="kpi-barra-relleno sin-datos" style="width: 2%"></div>
+      </div>
+    </div>
+  {% endif %}
+{% endmacro %}
+
+
+{#
+  Tarjeta de indicador.
+
+  Requiere titulo, icono, valor y las unidades opcionales. estado es una de
+  estas clases: is-ok, is-aviso, is-critico, is-sin-datos.
+#}
+{% macro tarjeta(titulo, icono, valor, unidad='', pie='', variacion_html='', estado='is-sin-datos') %}
+  <div class="kpi-card {{ estado }}">
+    <div class="kpi-cab"><i class="bi {{ icono }}"></i>{{ titulo }}</div>
+    <div class="kpi-valor" data-kpi-valor>{{ valor }}{% if unidad %}<small> {{ unidad }}</small>{% endif %}</div>
+    <div class="kpi-pie">
+      {% if variacion_html %}{{ variacion_html }}{% endif %}
+      {% if pie %}<span>{{ pie }}</span>{% endif %}
+    </div>
+  </div>
+{% endmacro %}
+
+
+{#
+  Estado vacio unificado.
+
+  Se usa cuando un indicador no tiene datos porque la instrumentacion acaba
+  de arrancar. Distingue 'aun no hay datos' de 'el panel fallo', porque son
+  dos situaciones muy distintas para quien lo mira.
+#}
+{% macro vacio(icono='bi-inbox', texto='Sin datos todavía') %}
+  <div class="kpi-vacio">
+    <i class="bi {{ icono }}"></i>{{ texto }}
+  </div>
+{% endmacro %}
+
+
+{#
+  Fila de la lista de postura de configuracion.
+#}
+{% macro postura_item(check) %}
+  <div class="kpi-postura-item {{ check.estado }}">
+    <div>
+      <div class="nombre">{{ check.nombre }}</div>
+      {% if check.detalle %}
+        <div class="detalle">{{ check.detalle }}</div>
+      {% endif %}
+    </div>
+    <span class="kpi-badge {{ check.estado }}">{{ check.estado }}</span>
+  </div>
+{% endmacro %}
