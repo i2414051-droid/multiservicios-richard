@@ -1,1 +1,75 @@
-∢ഢ䔊煳敵慭瀠潲楰⁯敤⁬潭畤潬搠⁥偋獉മഊ䔊⁬潭畤潬猠⁥灡祯⁡湥氠獡琠扡慬⁳畱⁥慬愠汰捩捡潩⁮慹琠敩敮⠠敶瑮獡ബ猊来極業湥潴敟瑮敲慧ⱳ瀠潲畤瑣獯‬湩牧獥獯⸮⤮礠猠汯⁯湡摡⁥湵㩡氠獡਍湩楣敤据慩⁳敤漠数慲楣湯‮敄潶畬楣湯獥‬牥潲敲⁳敤瀠捩楫杮‬慤潮⁳敤਍牴湡灳牯整‬敭浲獡礠挠瑯穩捡潩敮⁳数摲摩獡渠⁯敳搠摥捵湥搠⁥楮杮湵猠瑩潩‬慨൹焊敵爠来獩牴牡慬⹳਍਍敓洠湡楴湥⁥灡牡整搠⁥敲潰楳潴祲瀮⁹潰煲敵攠⁳潬甠楮潣搠汥洠摯汵⁯畱⁥牣慥਍獥牴捵畴慲‬⁹潣癮敩敮瀠摯牥氠敥汲⁯楳⁮敲潣牲牥㘠〰氠湩慥⁳敤匠䱑മ∊∢਍浩潰瑲氠杯楧杮਍਍牦浯⸠椠灭牯⁴敲潰楳潴祲਍਍潬⁧‽潬杧湩⹧敧䱴杯敧⡲彟慮敭彟ഩഊ匊䡃䵅彁呓呁䵅久協㴠⠠਍††∢ഢ †䌠䕒呁⁅䅔䱂⁅䙉丠呏䔠䥘呓⁓火彩湩楣敤据慩⁳ന †††椠⁤††††义⁔啁佔䥟䍎䕒䕍呎倠䥒䅍奒䬠奅ബ †††琠灩⁯†††䅖䍒䅈⡒〳 低⁔啎䱌ബ †††洠瑯癩⁯††䅖䍒䅈⡒〴 低⁔啎䱌䐠䙅啁呌✠瑯潲Ⱗ਍††††慣瑮摩摡†䤠呎丠呏丠䱕⁌䕄䅆䱕⁔ⰱ਍††††敶瑮彡摩†䤠呎ബ †††瀠潲畤瑣彯摩䤠呎ബ †††爠晥牥湥楣⁡䅖䍒䅈⡒〲⤰ബ †††渠瑯⁡†††䅖䍒䅈⡒〵⤰ബ †††ⴠ‭慌洠牡慣氠⁡獥牣扩⁥䥓䵅剐⁅祐桴湯‬畮据⁡啃剒久彔䥔䕍呓䵁㩐攠൬ †††ⴠ‭慣捬汵⁯敤瀠牥潩潤⁳潣灭牡⁡潣瑮慲搠瑡瑥浩⹥潮⡷ ⁹潣⁮潤⁳敲潬敪൳ †††ⴠ‭慬⁳湩楣敤据慩⁳慭⁳敲楣湥整⁳敳挠楡楲湡映敵慲搠⁥慬瘠湥慴慮മ †††映捥慨†††䅄䕔䥔䕍丠呏丠䱕ⱌ਍††††义䕄⁘摩彸火彩湩彣敦档⁡昨捥慨Ⱙ਍††††义䕄⁘摩彸火彩湩彣楴潰⠠楴潰‬敦档⥡ബ †††䤠䑎塅椠硤歟楰楟据癟湥慴⠠敶瑮彡摩ഩ †⤠䔠䝎义㵅湉潮䉄䐠䙅啁呌䌠䅈卒呅甽晴洸㑢਍††∢Ⱒ਍††‣牔穡⁡敤攠牲牯獥渠⁯潣瑮潲慬潤⹳丠⁯獥甠⁮偋㩉攠⁳汥氠杯焠敵礠ൡ †⌠攠捳楲楢⁡汥攠牲牯慨摮敬⁲汧扯污‬潣獮牥慶潤瀠牯猠⁩慨⁹畱⁥楤条潮瑳捩牡മ †⌠匠⁥敲灳瑥湡氠獯渠浯牢獥搠⁥潣畬湭⁡畱⁥慹琠湥慩氠⁡慴汢⁡湥椠獮慴慬楣湯獥਍††‣湡整楲牯獥‬潰煲敵䌠䕒呁⁅䅔䱂⁅䙉丠呏䔠䥘呓⁓潮愠瑬牥⁡湵⁡慴汢⁡畱⁥慹਍††‣硥獩整礠甠⁮潮扭敲搠獩楴瑮⁯敤慪楲⁡汥䤠华剅⁔潣瑮慲甠慮挠汯浵慮椠敮楸瑳湥整മ †∠∢਍††剃䅅䕔吠䉁䕌䤠⁆低⁔塅卉協欠楰敟牲牯敟敶瑮⁳ന †††椠⁤††††义⁔啁佔䥟䍎䕒䕍呎倠䥒䅍奒䬠奅ബ †††爠畯整†††䅖䍒䅈⡒㈱⤰ബ †††攠牲牯瑟灹⁥䅖䍒䅈⡒㔱⤰丠呏丠䱕ⱌ਍††††敭獮橡⁥†嘠剁䡃剁㔨〰Ⱙ਍††††牯杩湥††嘠剁䡃剁㌨⤰丠呏丠䱕⁌䕄䅆䱕⁔猧牥楶潤❲ബ †††挠敲瑡摥慟⁴䅄䕔䥔䕍丠呏丠䱕ⱌ਍††††义䕄⁘摩彸火彩牥彲敦档⁡挨敲瑡摥慟⥴਍†† 久䥇䕎䤽湮䑯⁂䕄䅆䱕⁔䡃剁䕓㵔瑵㡦扭ഴ †∠∢ബ⤊਍਍敟煳敵慭江獩潴㴠䘠污敳਍਍਍敤⁦湥畳敲獟档浥⡡ 㸭丠湯㩥਍††∢䌢敲⁡慬⁳慴汢獡瀠潲楰獡搠汥洠摯汵⁯楳渠⁯硥獩整⹮䔠⁳摩浥潰整瑮⹥∢ഢ †朠潬慢⁬敟煳敵慭江獩潴਍††晩张獥畱浥彡楬瑳㩯਍††††敲畴湲਍਍††敤⁦损敲牡挨牵㨩਍††††潦⁲瑳瑡浥湥⁴湩匠䡃䵅彁呓呁䵅久協ഺ †††††挠牵攮數畣整猨慴整敭瑮ഩഊ †爠灥獯瑩牯⹹橥捥瑵牡敟捳楲畴慲弨牣慥⥲਍††敟煳敵慭江獩潴㴠吠畲൥ഊഊ搊晥攠煳敵慭江獩潴⤨ⴠ‾潢汯ഺ †爠瑥牵⁮敟煳敵慭江獩潴਍
+"""
+Esquema propio del modulo de KPIs.
+
+El modulo se apoya en las tablas que la aplicacion ya tiene (ventas,
+seguimiento_entregas, productos, ingresos...) y solo anade una: las
+incidencias de operacion. Devoluciones, errores de picking, danos de
+transporte, mermas y cotizaciones perdidas no se deducen de ningun sitio, hay
+que registrarlas.
+
+Se mantiene aparte de repository.py porque es lo unico del modulo que crea
+estructura, y conviene poder leerlo sin recorrer 600 lineas de SQL.
+"""
+import logging
+
+from . import repository
+
+log = logging.getLogger(__name__)
+
+SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS kpi_incidencias (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        tipo       VARCHAR(30) NOT NULL,
+        motivo     VARCHAR(40) NOT NULL DEFAULT 'otro',
+        cantidad   INT NOT NULL DEFAULT 1,
+        venta_id   INT,
+        producto_id INT,
+        referencia VARCHAR(200),
+        nota       VARCHAR(500),
+        -- La marca la escribe SIEMPRE Python, nunca CURRENT_TIMESTAMP: el
+        -- calculo de periodos compara contra datetime.now() y con dos relojes
+        -- las incidencias mas recientes se cairian fuera de la ventana.
+        fecha      DATETIME NOT NULL,
+        INDEX idx_kpi_inc_fecha (fecha),
+        INDEX idx_kpi_inc_tipo (tipo, fecha),
+        INDEX idx_kpi_inc_venta (venta_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    # Traza de errores no controlados. No es un KPI: es el log que ya
+    # escribia el errorhandler global, conservado por si hay que diagnosticar.
+    # Se respetan los nombres de columna que ya tenia la tabla en instalaciones
+    # anteriores, porque CREATE TABLE IF NOT EXISTS no altera una tabla que ya
+    # existe y un nombre distinto dejaria el INSERT contra una columna inexistente.
+    """
+    CREATE TABLE IF NOT EXISTS kpi_error_events (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        route      VARCHAR(120),
+        error_type VARCHAR(150) NOT NULL,
+        mensaje    VARCHAR(500),
+        origen     VARCHAR(30) NOT NULL DEFAULT 'servidor',
+        created_at DATETIME NOT NULL,
+        INDEX idx_kpi_err_fecha (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+)
+
+_esquema_listo = False
+
+
+def ensure_schema() -> None:
+    """Crea las tablas propias del modulo si no existen. Es idempotente."""
+    global _esquema_listo
+    if _esquema_listo:
+        return
+
+    def _crear(cur):
+        for statement in SCHEMA_STATEMENTS:
+            cur.execute(statement)
+
+    repository.ejecutar_escritura(_crear)
+    _esquema_listo = True
+
+
+def esquema_listo() -> bool:
+    return _esquema_listo

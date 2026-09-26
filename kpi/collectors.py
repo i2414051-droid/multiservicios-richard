@@ -1,1 +1,280 @@
-∢ਢ湉瑳畲敭瑮捡潩㩮搠⁥潤摮⁥慳敬⁮潬⁳慤潴⁳敤氠獯䬠䥐⹳ਊ敒楧瑳慲琠敲⁳潣慳⁳⁹楮杮湵⁡慭㩳ਊ⸱䌠摡⁡数楴楣湯⠠畲慴‬瑳瑡獵‬畤慲楣湯 慰慲氠獯䬠䥐⁳敤爠湥楤業湥潴礠 †楤灳湯扩汩摩摡ਮ⸲䌠摡⁡硥散捰潩⁮潮挠湯牴汯摡⁡慰慲攠⁬偋⁉敤攠瑳扡汩摩摡ਮ⸳䌠敨畱潥⁳敤猠污摵⠠慬整据慩搠⁥䑂礠洠浥牯慩搠汥瀠潲散潳⸩ਊ牐湩楣楰⁯敤搠獩湥⁯浩潰瑲湡整›慬椠獮牴浵湥慴楣湯丠乕䅃瀠敵敤爠浯数⁲慬愊汰捩捡潩⹮吠摯⁯潬焠敵攠捳楲慢攠⁮慬戠獡⁥敤搠瑡獯瘠⁡湥當汥潴攠⁮湵琊祲支捸灥⁴畱⁥敳琠慲慧攠⁬慦汬Ɐ瀠牯畱⁥湵瀠湡汥搠⁥敭牴捩獡焠敵琠浵慢氠੡楴湥慤猠牥慩甠⁮慦汬⁯畭档⁯数牯焠敵攠⁬畱⁥楤散洠摥物ਮ∢ਢ浩潰瑲愠整楸ੴ浩潰瑲漠ੳ浩潰瑲瀠慬晴牯੭浩潰瑲焠敵敵椊灭牯⁴桴敲摡湩੧浩潰瑲琠浩੥牦浯搠瑡瑥浩⁥浩潰瑲搠瑡瑥浩੥昊潲⁭汦獡⁫浩潰瑲朠‬敲畱獥ⱴ猠獥楳湯ਊ牦浯⸠椠灭牯⁴敲潰楳潴祲‬敳瑴湩獧ਊ‣啂䙆剅䐠⁅卅剃呉剕ੁ‣獅牣扩物甠⁮义䕓呒瀠牯瀠瑥捩潩⁮潣癮牥楴楲⁡慬䈠⁄湥攠⁬畣汥潬搠⁥潢整汬੡‣ⱹ瀠潥⁲潴慤楶ⱡ椠普慬楲⁡慬瀠潲楰⁡敭牴捩⁡敤爠湥楤業湥潴‮敓愠畣畭慬੮‣潬⁳敲楧瑳潲⁳湥洠浥牯慩礠甠⁮楨潬氠獯瘠敵捬⁡潰⁲潬整⹳弊畢晦牥㴠焠敵敵儮敵敵⤨弊汦獵敨彲瑳牡整⁤‽慆獬੥獟慴瑲江捯⁫‽桴敲摡湩⹧潌正⤨ਊ搊晥张汦獵彨湯散愨灰 㸭丠湯㩥 †∠∢畖汥慣愠䴠卹䱑琠摯⁯潬焠敵栠祡⁡捡浵汵摡⁯湥攠⁬畢晦牥∮∢ †爠睯⁳‽嵛 †眠楨敬吠畲㩥 †††琠祲਺††††††潲獷愮灰湥⡤扟晵敦⹲敧彴潮慷瑩⤨਩††††硥散瑰焠敵敵䔮灭祴਺††††††牢慥੫††晩渠瑯爠睯㩳 †††爠瑥牵੮††牴㩹 †††眠瑩⁨灡⹰灡彰潣瑮硥⡴㨩 †††††爠灥獯瑩牯⹹湩敳瑲牟煥敵瑳浟瑥楲獣爨睯⥳ †攠捸灥⁴硅散瑰潩㩮 †††愠灰氮杯敧⹲牥潲⡲ †††††✠火㩩渠⁯敳瀠摵敩潲⁮畧牡慤⁲搥洠瑥楲慣㭳猠⁥敤捳牡慴❮ਬ††††††敬⡮潲獷Ⱙ †††††攠捸楟普㵯牔敵ਬ††††਩ਊ敤⁦晟畬桳牥江潯⡰灡⥰ⴠ‾潎敮਺††∢嘢敵捬⁡汥戠晵敦⁲慣慤䘠啌䡓䥟呎剅䅖彌䕓佃䑎ⱓ瘠捡敩漠渠⁯敳栠祡⁡汬湥摡⹯∢ਢ††桷汩⁥牔敵਺††††楴敭献敬灥猨瑥楴杮⹳䱆单彈义䕔噒䱁卟䍅乏卄਩††††晟畬桳潟据⡥灡⥰ਊ搊晥猠慴瑲晟畬桳牥愨灰 㸭丠湯㩥 †∠∢牁慲据⁡汥栠汩⁯敤瘠汯慣潤甠慮猠汯⁡敶⁺潰⁲牰捯獥⹯∢ਢ††汧扯污张汦獵敨彲瑳牡整੤††楷桴张瑳牡彴潬正਺††††晩张汦獵敨彲瑳牡整㩤 †††††爠瑥牵੮††††晟畬桳牥獟慴瑲摥㴠吠畲੥††††桴敲摡㴠琠牨慥楤杮吮牨慥⡤ †††††琠牡敧㵴晟畬桳牥江潯Ɒ愠杲㵳愨灰⤬‬慤浥湯吽畲ⱥ †††††渠浡㵥欧楰昭畬桳牥⤧ †††琠牨慥⹤瑳牡⡴਩††††瑡硥瑩爮来獩整⡲晟畬桳潟据ⱥ愠灰਩ਊ敤⁦楟彳硥汣摵摥瀨瑡㩨猠牴 㸭戠潯㩬 †爠瑥牵⁮湡⡹慰桴献慴瑲睳瑩⡨牰晥硩 潦⁲牰晥硩椠⁮敳瑴湩獧䔮䍘啌䕄彄䅐䡔⥓ਊ搊晥张畣牲湥彴潲瑵⡥ 㸭猠牴਺††湥灤楯瑮㴠爠煥敵瑳攮摮潰湩ੴ††晩攠摮潰湩⁴湡⁤潮⁴湥灤楯瑮献慴瑲睳瑩⡨猧慴楴❣㨩 †††爠瑥牵⁮湥灤楯瑮 †爠瑥牵⁮敲畱獥⹴慰桴㩛㈱崰ਊ⌊䠠住卋䐠⁅䱆十ੋ敤⁦敲楧瑳牥桟潯獫愨灰 㸭丠湯㩥 †猠慴瑲晟畬桳牥愨灰਩ †䀠灡⹰敢潦敲牟煥敵瑳 †搠晥张火彩慭歲獟慴瑲⤨਺††††⹧歟楰獟慴瑲摥慟⁴‽楴敭瀮牥彦潣湵整⡲਩ †䀠灡⹰晡整彲敲畱獥ੴ††敤⁦歟楰牟捥牯彤敲畱獥⡴敲灳湯敳㨩 †††猠慴瑲摥㴠朠瑥瑡牴木‬弧火彩瑳牡整彤瑡Ⱗ丠湯⥥ †††椠⁦瑳牡整⁤獩丠湯⁥牯张獩敟捸畬敤⡤敲畱獥⹴慰桴㨩 †††††爠瑥牵⁮敲灳湯敳ਊ††††畤慲楴湯浟⁳‽琨浩⹥数晲损畯瑮牥⤨ⴠ猠慴瑲摥 ‪〱〰〮 †††张畢晦牥瀮瑵⠨ †††††张畣牲湥彴潲瑵⡥Ⱙ †††††爠煥敵瑳洮瑥潨孤ㄺ崰ਬ††††††湩⡴敲灳湯敳献慴畴彳潣敤Ⱙ †††††爠畯摮搨牵瑡潩彮獭‬⤲ਬ††††††猨獥楳湯朮瑥✨潲❬ 牯丠湯⥥ਬ††††††慤整楴敭渮睯⤨ਬ††††⤩ †††爠瑥牵⁮敲灳湯敳ਊ††慀灰琮慥摲睯彮敲畱獥ੴ††敤⁦歟楰晟畬桳楟彦畦汬攨捸㨩 †††琠祲਺††††††晩张畢晦牥焮楳敺⤨㸠‽敳瑴湩獧䘮啌䡓䉟呁䡃卟婉㩅 †††††††映潲⁭汦獡⁫浩潰瑲挠牵敲瑮慟灰 †††††††张汦獵彨湯散挨牵敲瑮慟灰弮敧彴畣牲湥彴扯敪瑣⤨਩††††硥散瑰䔠捸灥楴湯਺††††††慰獳ਊ搊晥瀠牥楳瑳敟牲牯攨牲牯‬牯杩湥✽敳癲摩牯⤧਺††牴㩹 †††映潲⁭汦獡⁫浩潰瑲爠煥敵瑳 †††爠畯整㴠张畣牲湥彴潲瑵⡥ 晩爠煥敵瑳攠獬⁥潎敮 †攠捸灥⁴硅散瑰潩㩮 †††爠畯整㴠丠湯੥††牴㩹 †††爠灥獯瑩牯⹹湩敳瑲敟牲牯敟敶瑮ਨ††††††潲瑵㵥潲瑵ⱥ †††††攠牲牯瑟灹㵥祴数攨牲牯⸩彟慮敭彟ਬ††††††敭獮橡㵥瑳⡲牥潲⥲ਬ††††††牯杩湥漽楲敧Ɱ †††⤠ †攠捸灥⁴硅散瑰潩㩮 †††瀠獡ੳਊ‣䡃充䕕⁏䕄匠䱁䑕搊晥爠慥彤牰捯獥彳敭潭祲歟⡢㨩 †琠祲਺††††楷桴漠数⡮⼧牰捯猯汥⽦瑳瑡獵Ⱗ✠❲‬湥潣楤杮✽瑵ⵦ✸ 獡映㩨 †††††映牯氠湩⁥湩映㩨 †††††††椠⁦楬敮献慴瑲睳瑩⡨嘧剭卓✺㨩 †††††††††爠瑥牵⁮湩⡴楬敮献汰瑩⤨ㅛ⥝ †攠捸灥⁴伨䕓牲牯‬慖畬䕥牲牯‬湉敤䕸牲牯㨩 †††瀠獡ੳ††敲畴湲丠湯੥ਊ敤⁦畲彮敨污桴损敨正愨灰‬数獲獩㵴牔敵 㸭搠捩㩴 †爠獥汵慴潤㴠笠漧❫›慆獬ⱥ✠扤浟❳›⸰ⰰ✠獲彳扫㨧丠湯ⱥ✠敤慴汬❥›潎敮੽††瑳牡整⁤‽楴敭瀮牥彦潣湵整⡲਩††牴㩹 †††眠瑩⁨灡⹰灡彰潣瑮硥⡴㨩 †††††挠牵㴠爠灥獯瑩牯⹹敧彴畣獲牯⤨ †††††琠祲਺††††††††畣⹲硥捥瑵⡥匧䱅䍅⁔✱਩††††††††畣⹲敦捴潨敮⤨ †††††映湩污祬਺††††††††畣⹲汣獯⡥਩††††敲畳瑬摡孯搧形獭崧㴠爠畯摮⠨楴敭瀮牥彦潣湵整⡲ ‭瑳牡整⥤⨠ㄠ〰⸰ⰰ㈠਩††††敲畳瑬摡孯漧❫⁝‽牔敵 †攠捸灥⁴硅散瑰潩⁮獡攠捸਺††††敲畳瑬摡孯搧形獭崧㴠爠畯摮⠨楴敭瀮牥彦潣湵整⡲ ‭瑳牡整⥤⨠ㄠ〰⸰ⰰ㈠਩††††敲畳瑬摡孯搧瑥污敬崧㴠映䈧⁄潮搠獩潰楮汢㩥笠祴数攨捸⸩彟慮敭彟❽ †††椠⁦数獲獩㩴 †††††张牴役数獲獩彴敨污桴愨灰‬敲畳瑬摡⥯ਊ††敲畳瑬摡孯爧獳歟❢⁝‽敲摡灟潲散獳浟浥牯役扫⤨ਊ††晩瀠牥楳瑳愠摮爠獥汵慴潤❛歯崧਺††††瑟祲灟牥楳瑳桟慥瑬⡨灡Ɒ爠獥汵慴潤਩††敲畴湲爠獥汵慴潤ਊ搊晥张牴役数獲獩彴敨污桴愨灰‬敲畳瑬摡⥯ⴠ‾潎敮਺††牴㩹 †††眠瑩⁨灡⹰灡彰潣瑮硥⡴㨩 †††††爠灥獯瑩牯⹹湩敳瑲桟慥瑬彨档捥⡫ †††††††漠㵫敲畳瑬摡孯漧❫ⱝ †††††††搠形獭爽獥汵慴潤❛扤浟❳ⱝ †††††††爠獳歟㵢敲畳瑬摡孯爧獳歟❢⁝牯〠ਬ††††††††祰桴湯癟牥楳湯瀽慬晴牯⹭祰桴湯癟牥楳湯⤨ਬ††††††††敤慴汬㵥敲畳瑬摡孯搧瑥污敬崧ਬ††††††਩††硥散瑰䔠捸灥楴湯਺††††慰獳ਊ搊晥爠捥牯彤潢瑯敟敶瑮愨灰 㸭丠湯㩥 †琠祲਺††††楷桴愠灰愮灰损湯整瑸⤨਺††††††敲潰楳潴祲椮獮牥彴敨污桴损敨正ਨ††††††††歯吽畲ⱥ †††††††搠形獭〽〮ਬ††††††††獲彳扫爽慥彤牰捯獥彳敭潭祲歟⡢ 牯〠ਬ††††††††祰桴湯癟牥楳湯瀽慬晴牯⹭祰桴湯癟牥楳湯⤨ਬ††††††††敤慴汬㵥ਨ††††††††††❦牡慲煮敵瀠摩笽獯朮瑥楰⡤紩✠ †††††††††映瀧瑹潨㵮灻慬晴牯⹭祰桴湯癟牥楳湯⤨❽ †††††††⤠ਬ††††††਩††硥散瑰䔠捸灥楴湯਺††††慰獳
+"""
+Instrumentacion: de donde salen los datos de los KPIs.
+
+Registra tres cosas y ninguna mas:
+
+1. Cada peticion (ruta, status, duracion) para los KPIs de rendimiento y
+   disponibilidad.
+2. Cada excepcion no controlada para el KPI de estabilidad.
+3. Chequeos de salud (latencia de BD y memoria del proceso).
+
+Principio de diseno importante: la instrumentacion NUNCA puede romper la
+aplicacion. Todo lo que escriba en la base de datos va envuelto en un
+try/except que se traga el fallo, porque un panel de metricas que tumba la
+tienda seria un fallo mucho peor que el que dice medir.
+"""
+import atexit
+import os
+import platform
+import queue
+import threading
+import time
+from datetime import datetime
+
+from flask import g, request, session
+
+from . import repository, settings
+
+# ─────────────────────────────────────────────
+# BUFFER DE ESCRITURA
+# ─────────────────────────────────────────────
+# Escribir un INSERT por peticion convertiria la BD en el cuello de botella
+# y, peor todavia, inflaria la propia metrica de rendimiento. Se acumulan
+# los registros en memoria y un hilo los vuelca por lotes.
+_buffer = queue.Queue()
+_flusher_started = False
+_start_lock = threading.Lock()
+
+
+def _flush_once(app) -> None:
+    """Vuelca a MySQL todo lo que haya acumulado en el buffer."""
+    rows = []
+    while True:
+        try:
+            rows.append(_buffer.get_nowait())
+        except queue.Empty:
+            break
+    if not rows:
+        return
+    try:
+        with app.app_context():
+            repository.insert_request_metrics(rows)
+    except Exception:
+        # Si la escritura falla se descartan las filas: es preferible perder
+        # metricas a dejar crecer la memoria sin control.
+        #
+        # Pero no en silencio. Este bloque era un `pass` puro, y asi se perdio
+        # el fallo que hacia que get_cursor() no encontrara la conexion: el
+        # buffer se vaciaba, las filas nunca llegaban a la tabla y no habia ni
+        # una linea en el log que lo explicara. Un fallo silencioso en la
+        # instrumentacion es indistinguible de "todo va bien" desde fuera.
+        #
+        # Se registra con app.logger y no con current_app.logger porque aqui
+        # ya se ha salido del contexto de aplicacion.
+        app.logger.error(
+            'kpi: no se pudieron guardar %d metricas; se descartan',
+            len(rows),
+            exc_info=True,
+        )
+
+
+def _flusher_loop(app) -> None:
+    """Vuelca el buffer cada FLUSH_INTERVAL_SECONDS, vacie o no se haya lleno."""
+    while True:
+        time.sleep(settings.FLUSH_INTERVAL_SECONDS)
+        _flush_once(app)
+
+
+def start_flusher(app) -> None:
+    """Arranca el hilo de volcado una sola vez por proceso."""
+    global _flusher_started
+    with _start_lock:
+        if _flusher_started:
+            return
+        _flusher_started = True
+        thread = threading.Thread(
+            target=_flusher_loop, args=(app,), daemon=True,
+            name='kpi-flusher')
+        thread.start()
+        # Al apagar el proceso se vuelca lo que quede en el buffer.
+        atexit.register(_flush_once, app)
+
+
+def _is_excluded(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in settings.EXCLUDED_PATHS)
+
+
+def _current_route() -> str:
+    """
+    Nombre del endpoint en vez de la ruta literal.
+
+    request.endpoint agrupa /producto/1 y /producto/2 bajo 'producto', lo
+    que mantiene baja la cardinalidad de la tabla y hace correctos los
+    agregados por pagina.
+    """
+    endpoint = request.endpoint
+    if endpoint and not endpoint.startswith('static'):
+        return endpoint
+    return request.path[:120]
+
+
+# ─────────────────────────────────────────────
+# HOOKS DE FLASK
+# ─────────────────────────────────────────────
+def register_hooks(app) -> None:
+    """Instala los hooks que alimentan el modulo de KPIs."""
+    start_flusher(app)
+
+    @app.before_request
+    def _kpi_mark_start():
+        # perf_counter es monotono: immune a cambios de reloj del sistema,
+        # a diferencia de time.time().
+        g._kpi_started_at = time.perf_counter()
+
+    @app.after_request
+    def _kpi_record_request(response):
+        started = getattr(g, '_kpi_started_at', None)
+        if started is None or _is_excluded(request.path):
+            return response
+
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        # La marca de tiempo se toma aqui, cuando se sirvio la peticion, y no
+        # al vaciar el buffer: un lote puede esperar hasta FLUSH_INTERVAL_SECONDS
+        # y la fila debe decir cuando ocurrio, no cuando se escribio.
+        #
+        # Se usa el reloj de Python y no el DEFAULT CURRENT_TIMESTAMP de MySQL
+        # a proposito. El calculo de periodos y la purga comparan contra
+        # datetime.now() de Python, asi que si las marcas las pusiera el
+        # servidor MySQL y viviera en otra zona horaria, las peticiones mas
+        # recientes caerian fuera de la ventana 'hasta' y el panel mostraria
+        # cero con trafico real. Un solo reloj en todo el modulo.
+        _buffer.put((
+            _current_route(),
+            request.method[:10],
+            int(response.status_code),
+            round(duration_ms, 2),
+            (session.get('rol') or None),
+            datetime.now(),
+        ))
+        return response
+
+    @app.teardown_request
+    def _kpi_flush_if_full(exc):
+        """Si el buffer se llena mucho (pico de trafico), volcamos ya."""
+        try:
+            if _buffer.qsize() >= settings.FLUSH_BATCH_SIZE:
+                from flask import current_app
+                _flush_once(current_app._get_current_object())
+        except Exception:
+            pass
+
+
+def persist_error(error, origen='servidor'):
+    """
+    Guarda una excepcion para el KPI de estabilidad.
+
+    No se registra como errorhandler propio a proposito: Flask resuelve el
+    manejador de una excepcion con el primero que encuentra, y app.py ya
+    define uno global. Si este modulo declarara el suyo, el suyo no se
+    ejecutaria nunca. Por eso app.py llama a esta funcion desde dentro de su
+    manejador existente, que es ademas el punto correcto: se registra el
+    error antes de decidir que mensaje se le devuelve al usuario.
+
+    Nunca propaga excepciones: registrar una metrica no puede romper la
+    atencion de la peticion que estaba fallando.
+    """
+    try:
+        from flask import request
+        route = _current_route() if request else None
+    except Exception:
+        route = None
+    try:
+        repository.insert_error_event(
+            route=route,
+            error_type=type(error).__name__,
+            mensaje=str(error),
+            origen=origen,
+        )
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────
+# CHEQUEO DE SALUD
+# ─────────────────────────────────────────────
+def read_process_memory_kb():
+    """
+    Memoria residente del proceso leida de /proc (solo en Linux).
+
+    En Render el contenedor es Linux, asi que esto da una medida real y
+    gratuita del consumo. Si no existe /proc se devuelve None en vez de
+    inventar un valor.
+    """
+    try:
+        with open('/proc/self/status', 'r', encoding='utf-8') as fh:
+            for line in fh:
+                if line.startswith('VmRSS:'):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def run_health_check(app, persist=True) -> dict:
+    """
+    Mide la latencia real de la BD y comprueba que responde.
+
+    Se usa tanto para el boton de 'Comprobar ahora' del panel como para el
+    registro periodico.
+    """
+    resultado = {'ok': False, 'db_ms': 0.0, 'rss_kb': None, 'detalle': None}
+    started = time.perf_counter()
+    try:
+        with app.app_context():
+            cur = repository.get_cursor()
+            try:
+                cur.execute('SELECT 1')
+                cur.fetchone()
+            finally:
+                cur.close()
+        resultado['db_ms'] = round((time.perf_counter() - started) * 1000.0, 2)
+        resultado['ok'] = True
+    except Exception as exc:
+        resultado['db_ms'] = round((time.perf_counter() - started) * 1000.0, 2)
+        resultado['detalle'] = f'BD no disponible: {type(exc).__name__}'
+        if persist:
+            _try_persist_health(app, resultado)
+
+    resultado['rss_kb'] = read_process_memory_kb()
+
+    if persist and resultado['ok']:
+        _try_persist_health(app, resultado)
+    return resultado
+
+
+def _try_persist_health(app, resultado) -> None:
+    try:
+        with app.app_context():
+            repository.insert_health_check(
+                ok=resultado['ok'],
+                db_ms=resultado['db_ms'],
+                rss_kb=resultado['rss_kb'] or 0,
+                python_version=platform.python_version(),
+                detalle=resultado['detalle'],
+            )
+    except Exception:
+        pass
+
+
+def record_boot_event(app) -> None:
+    """
+    Registra el arranque del proceso.
+
+    Sirve para saber cuando hubo un reinicio (un despliegue, un crash loop o
+    un cold start de Render), que es el dato mas cercano a 'caida' que se
+    puede obtener desde dentro de la aplicacion.
+    """
+    try:
+        with app.app_context():
+            repository.insert_health_check(
+                ok=True,
+                db_ms=0.0,
+                rss_kb=read_process_memory_kb() or 0,
+                python_version=platform.python_version(),
+                detalle=(
+                    f'arranque pid={os.getpid()} '
+                    f'python={platform.python_version()}'
+                ),
+            )
+    except Exception:
+        pass
