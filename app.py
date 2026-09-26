@@ -636,7 +636,6 @@ def login():
             session['rol']      = usuario['rol'].lower()
             flash('Bienvenido', 'success')
             if session['rol'] in ['admin','administrador']:
-                init_db()
                 return redirect('/dashboard')
             return redirect('/')
 
