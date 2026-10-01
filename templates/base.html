@@ -122,6 +122,10 @@
 {% block content %}{% endblock %}
 </div>
 
+<!-- BARRA DE CARGA GLOBAL -->
+<div id="cargaFondo"></div>
+<div id="cargaBarra"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 /* ── Theme Toggle ── */
@@ -147,6 +151,78 @@ setTimeout(()=>{
     setTimeout(()=>e.remove(),500);
   });
 },3000);
+</script>
+
+<script>
+/* ── Barra de carga global ──
+   Se activa al enviar formularios o navegar a enlaces internos.
+   Para uso manual en fetch/AJAX:  mostrarCarga() / ocultarCarga()
+   Para excluir un elemento:      data-sin-carga
+   Texto alternativo en boton:    data-carga-texto="Ingresando..."
+*/
+window.mostrarCarga = function(){
+  var barra  = document.getElementById('cargaBarra');
+  var fondo  = document.getElementById('cargaFondo');
+  if (!barra || window.__cargaVisible) return;
+  window.__cargaVisible = true;
+  barra.classList.add('activo');
+  fondo.classList.add('activo');
+  // Red de seguridad: si la respuesta nunca llega (error 500, red caida),
+  // la barra se oculta sola para no dejar la pagina congelada.
+  clearTimeout(window.__cargaTimer);
+  window.__cargaTimer = setTimeout(window.ocultarCarga, 15000);
+};
+
+window.ocultarCarga = function(){
+  var barra  = document.getElementById('cargaBarra');
+  var fondo  = document.getElementById('cargaFondo');
+  clearTimeout(window.__cargaTimer);
+  if (barra) barra.classList.remove('activo');
+  if (fondo) fondo.classList.remove('activo');
+  window.__cargaVisible = false;
+};
+
+(function(){
+  // Enlaces internos
+  document.addEventListener('click', function(e){
+    var a = e.target.closest ? e.target.closest('a') : null;
+    if (!a) return;
+    // Ignorar: abrir en pestaña nueva, descargas, anclas, boton izq. normal
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.button !== 0) return;
+    if (a.target === '_blank') return;
+    if (a.hasAttribute('download')) return;
+    if (a.hasAttribute('data-sin-carga')) return;
+    var href = a.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#' || href.indexOf('javascript:') === 0) return;
+    window.mostrarCarga();
+  });
+
+  // Formularios
+  document.addEventListener('submit', function(e){
+    var f = e.target;
+    if (f.hasAttribute('data-sin-carga')) return;
+    window.mostrarCarga();
+    var btn = f.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+    if (btn && !btn.hasAttribute('data-sin-carga')) {
+      btn.classList.add('btn-cargando');
+      var nuevo = btn.getAttribute('data-carga-texto');
+      if (nuevo) {
+        if (!btn.hasAttribute('data-texto-original')) {
+          btn.setAttribute('data-texto-original', btn.textContent.trim());
+        }
+        var punto = document.createElement('span');
+        punto.className = 'carga-puntos';
+        btn.textContent = '';
+        btn.appendChild(punto);
+      }
+    }
+  });
+
+  // Si el navegador restaura la pagina desde cache, ocultar la barra
+  window.addEventListener('pageshow', window.ocultarCarga);
+  window.addEventListener('pagehide', window.ocultarCarga);
+})();
 </script>
 
 {# Boton flotante para abrir el dashboard de KPIs de Ventas y Almacen #}
