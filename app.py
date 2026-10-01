@@ -1012,7 +1012,7 @@ def ver_carrito():
     usuario = obtener_usuario()
     cur = mysql.connection.cursor()
     cur.execute(f"""
-        SELECT c.id, c.producto_id, p.nombre, p.precio, c.cantidad
+        SELECT c.id, c.producto_id, p.nombre, p.precio, c.cantidad, p.stock
         FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
         WHERE c.usuario_id=%s
     """, (usuario,))
@@ -1041,30 +1041,118 @@ def ver_carrito():
     return render_template('carrito.html', productos=productos, total=total, sugeridos=sugeridos)
 
 
+# Tope de unidades por linea de carrito. Si el stock es menor, manda el stock:
+# el maximo real es min(stock, CANTIDAD_MAXIMA).
+CANTIDAD_MAXIMA = 500
+
+
+def _total_carrito(usuario):
+    cur = mysql.connection.cursor()
+    cur.execute(
+        f"SELECT SUM(c.cantidad * p.precio) AS total FROM carrito c "
+        f"JOIN {ALMACEN_DB}.productos p ON c.producto_id = p.id "
+        f"WHERE c.usuario_id = %s",
+        (usuario,),
+    )
+    t = cur.fetchone()['total']
+    cur.close()
+    return round(float(t or 0), 2)
+
+
 @app.route('/actualizar-cantidad/<int:id_producto>', methods=['POST'])
 def actualizar_cantidad(id_producto):
     usuario = obtener_usuario()
     if not request.is_json:
         return jsonify({'error': 'Request debe ser JSON'}), 400
-    accion  = request.json.get('accion')
-    if accion not in ('aumentar', 'reducir'):
-        return jsonify({'error': 'Acción inválida'}), 400
+    accion = request.json.get('accion')
+
+    # 'fijar' = edicion directa del numero (optimizacion)
+    if accion == 'fijar':
+        try:
+            cantidad = int(request.json.get('cantidad'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Cantidad invalida'}), 400
+    elif accion in ('aumentar', 'reducir'):
+        cantidad = None   # se calcula mas abajo
+    else:
+        return jsonify({'error': 'Accion invalida'}), 400
+
     cur = mysql.connection.cursor()
-    if accion == 'aumentar':
-        cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
-    elif accion == 'reducir':
-        cur.execute("UPDATE carrito SET cantidad=cantidad-1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
-        cur.execute("DELETE FROM carrito WHERE producto_id=%s AND usuario_id=%s AND cantidad<=0", (id_producto, usuario))
-    mysql.connection.commit()
-    cur.execute(f"SELECT c.cantidad, p.precio FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id WHERE c.producto_id=%s AND c.usuario_id=%s", (id_producto, usuario))
+    cur.execute(
+        f"SELECT c.cantidad, p.precio, p.stock FROM carrito c "
+        f"JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id "
+        f"WHERE c.producto_id=%s AND c.usuario_id=%s",
+        (id_producto, usuario),
+    )
     fila = cur.fetchone()
-    cur.execute(f"SELECT SUM(c.cantidad*p.precio) AS total FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id WHERE c.usuario_id=%s", (usuario,))
-    res = cur.fetchone()
-    total = res['total'] if res['total'] else 0
+    if not fila:
+        cur.close()
+        return jsonify({'eliminado': True, 'total': _total_carrito(usuario)})
+
+    actual = int(fila['cantidad'])
+    stock = int(fila['stock'] if fila['stock'] is not None else 0)
+
+    if accion == 'aumentar':
+        nueva = actual + 1
+    elif accion == 'reducir':
+        nueva = actual - 1
+    else:
+        nueva = cantidad
+
+    # Validaciones de limites.
+    # El maximo real es el MENOR entre el stock disponible y el tope de 500:
+    # si hay 100 unidades no se puede pedir 101; si hay 600, el tope es 500.
+    if nueva > CANTIDAD_MAXIMA:
+        cur.close()
+        return jsonify({
+            'error': True,
+            'motivo': 'maximo',
+            'maximo': CANTIDAD_MAXIMA,
+            'stock': stock,
+            'mensaje': f'No puedes comprar mas de {CANTIDAD_MAXIMA} unidades de un mismo producto.',
+        }), 400
+
+    if nueva > stock:
+        cur.close()
+        return jsonify({
+            'error': True,
+            'motivo': 'stock',
+            'maximo': stock,
+            'stock': stock,
+            'mensaje': f'Stock insuficiente: solo hay {stock} unidades disponibles.',
+        }), 400
+
+    if nueva <= 0:
+        cur.execute(
+            "DELETE FROM carrito WHERE producto_id=%s AND usuario_id=%s",
+            (id_producto, usuario),
+        )
+    else:
+        cur.execute(
+            "UPDATE carrito SET cantidad=%s WHERE producto_id=%s AND usuario_id=%s",
+            (nueva, id_producto, usuario),
+        )
+    mysql.connection.commit()
+
+    subtotal = round(nueva * float(fila['precio']), 2) if nueva > 0 else 0.0
+    total = _total_carrito(usuario)
+    maximo = min(stock, CANTIDAD_MAXIMA)
     cur.close()
-    if fila:
-        return jsonify({'eliminado':False,'cantidad':fila['cantidad'],'subtotal':round(fila['cantidad']*float(fila['precio']),2),'total':round(float(total),2)})
-    return jsonify({'eliminado':True,'total':round(float(total),2)})
+    if nueva <= 0:
+        return jsonify({
+            'eliminado': True,
+            'total': total,
+            'maximo': maximo,
+            'stock': stock,
+        })
+    return jsonify({
+        'eliminado': False,
+        'cantidad': nueva,
+        'subtotal': subtotal,
+        'total': total,
+        'maximo': maximo,
+        'stock': stock,
+    })
 
 
 # ─────────────────────────────────────────────

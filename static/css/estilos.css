@@ -1209,3 +1209,13 @@ a.btn-bloqueado {
 
 
 
+
+/* ── Campos del formulario inmovilizados durante el envio ──
+   pointer-events en vez de 'disabled': el campo sigue enviando su valor,
+   solo deja de aceptar escritura/clicks. */
+.input-bloqueado {
+  opacity: .65;
+  cursor: not-allowed;
+  user-select: none;
+  pointer-events: none;
+}

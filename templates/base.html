@@ -71,7 +71,8 @@
 
     <!-- DERECHA: Theme + Carrito + Perfil -->
     <div class="d-flex align-items-center gap-2 ms-lg-auto">
-      <button class="theme-toggle" id="themeToggle" title="Cambiar tema">
+      <button class="theme-toggle" id="themeToggle" title="Cambiar tema"
+              data-sin-carga data-sin-bloqueo>
         <i class="bi bi-moon-fill icon-moon"></i>
         <i class="bi bi-sun-fill icon-sun"></i>
       </button>
@@ -193,10 +194,23 @@ window.ocultarCarga = function(){
 window.reactivarBotones = function(){
   document.querySelectorAll('.btn-bloqueado').forEach(function(b){
     b.classList.remove('btn-bloqueado');
-    if (b.tagName === 'BUTTON' || b.tagName === 'INPUT') b.disabled = false;
     if (b.hasAttribute('aria-disabled')) b.removeAttribute('aria-disabled');
+    // El '+' del carrito puede seguir bloqueado por regla propia (llego al tope)
+    if (b.dataset && b.dataset.bloqueoFijo === '1') return;
+    if (b.tagName === 'BUTTON' || b.tagName === 'INPUT') b.disabled = false;
   });
   window.__botonesBloqueados = false;
+};
+
+/* ── Inmovilizar los campos del formulario al enviar ──
+   Se liberan al recargar la pagina o por el timeout de seguridad; nunca
+   por un fetch, para no abrir el formulario a medio enviar. */
+window.reactivarInputs = function(){
+  document.querySelectorAll('.input-bloqueado').forEach(function(c){
+    c.classList.remove('input-bloqueado');
+    c.removeAttribute('readonly');
+    c.removeAttribute('data-bloqueado-principal');
+  });
 };
 
 function esBloqueable(el){
@@ -257,6 +271,7 @@ function bloquearBotones(){
     if (a.target === '_blank') return;
     if (a.hasAttribute('download')) return;
     if (a.hasAttribute('data-sin-carga')) return;
+    if (e.defaultPrevented) return;
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#' || href.indexOf('javascript:') === 0) return;
     bloquearBotones();
@@ -269,6 +284,7 @@ function bloquearBotones(){
     if (!b) return;
     if (!esBloqueable(b)) return;
     if (b.type === 'submit') return;   // lo maneja el submit
+    if (e.defaultPrevented) return;    // el propio boton ya lomanageo
     bloquearBotones();
     window.mostrarCarga();
   });
@@ -296,12 +312,31 @@ function bloquearBotones(){
     } else {
       bloquearBotones();
     }
+
+    // Inmovilizar los campos del formulario: mientras se procesa el envio
+    // no se puede borrar ni escribir mas (evita datos a medias).
+    // IMPORTANTE: no se usa 'disabled'. El navegador serializa el formulario
+    // DESPUES de este evento, y un campo deshabilitado NO se envia ->
+    // el servidor recibiria el formulario vacio (error 400).
+    // 'readonly' inmoviliza sin dejar de enviar el valor; los campos que no
+    // admiten readonly (select, checkbox, radio) se bloquean solo por CSS.
+    f.querySelectorAll('input, select, textarea').forEach(function(campo){
+      if (campo.type === 'hidden' || campo.disabled) return;
+      campo.setAttribute('data-bloqueado-principal', '1');
+      campo.classList.add('input-bloqueado');
+      var admiteReadonly = (campo.tagName === 'INPUT' || campo.tagName === 'TEXTAREA') &&
+                           campo.type !== 'checkbox' &&
+                           campo.type !== 'radio' &&
+                           campo.type !== 'file';
+      if (admiteReadonly) campo.setAttribute('readonly', 'readonly');
+    });
   });
 
   // Si el navegador restaura la pagina desde cache, ocultar la barra
   window.addEventListener('pageshow', function(){
     window.ocultarCarga();
     window.reactivarBotones();
+    window.reactivarInputs();
   });
   window.addEventListener('pagehide', window.ocultarCarga);
 })();
