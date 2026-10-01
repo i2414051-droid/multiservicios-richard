@@ -182,6 +182,70 @@ window.ocultarCarga = function(){
   window.__cargaVisible = false;
 };
 
+/* ── Bloqueo de botones y enlaces ──
+   Al pulsar una accion se bloquea TODO lo interactuable (botones,
+   enlaces del navbar, accesos rapidos, crear cuenta, etc.) para
+   evitar multiples presiones y la lentitud que generan.
+   EXCEPCION: el cambio de tema (claro/oscuro) nunca se bloquea.
+   Para excluir un elemento:  data-sin-bloqueo
+   Para reenablear manualmente: reactivarBotones()
+*/
+window.reactivarBotones = function(){
+  document.querySelectorAll('.btn-bloqueado').forEach(function(b){
+    b.classList.remove('btn-bloqueado');
+    if (b.tagName === 'BUTTON' || b.tagName === 'INPUT') b.disabled = false;
+    if (b.hasAttribute('aria-disabled')) b.removeAttribute('aria-disabled');
+  });
+  window.__botonesBloqueados = false;
+};
+
+function esBloqueable(el){
+  if (!el) return false;
+  if (el.id === 'themeToggle' || el.classList.contains('theme-toggle')) return false;
+  if (el.closest && el.closest('.theme-toggle')) return false;
+  if (el.hasAttribute('data-sin-bloqueo')) return false;
+  if (el.closest && el.closest('[data-sin-bloqueo]')) return false;
+  if (el.hasAttribute('data-bloqueado-principal')) return false;
+  return true;
+}
+
+function bloquearBotones(){
+  if (window.__botonesBloqueados) return;
+  window.__botonesBloqueados = true;
+
+  document.querySelectorAll('a[href], button, input[type="submit"], input[type="button"], [role="button"]')
+    .forEach(function(b){
+      if (!esBloqueable(b)) return;
+      if (b.tagName === 'A') {
+        if (b.target === '_blank' || b.hasAttribute('download')) return;
+        var href = b.getAttribute('href') || '';
+        if (!href || href.charAt(0) === '#' || href.indexOf('javascript:') === 0) return;
+      }
+      b.classList.add('btn-bloqueado');
+      b.setAttribute('aria-disabled', 'true');
+      if (b.tagName === 'BUTTON' || b.tagName === 'INPUT') b.disabled = true;
+    });
+
+  clearTimeout(window.__botonTimer);
+  window.__botonTimer = setTimeout(window.reactivarBotones, 15000);
+}
+
+(function(){
+  var _fetch = window.fetch;
+  if (_fetch) {
+    window.fetch = function(){
+      var p = _fetch.apply(this, arguments);
+      p.then(function(){ setTimeout(function(){ window.reactivarBotones(); }, 120); }, function(){ setTimeout(function(){ window.reactivarBotones(); }, 120); });
+      return p;
+    };
+  }
+  var _send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function(){
+    this.addEventListener('loadend', function(){ setTimeout(function(){ window.reactivarBotones(); }, 120); });
+    return _send.apply(this, arguments);
+  };
+})();
+
 (function(){
   // Enlaces internos
   document.addEventListener('click', function(e){
@@ -195,6 +259,17 @@ window.ocultarCarga = function(){
     if (a.hasAttribute('data-sin-carga')) return;
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#' || href.indexOf('javascript:') === 0) return;
+    bloquearBotones();
+    window.mostrarCarga();
+  });
+
+  // Botones sueltos que no son formulario (p.ej. acciones con JS)
+  document.addEventListener('click', function(e){
+    var b = e.target.closest ? e.target.closest('button, input[type="submit"], input[type="button"], [role="button"]') : null;
+    if (!b) return;
+    if (!esBloqueable(b)) return;
+    if (b.type === 'submit') return;   // lo maneja el submit
+    bloquearBotones();
     window.mostrarCarga();
   });
 
@@ -205,6 +280,8 @@ window.ocultarCarga = function(){
     window.mostrarCarga();
     var btn = f.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
     if (btn && !btn.hasAttribute('data-sin-carga')) {
+      btn.setAttribute('data-bloqueado-principal', '1');
+      bloquearBotones();
       btn.classList.add('btn-cargando');
       var nuevo = btn.getAttribute('data-carga-texto');
       if (nuevo) {
@@ -216,11 +293,16 @@ window.ocultarCarga = function(){
         btn.textContent = '';
         btn.appendChild(punto);
       }
+    } else {
+      bloquearBotones();
     }
   });
 
   // Si el navegador restaura la pagina desde cache, ocultar la barra
-  window.addEventListener('pageshow', window.ocultarCarga);
+  window.addEventListener('pageshow', function(){
+    window.ocultarCarga();
+    window.reactivarBotones();
+  });
   window.addEventListener('pagehide', window.ocultarCarga);
 })();
 </script>

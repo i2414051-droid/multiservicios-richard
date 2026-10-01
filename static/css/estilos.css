@@ -1165,6 +1165,30 @@ select option {
   border-top-color: currentColor;
 }
 
+/* === Todo lo interactuable se bloquea mientras se procesa una accion ===
+   Evita multiples presiones simultaneas (y la lentitud que causan).
+   El unico elemento EXENTO es el toggle de tema claro/oscuro. */
+.btn-bloqueado,
+.btn-bloqueado:hover,
+.btn-bloqueado:focus {
+  pointer-events: none !important;
+  opacity: .38;
+  filter: grayscale(.6);
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+  transform: none !important;
+  transition: opacity .2s ease, filter .2s ease;
+}
+/* Enlaces del navbar y acciones rapidas: mismo efecto bloqueado */
+a.btn-bloqueado {
+  color: var(--text-muted) !important;
+  text-decoration: none !important;
+}
+/* El boton principal mantiene su opacidad original con su spinner */
+.btn-cargando {
+  opacity: .9;
+}
+
 /* Texto con puntos animados (botones que cambian de etiqueta) */
 .carga-puntos::after {
   content: "";
