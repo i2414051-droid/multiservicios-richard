@@ -266,8 +266,10 @@ document.addEventListener('DOMContentLoaded', function () {
         setTimeout(function(){ fila.remove(); }, 300);
       } else {
         pintar(id, data);
-        desbloquear();
       }
+      // Liberar SIEMPRE, tambien al eliminar: si no, los demas productos
+      // quedan bloqueados y no se pueden editar.
+      desbloquear();
       document.getElementById('total-carrito').textContent = 'S/. ' + data.total.toFixed(2);
     })
     .catch(function(){
