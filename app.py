@@ -1,4 +1,4 @@
-import os, uuid, io, threading, secrets, time, logging, traceback
+import os, uuid, io, threading, secrets, time, re, logging, traceback
 from datetime import datetime, timedelta
 from functools import wraps
 from urllib.parse import quote
@@ -2341,12 +2341,29 @@ def procesar_compra():
 
     if not all([nombres, apellidos, doc_numero, telefono, direccion_envio]):
         return _chk_error('Todos los campos son obligatorios.')
-    if doc_tipo == 'dni' and (len(doc_numero) != 8 or not doc_numero.isdigit()):
+    if doc_tipo not in ('dni', 'ruc'):
+        return _chk_error('Tipo de documento inválido.')
+    if not doc_numero.isdigit():
+        return _chk_error('El número de documento solo puede contener dígitos.')
+    if doc_tipo == 'dni' and len(doc_numero) != 8:
         return _chk_error('DNI debe tener exactamente 8 dígitos.')
-    if doc_tipo == 'ruc' and (len(doc_numero) != 11 or not doc_numero.isdigit()):
+    if doc_tipo == 'ruc' and len(doc_numero) != 11:
         return _chk_error('RUC debe tener exactamente 11 dígitos.')
-    if len(telefono) < 9 or not telefono.isdigit():
-        return _chk_error('Celular debe tener al menos 9 dígitos.')
+    if not telefono.isdigit():
+        return _chk_error('El celular solo puede contener dígitos.')
+    if len(telefono) != 9:
+        return _chk_error('El celular debe tener exactamente 9 dígitos.')
+    # Nombres y apellidos: se normalizan a mayusculas y luego se validan
+    # (no se rechazan por estar en minuscula: asi no se bloquea a quien ya
+    #  tiene el nombre guardado asi en la base)
+    nombres = ' '.join(nombres.upper().split())
+    apellidos = ' '.join(apellidos.upper().split())
+    solo_letras = r"^[A-ZÁÉÍÓÚÑÜ\s'.-]+$"
+    for campo, valor in (('nombre', nombres), ('apellido', apellidos)):
+        if re.search(r'\d', valor):
+            return _chk_error(f'El {campo} no puede contener números.')
+        if not re.match(solo_letras, valor):
+            return _chk_error(f'El {campo} solo puede contener letras.')
 
     comprobante_filename = ''
     if metodo_pago in ['yape', 'plin', 'transferencia']:

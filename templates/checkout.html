@@ -28,16 +28,7 @@
           <div class="card-body">
             <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-person me-2"></i>Datos personales</h5>
             <div class="row g-3 mt-1">
-              <div class="col-md-6">
-                <label class="form-label">Nombres</label>
-                <input type="text" name="nombres" id="nombres" class="form-control"
-                       value="{{ usuario.nombre or '' }}" required>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Apellidos</label>
-                <input type="text" name="apellidos" id="apellidos" class="form-control"
-                       value="{{ usuario.apellido or '' }}" required>
-              </div>
+              <!-- Tipo y numero de documento van PRIMERO, arriba de todo -->
               <div class="col-md-4">
                 <label class="form-label">Tipo de documento</label>
                 <select name="doc_tipo" id="docTipo" class="form-select" onchange="onDocTipoChange()">
@@ -45,26 +36,59 @@
                   <option value="ruc" {% if usuario.documento_tipo == 'ruc' %}selected{% endif %}>RUC</option>
                 </select>
               </div>
-              <div class="col-md-4">
-                <label class="form-label">N° Documento</label>
+              <div class="col-md-8">
+                <label class="form-label" id="lblDocNumero">N&middot; de DNI</label>
                 <input type="text" name="doc_numero" id="docNumero" class="form-control"
                        value="{{ usuario.documento_numero or '' }}" required
-                       maxlength="11" inputmode="numeric"
-                       oninput="autoDetectDocTipo(this.value)">
+                       maxlength="11" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+                       oninput="soloDigitos(this)"
+                       onpaste="pegarSoloDigitos(event, this)"
+                       onblur="validarDocumento(this)">
+                <div class="form-text" id="ayudaDocNumero">Solo n&uacute;meros. DNI: 8 d&iacute;gitos.</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Nombres</label>
+                <input type="text" name="nombres" id="nombres" class="form-control"
+                       value="{{ usuario.nombre or '' }}" required
+                       inputmode="text" autocomplete="off"
+                       style="text-transform:uppercase"
+                       onkeyup="this.value=this.value.toUpperCase()"
+                       pattern="[A-ZÁÉÍÓÚÑÜ ]+"
+                       title="Solo letras, sin números"
+                       oninput="sinDigitos(this)"
+                       onblur="validarNombre(this)">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Apellidos</label>
+                <input type="text" name="apellidos" id="apellidos" class="form-control"
+                       value="{{ usuario.apellido or '' }}" required
+                       inputmode="text" autocomplete="off"
+                       style="text-transform:uppercase"
+                       onkeyup="this.value=this.value.toUpperCase()"
+                       pattern="[A-ZÁÉÍÓÚÑÜ ]+"
+                       title="Solo letras, sin números"
+                       oninput="sinDigitos(this)"
+                       onblur="validarNombre(this)">
               </div>
               <div class="col-md-4">
                 <label class="form-label">Celular</label>
                 <input type="text" name="telefono" id="telefono" class="form-control"
                        value="{{ usuario.telefono or '' }}" required
-                       maxlength="9" inputmode="numeric">
+                       maxlength="9" inputmode="numeric" pattern="[0-9]{9}" autocomplete="off"
+                       oninput="soloDigitos(this)"
+                       onpaste="pegarSoloDigitos(event, this)"
+                       onblur="validarTelefono(this)">
+                <div class="form-text">9 d&iacute;gitos, sin letras.</div>
               </div>
-              <div class="col-md-12">
-                <label class="form-label">Correo electrónico</label>
+              <div class="col-md-8">
+                <label class="form-label">Correo electr&oacute;nico</label>
                 <input type="email" name="correo" class="form-control"
                        value="{{ usuario.correo or '' }}" readonly
                        style="background:var(--bg-body-3);opacity:0.7">
               </div>
             </div>
+            <!-- Aviso de validacion de formato -->
+            <div class="alert alert-danger mt-3 mb-0" id="avisoCheckout" style="display:none" role="alert"></div>
           </div>
         </div>
 
@@ -165,7 +189,8 @@
         <!-- BOTONES -->
         <div class="d-grid gap-2">
           <button type="button" class="btn btn-warning btn-lg fw-bold" id="btnConfirmar"
-                  style="border-radius:15px" onclick="mostrarResumen()">
+                  style="border-radius:15px" onclick="mostrarResumen()"
+                  data-sin-carga data-sin-bloqueo>
             <i class="bi bi-arrow-right-circle me-1"></i> Revisar mi pedido
           </button>
           <a href="/carrito" class="btn btn-outline-light" style="border-radius:15px">
@@ -260,6 +285,9 @@
     background:rgba(243,156,18,.05);border-radius:12px;cursor:pointer;border:2px solid transparent;transition:.2s;
   }
   .checkout-address-option:hover { border-color:rgba(243,156,18,.3); }
+  /* Campos con formato incorrecto */
+    /* Los recuadros NO cambian de color al validar */
+  #avisoCheckout { border-radius: 12px; font-weight: 600; }
   .checkout-sidebar { position:sticky; top:90px; }
   @media (max-width: 991px) {
     .checkout-sidebar { position:static; }
@@ -270,18 +298,104 @@ function seleccionarDireccion(el, dir) {
   document.getElementById('direccionEnvio').value = dir;
 }
 
-function onDocTipoChange() {
-  var tipo = document.getElementById('docTipo').value;
-  document.getElementById('docNumero').maxLength = tipo === 'dni' ? 8 : 11;
-  document.getElementById('docNumero').value = '';
+/* ── Validacion de campos ─────────────────────────────
+   Documento: solo digitos, DNI 8 y RUC 11.
+   Celular:   solo digitos, 9 en total.
+   Nombres y apellidos: sin digitos. */
+
+function limpiarNoDigitos(el) {
+  var limpio = el.value.replace(/\D/g, '');
+  if (el.maxLength > 0 && limpio.length > el.maxLength) limpio = limpio.slice(0, el.maxLength);
+  if (limpio !== el.value) el.value = limpio;
+  return limpio;
 }
 
-function autoDetectDocTipo(valor) {
-  if (valor.length === 8 && /^\d+$/.test(valor)) {
-    document.getElementById('docTipo').value = 'dni';
-  } else if (valor.length === 11 && /^\d+$/.test(valor)) {
-    document.getElementById('docTipo').value = 'ruc';
+// oninput: borra las letras en el momento, sin dejar escribir
+function soloDigitos(el) { limpiarNoDigitos(el); }
+
+// Pegar tambien se limpia
+function pegarSoloDigitos(ev, el) {
+  ev.preventDefault();
+  var texto = (ev.clipboardData || window.clipboardData).getData('text') || '';
+  el.value = texto.replace(/\D/g, '');
+  if (el.maxLength > 0 && el.value.length > el.maxLength) {
+    el.value = el.value.slice(0, el.maxLength);
   }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function marcar() { /* sin marcado visual: los recuadros no cambian de color */ }
+
+function largoDoc() {
+  return document.getElementById('docTipo').value === 'ruc' ? 11 : 8;
+}
+
+function validarDocumento(el) {
+  var valor = limpiarNoDigitos(el);
+  if (valor === '') return true;   // vacio lo revisa el required
+  if (valor.length !== largoDoc()) {
+    el.setCustomValidity(document.getElementById('docTipo').value === 'ruc'
+      ? 'El RUC debe tener 11 dígitos.' : 'El DNI debe tener 8 dígitos.');
+    return marcar(el, false);
+  }
+  el.setCustomValidity('');
+  return marcar(el, true);
+}
+
+function validarTelefono(el) {
+  var valor = limpiarNoDigitos(el);
+  if (valor === '') return true;
+  if (valor.length !== 9) {
+    el.setCustomValidity('El celular debe tener 9 dígitos.');
+    return marcar(el, false);
+  }
+  el.setCustomValidity('');
+  return marcar(el, true);
+}
+
+// Nombres y apellidos: siempre en mayusculas y sin digitos
+function sinDigitos(el) {
+  var limpio = el.value.replace(/[0-9]/g, '').toUpperCase();
+  if (limpio !== el.value) el.value = limpio;
+}
+
+function validarNombre(el) {
+  el.value = el.value.toUpperCase();
+  var valor = el.value.trim();
+  if (valor === '') return true;
+  if (/[0-9]/.test(valor)) {
+    el.setCustomValidity('No puede contener números.');
+    return marcar(el, false);
+  }
+  if (!/^[A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]+$/.test(valor)) {
+    el.setCustomValidity('Solo se permiten letras.');
+    return marcar(el, false);
+  }
+  el.setCustomValidity('');
+  return marcar(el, true);
+}
+
+function avisarCheckout(mensaje, campo) {
+  var box = document.getElementById('avisoCheckout');
+  if (!box) return;
+  box.textContent = mensaje;
+  box.style.display = 'block';
+  if (campo) campo.focus();
+}
+
+function onDocTipoChange() {
+  var esRuc = document.getElementById('docTipo').value === 'ruc';
+  var input = document.getElementById('docNumero');
+  var lbl   = document.getElementById('lblDocNumero');
+  var ayuda = document.getElementById('ayudaDocNumero');
+  input.maxLength = esRuc ? 11 : 8;
+  lbl.innerHTML = esRuc ? 'N&middot; de RUC' : 'N&middot; de DNI';
+  ayuda.innerHTML = esRuc ? 'Solo 11 dígitos, sin letras.'
+                          : 'Solo 8 dígitos, sin letras.';
+  if (input.value.length > input.maxLength) {
+    input.value = input.value.slice(0, input.maxLength);
+  }
+  if (input.value) validarDocumento(input);
 }
 
 function cambiarMetodo(metodo) {
@@ -297,23 +411,67 @@ function cambiarMetodo(metodo) {
 }
 
 function mostrarResumen() {
-  var nombres = document.getElementById('nombres').value.trim();
-  var apellidos = document.getElementById('apellidos').value.trim();
-  var docTipo = document.getElementById('docTipo').value.toUpperCase();
-  var docNum = document.getElementById('docNumero').value.trim();
-  var tel = document.getElementById('telefono').value.trim();
-  var dir = document.getElementById('direccionEnvio').value.trim();
+  var nombres  = document.getElementById('nombres');
+  var apellidos = document.getElementById('apellidos');
+  var docTipo  = document.getElementById('docTipo').value;
+  var docNum   = document.getElementById('docNumero');
+  var tel      = document.getElementById('telefono');
+  var dir      = document.getElementById('direccionEnvio');
 
-  if (!nombres || !apellidos || !docNum || !tel || !dir) {
-    alert('Por favor completa todos los campos obligatorios.');
+  // 1) Campos vacios: avisa y lleva al primero que falta
+  if (!nombres.value.trim() || !apellidos.value.trim() ||
+      !docNum.value.trim() || !tel.value.trim() || !dir.value.trim()) {
+    var vacio = null;
+    if (!nombres.value.trim())   vacio = nombres;
+    else if (!apellidos.value.trim()) vacio = apellidos;
+    else if (!docNum.value.trim()) vacio = docNum;
+    else if (!tel.value.trim())  vacio = tel;
+    else if (!dir.value.trim())  vacio = dir;
+    avisarCheckout('Por favor completa todos los campos obligatorios.', vacio);
     return;
   }
 
-  document.getElementById('resNombre').textContent = nombres + ' ' + apellidos;
-  document.getElementById('resDoc').textContent = docTipo + ': ' + docNum;
-  document.getElementById('resTel').textContent = tel;
+  // 2) Documento: solo digitos y el largo correcto
+  docNum.value = docNum.value.replace(/\D/g, '');
+  if (docNum.value.length !== largoDoc()) {
+    avisarCheckout(docTipo === 'ruc'
+      ? 'El RUC debe tener 11 dígitos (has puesto ' + docNum.value.length + ').'
+      : 'El DNI debe tener 8 dígitos (has puesto ' + docNum.value.length + ').', docNum);
+    return;
+  }
+
+  // 3) Celular: solo digitos y 9 exactos
+  tel.value = tel.value.replace(/\D/g, '');
+  if (tel.value.length !== 9) {
+    avisarCheckout('El celular debe tener 9 dígitos (has puesto ' + tel.value.length + ').', tel);
+    return;
+  }
+
+  // 4) Nombres y apellidos: sin numeros y solo letras
+  // 4) Nombres y apellidos: sin numeros, solo letras y en mayusculas
+  nombres.value = nombres.value.toUpperCase();
+  apellidos.value = apellidos.value.toUpperCase();
+  var patron = /^[A-ZÁÉÍÓÚÑÜ\s]+$/;
+  if (/[0-9]/.test(nombres.value) || /[0-9]/.test(apellidos.value)) {
+    avisarCheckout('Los nombres y apellidos no pueden contener números.', nombres);
+    return;
+  }
+  if (!patron.test(nombres.value.trim())) {
+    avisarCheckout('El nombre solo puede contener letras.', nombres);
+    return;
+  }
+  if (!patron.test(apellidos.value.trim())) {
+    avisarCheckout('El apellido solo puede contener letras.', apellidos);
+    return;
+  }
+
+  document.getElementById('avisoCheckout').style.display = 'none';
+
+  document.getElementById('resNombre').textContent = nombres.value.trim() + ' ' + apellidos.value.trim();
+  document.getElementById('resDoc').textContent = docTipo.toUpperCase() + ': ' + docNum.value;
+  document.getElementById('resTel').textContent = tel.value;
   document.getElementById('resCorreo').textContent = '{{ usuario.correo or "" }}';
-  document.getElementById('resDireccion').textContent = dir;
+  document.getElementById('resDireccion').textContent = dir.value.trim();
   document.getElementById('resNotas').textContent = document.querySelector('[name="notas_entrega"]').value || 'Sin notas';
   document.getElementById('resPago').textContent = document.getElementById('metodoPagoHidden').value.charAt(0).toUpperCase() + document.getElementById('metodoPagoHidden').value.slice(1);
   document.getElementById('resTotal').textContent = 'S/ {{ "%.2f"|format(total) }}';
