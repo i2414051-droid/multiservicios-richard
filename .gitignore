@@ -1,4 +1,6 @@
 venv/
+# Los scripts arrancar/ buscan .venv\Scripts\python.exe, no venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo

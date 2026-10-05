@@ -60,6 +60,30 @@ CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 # ─────────────────────────────────────────────
 # INIT TABLAS — Solo tablas de Clientes/Ventas
 # ─────────────────────────────────────────────
+# Dias que se guarda una fila de intentos_usuario sin actividad.
+DIAS_LIMPIEZA_INTENTOS = 90
+
+
+def _deduplicar_intentos(cur):
+    """Deja una sola fila por correo en intentos_usuario.
+
+    El login lee con fetchone() y despues hace UPDATE ... WHERE correo=%s, que
+    afecta a TODAS las filas de ese correo. Con duplicados el contador leido
+    seria uno cualquiera y el UPDATE los pisaria a todos con el mismo valor.
+    De cada correo se conserva la fila mas grave.
+    """
+    cur.execute("SELECT id, correo, intentos FROM intentos_usuario "
+                "ORDER BY correo, intentos DESC, id ASC")
+    filas = cur.fetchall() or []
+    conservar = {}
+    for f in filas:
+        conservar.setdefault(f['correo'], f['id'])
+    sobrantes = [f['id'] for f in filas if f['id'] != conservar[f['correo']]]
+    for _id in sobrantes:
+        cur.execute("DELETE FROM intentos_usuario WHERE id=%s", (_id,))
+    return len(sobrantes)
+
+
 def init_db():
     try:
         cur = mysql.connection.cursor()
@@ -151,11 +175,38 @@ def init_db():
             CREATE TABLE IF NOT EXISTS intentos_usuario (
                 id              INT AUTO_INCREMENT PRIMARY KEY,
                 correo          VARCHAR(200) NOT NULL,
-                intentos        INT DEFAULT 1,
+                -- DEFAULT 0: la fila solo nace al llegar al umbral y mientras
+                -- no se bloquea, el contador llega en 0.
+                intentos        INT DEFAULT 0,
                 bloqueado_hasta DATETIME,
                 created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        for col, defn in [
+            ('ultimo_fallo', 'DATETIME'),
+            ('max_intentos', 'INT DEFAULT 0'),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE intentos_usuario ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
+        try:
+            cur.execute("ALTER TABLE intentos_usuario ADD INDEX ix_intentos_ultimo (ultimo_fallo)")
+        except Exception:
+            pass
+        try:
+            _deduplicar_intentos(cur)
+            cur.execute("ALTER TABLE intentos_usuario ADD UNIQUE KEY uq_intentos_correo (correo)")
+        except Exception:
+            pass
+        try:
+            cur.execute(
+                "DELETE FROM intentos_usuario "
+                "WHERE (ultimo_fallo IS NOT NULL AND ultimo_fallo < NOW() - INTERVAL %s DAY) "
+                "   OR (ultimo_fallo IS NULL AND created_at < NOW() - INTERVAL %s DAY)",
+                (DIAS_LIMPIEZA_INTENTOS, DIAS_LIMPIEZA_INTENTOS))
+        except Exception:
+            pass
         # Columnas para recuperacion de contrasena
         for col, defn in [
             ('recuperacion_token', 'VARCHAR(255)'),
@@ -413,6 +464,128 @@ def ruta_init_db():
 # ─────────────────────────────────────────────
 # AUTH
 # ─────────────────────────────────────────────
+# Mismas reglas de bloqueo por intentos que el monolito de la raiz:
+#   - Los intentos 1 y 2 se cuentan "a la sombra" en la cookie firmada, sin
+#     escribir nada en la base.
+#   - Al llegar a UMBRAL_INTENTOS la fila nace en intentos_usuario.
+#   - En el 5.o fallo se bloquea, y cada fallo posterior alarga el castigo
+#     hasta un tope de 24 horas (ESCALERA_BLOQUEO).
+#   - Al vencer un bloqueo se concede UN intento mas y el contador NO se
+#     reinicia, para que la escalada pueda seguir subiendo.
+#   - Un login correcto NO borra la fila ni baja el contador.
+#
+# Decaimiento (tiempo de vida de los fallos):
+#
+#   - ultimo_fallo marca cuando fue el ultimo fallo. Si la rafaga envejece mas
+#     que su ventana, el contador vuelve a 0 y los fallos viejos dejan de pesar.
+#   - La ventana es el MAYOR valor entre VENTANA_BASE_MIN y la duracion del
+#     ultimo bloqueo aplicado. Con una ventana fija, un atacante que espera lo
+#     necesario reiniciaria su contador y la escalera no serviria.
+#   - max_intentos guarda el pico historico y nunca baja: el dato de "esta
+#     cuenta llego a N" sobrevive al reinicio del contador.
+UMBRAL_INTENTOS  = 3
+INTENTOS_SOMBRA  = 'intentos_sombra'
+
+# Fallo a partir del cual empieza a aplicarse la escalera de bloqueo.
+PRIMER_BLOQUEO_FALLO = 5
+
+# Base de la ventana de decaimiento. No puede bajar del primer bloqueo (15 min).
+VENTANA_BASE_MIN = 30
+
+ESCALERA_BLOQUEO = {
+    5:   15,        # 5.o  fallo -> 15 minutos
+    6:   30,        # 6.o  fallo -> 30 minutos
+    7:   60,        # 7.o  fallo -> 1 hora
+    8:   120,       # 8.o  fallo -> 2 horas
+    9:   240,       # 9.o  fallo -> 4 horas
+    10:  480,       # 10.o fallo -> 8 horas
+    11:  960,       # 11.o fallo -> 16 horas
+    12:  1440,      # 12.o fallo -> 24 horas (techo alcanzado)
+}
+BLOQUEO_TOPE_MIN = 1440   # 24 horas: ningun fallo pasa de aqui
+
+
+def minutos_bloqueo(intentos):
+    """Minutos de castigo para un numero de fallo dado.
+
+    Del 12.o fallo en adelante se mantiene el tope de 24 horas por cada intento
+    fallido.
+    """
+    return min(ESCALERA_BLOQUEO.get(intentos, BLOQUEO_TOPE_MIN), BLOQUEO_TOPE_MIN)
+
+
+def ventana_decaimiento(intentos):
+    """Minutos que un contador sobrevive sin actividad antes de volver a 0.
+
+    Es el mayor valor entre la base y la duracion del bloqueo de ese nivel:
+        5.o fallo  -> bloqueo 15 min -> ventana 30 min  (gana la base)
+        9.o fallo  -> bloqueo  4 h   -> ventana  4 h
+        12.o fallo -> bloqueo 24 h   -> ventana 24 h
+    """
+    if intentos < PRIMER_BLOQUEO_FALLO:
+        return VENTANA_BASE_MIN
+    return max(VENTANA_BASE_MIN, minutos_bloqueo(intentos))
+
+
+def _leer_sombra(sombra, correo, ahora=None):
+    """Fallos que lleva el conteo a la sombra de este correo.
+
+    La cookie guarda {'n': intentos, 't': epoch}. Si la entrada es mas vieja que
+    la ventana, la rafaga se dio por terminada y el conteo arranca en 0. Tambien
+    se acepta el formato viejo (entero suelto) para no romper las cookies que
+    ya estan en el navegador.
+    """
+    entrada = sombra.get(correo)
+    if entrada is None:
+        return 0
+    if isinstance(entrada, dict):
+        n = entrada.get('n', 0)
+        marca = entrada.get('t')
+        if not marca:
+            return n
+        ahora = ahora or datetime.now()
+        if (ahora - datetime.fromtimestamp(marca)) > timedelta(minutes=VENTANA_BASE_MIN):
+            return 0
+        return n
+    return int(entrada)
+
+
+def rafaga_vencida(fila, ahora=None):
+    """True si la rafaga de fallos de esta fila ya no debe seguir pesando.
+
+    False cuando no hay ultimo_fallo: son filas anteriores a la columna, y
+    reiniciarlas todas al desplegar dejaria entrar a quien ya estaba castigado.
+    """
+    if not fila:
+        return False
+    ultimo = fila.get('ultimo_fallo')
+    if not ultimo:
+        return False
+    ahora = ahora or datetime.now()
+    ventana = timedelta(minutes=ventana_decaimiento(fila.get('intentos') or 0))
+    return (ahora - ultimo) > ventana
+
+
+def humanizar_bloqueo(timedelta_restante):
+    """Convierte el tiempo restante en texto legible.
+
+    Importa no usar `.seconds` a secas: en un timedelta de mas de un dia, el
+    campo `.seconds` vale lo que sobra del dia, no el total. Un bloqueo de 24
+    horas con `.seconds` diria "Intenta en 0m 0s".
+    """
+    total = int(timedelta_restante.total_seconds())
+    if total < 0:
+        total = 0
+    if total < 60:
+        return f'{total}s'
+    if total < 3600:
+        return f'{total // 60}m {total % 60}s'
+    if total < 86400:
+        horas = total // 3600
+        resto = (total % 3600) // 60
+        return f'{horas}h' if not resto else f'{horas}h {resto}m'
+    return f'{total // 86400}d'
+
 @app.route('/login', methods=['GET','POST'])
 def login():
     ip = obtener_ip()
@@ -427,31 +600,53 @@ def login():
             ahora = datetime.now()
             if ahora < bloqueo_ip['bloqueado_hasta']:
                 restante = bloqueo_ip['bloqueado_hasta'] - ahora
-                flash(f"IP bloqueada. Intenta en {restante.seconds//60}m {restante.seconds%60}s", 'danger')
+                flash(f"IP bloqueada. Intenta en {humanizar_bloqueo(restante)}", 'danger')
                 return redirect('/login')
             else:
                 cur.execute("DELETE FROM bloqueos_ip WHERE ip=%s", (ip,))
                 mysql.connection.commit()
 
+        # ── Conteo a la sombra (intentos 1 y 2) ──
+        # Vive en la cookie de sesion, firmada por Flask con SECRET_KEY. Cada
+        # entrada guarda su propia fecha para que la rafaga tambien pueda
+        # vencer.
+        sombra = session.get(INTENTOS_SOMBRA, {})
+        if not isinstance(sombra, dict):
+            sombra = {}
+
         cur.execute("SELECT * FROM intentos_usuario WHERE correo=%s", (correo,))
         bloqueo_usuario = cur.fetchone()
-        if bloqueo_usuario and bloqueo_usuario['bloqueado_hasta']:
-            ahora = datetime.now()
-            if ahora < bloqueo_usuario['bloqueado_hasta']:
-                restante = bloqueo_usuario['bloqueado_hasta'] - ahora
-                flash(f"Usuario bloqueado. Intenta en {restante.seconds//60}m {restante.seconds%60}s", 'danger')
-                return redirect('/login')
-            else:
-                cur.execute("DELETE FROM intentos_usuario WHERE correo=%s", (correo,))
+        if bloqueo_usuario:
+            if bloqueo_usuario['bloqueado_hasta']:
+                ahora = datetime.now()
+                if ahora < bloqueo_usuario['bloqueado_hasta']:
+                    restante = bloqueo_usuario['bloqueado_hasta'] - ahora
+                    flash(f"Usuario bloqueado. Intenta en {humanizar_bloqueo(restante)}", 'danger')
+                    return redirect('/login')
+                # El bloqueo caduco: se concede UN intento mas. Solo se levanta
+                # el bloqueo, el contador NO se reinicia, para que si este
+                # intento tambien falla la escalada siga subiendo.
+                cur.execute("UPDATE intentos_usuario SET bloqueado_hasta=NULL WHERE correo=%s", (correo,))
                 mysql.connection.commit()
-                bloqueo_usuario = None
+                bloqueo_usuario = dict(bloqueo_usuario, bloqueado_hasta=None)
+                flash('Bloqueo vencido. Tienes un intento. Si fallas de nuevo el bloqueo sera mayor.', 'info')
+
+            # Decaimiento: si la rafaga es mas vieja que su ventana, los fallos
+            # anteriores dejan de contar. max_intentos conserva el pico.
+            if rafaga_vencida(bloqueo_usuario):
+                cur.execute("UPDATE intentos_usuario SET intentos=0, bloqueado_hasta=NULL WHERE correo=%s",
+                            (correo,))
+                mysql.connection.commit()
+                bloqueo_usuario = dict(bloqueo_usuario, intentos=0, bloqueado_hasta=None)
+                flash('La rafaga de intentos anteriores caduco. Empiezas de cero.', 'info')
 
         cur.execute("SELECT * FROM usuarios WHERE correo=%s", (correo,))
         usuario = cur.fetchone()
 
         if usuario and bcrypt.check_password_hash(usuario['password'], password):
-            cur.execute("DELETE FROM intentos_usuario WHERE correo=%s", (correo,))
-            mysql.connection.commit()
+            # La fila NO se borra y el contador NO se baja: queda el historial.
+            sombra.pop(correo, None)
+            session[INTENTOS_SOMBRA] = sombra
             session['user_id'] = usuario['id']
             session['correo']   = usuario['correo']
             session['rol']      = usuario['rol'].lower()
@@ -463,14 +658,29 @@ def login():
                 return redirect('/dashboard')
             return redirect('/')
 
+        # ── Credenciales incorrectas: contar y decidir ──
+        # El numero de fallo viene de la fila cuando ya existe (y nunca se
+        # reinicia dentro de la misma rafaga), o del contador a la sombra
+        # mientras la fila no ha nacido.
+        ahora = datetime.now()
         if bloqueo_usuario:
-            intentos  = bloqueo_usuario['intentos'] + 1
-            restantes = 3 - intentos
-            if intentos >= 3:
-                bloqueo_hasta = datetime.now() + timedelta(minutes=5)
-                cur.execute("UPDATE intentos_usuario SET intentos=%s, bloqueado_hasta=%s WHERE correo=%s",
-                            (intentos, bloqueo_hasta, correo))
-                flash('Usuario bloqueado por 5 minutos.', 'danger')
+            intentos = (bloqueo_usuario['intentos'] or 0) + 1
+        else:
+            intentos = _leer_sombra(sombra, correo, ahora) + 1
+
+        castigo = minutos_bloqueo(intentos) if intentos >= PRIMER_BLOQUEO_FALLO else 0
+        # El pico historico nunca baja aunque el contador se reinicie por
+        # decaimiento: el dato de "llego a N" no se pierde. Se lee con .get()
+        # porque la columna la agrega un ALTER en init_db.
+        pico = max(intentos, (bloqueo_usuario.get('max_intentos') or 0) if bloqueo_usuario else 0)
+
+        if bloqueo_usuario:
+            if castigo:
+                bloqueo_hasta = ahora + timedelta(minutes=castigo)
+                cur.execute("UPDATE intentos_usuario SET intentos=%s, bloqueado_hasta=%s, "
+                            "ultimo_fallo=%s, max_intentos=%s WHERE correo=%s",
+                            (intentos, bloqueo_hasta, ahora, pico, correo))
+                flash(f'Usuario bloqueado por {humanizar_bloqueo(timedelta(minutes=castigo))}.', 'danger')
                 if bloqueo_ip:
                     usuarios_dif = bloqueo_ip['usuarios_diferentes'] + 1
                     if usuarios_dif >= 2:
@@ -483,12 +693,31 @@ def login():
                 else:
                     cur.execute("INSERT INTO bloqueos_ip(ip, usuarios_diferentes) VALUES(%s,1)", (ip,))
             else:
-                cur.execute("UPDATE intentos_usuario SET intentos=%s WHERE correo=%s", (intentos, correo))
-                flash(f'Credenciales incorrectas. Te quedan {restantes} intento(s).', 'warning')
+                cur.execute("UPDATE intentos_usuario SET intentos=%s, ultimo_fallo=%s, max_intentos=%s "
+                            "WHERE correo=%s", (intentos, ahora, pico, correo))
+                sombra.pop(correo, None)
+                flash(f'Credenciales incorrectas. Te quedan {PRIMER_BLOQUEO_FALLO - intentos} '
+                      f'intento(s) antes del bloqueo.', 'warning')
+        elif intentos >= UMBRAL_INTENTOS:
+            # Primera vez que la fila aparece: la cuenta ya llega al umbral.
+            cur.execute("INSERT INTO intentos_usuario(correo, intentos, ultimo_fallo, max_intentos) "
+                        "VALUES(%s,%s,%s,%s)", (correo, intentos, ahora, pico))
+            sombra.pop(correo, None)
+            if castigo:
+                bloqueo_hasta = ahora + timedelta(minutes=castigo)
+                cur.execute("UPDATE intentos_usuario SET bloqueado_hasta=%s WHERE correo=%s",
+                            (bloqueo_hasta, correo))
+                flash(f'Usuario bloqueado por {humanizar_bloqueo(timedelta(minutes=castigo))}.', 'danger')
+            else:
+                flash(f'Credenciales incorrectas. Te quedan {PRIMER_BLOQUEO_FALLO - intentos} '
+                      f'intento(s) antes del bloqueo.', 'warning')
         else:
-            cur.execute("INSERT INTO intentos_usuario(correo, intentos) VALUES(%s,1)", (correo,))
-            flash('Credenciales incorrectas. Te quedan 2 intento(s).', 'warning')
+            # Aun bajo el umbral: se cuenta en la sombra, sin tocar la base.
+            sombra[correo] = {'n': intentos, 't': ahora.timestamp()}
+            flash(f'Credenciales incorrectas. Te quedan {PRIMER_BLOQUEO_FALLO - intentos} '
+                  f'intento(s) antes del bloqueo.', 'warning')
 
+        session[INTENTOS_SOMBRA] = sombra
         mysql.connection.commit()
         return redirect('/login')
     return render_template('login.html')

@@ -1,11 +1,8 @@
 {% extends 'base.html' %}
 {% from 'macros/pagination.html' import paginacion %}
 
-{# El bloque de KPIs trae su propia hoja de estilos, acotada con .kpi-panel
-   para no interferir con el resto de la pagina. #}
-{% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/kpi_biz.css') }}">
-{% endblock %}
+{# Los KPIs de Ventas y Almacen ya no viven aqui: se alcanzan desde el boton
+   "KPIs" de Accesos Rapidos en /dashboard, que abre /panel. #}
 
 {% block content %}
 
@@ -31,19 +28,7 @@
             <span class="badge bg-info text-dark ms-1">{{ total_proveedores }}</span>
             {% endif %}
         </a>
-        {# El enlace al panel vive aqui y no en el navbar: el menu ya esta
-           justo de ancho a partir de ~1200 px y un elemento mas lo desborda
-           en horizontal. #}
-        <a href="#kpiPanel" class="btn btn-outline-warning">
-            <i class="bi bi-speedometer2"></i> KPIs del sistema
-        </a>
-        <a href="{{ url_for('kpi_biz.panel_completo') }}" class="btn btn-outline-warning" target="_blank">
-            <i class="bi bi-fullscreen"></i> KPIs completos
-        </a>
     </div>
-
-    {# ── KPIs de Ventas y Almacen (NEGOCIO) ── #}
-    {% include 'kpi_biz/_bloque.html' %}
 
     <!-- FORMULARIO AGREGAR -->
     <div class="card shadow-sm mb-4">
@@ -190,9 +175,9 @@
 </div>
 {% endblock %}
 
-{# Chart.js y el script del panel se cargan al final para no frenar el
-   pintado de la pagina. #}
-{% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/kpi-dashboard.js') }}"></script>
-{% endblock %}
+{# Aqui ya no se carga nada de KPIs: Chart.js y kpi-dashboard.js eran del
+   panel tecnico (kpi/_bloque.html), que no se incluye en ninguna plantilla.
+   kpi-dashboard.js abortaba en su linea 22 al no encontrar #kpiPanel, asi que
+   la descarga de Chart.js era wasted en cada carga de esta pagina. Los KPIs
+   de negocio cargan su propio CSS y JS desde /panel. #}
+{% block scripts %}{% endblock %}

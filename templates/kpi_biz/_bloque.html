@@ -2,8 +2,8 @@
   Bloque de KPIs de Ventas y Almacen, reutilizable.
 
   Este archivo no extiende ninguna pagina: es un fragmento que se incrusta en
-  el panel de administracion (/admin) con `{% include %}`. El servidor sigue
-  siendo el unico que pinta los datos.
+  /panel con `{% include %}`. El servidor sigue siendo el unico que pinta los
+  datos.
 
   Contrato de datos: recibe `kpis_biz`, el snapshot ya calculado por
   kpi.routes_biz.get_snapshot(). Si no llega, la variable no viene definida y
@@ -25,14 +25,13 @@
   <div class="kpi-biz-error" id="kpiBizError"></div>
 
   {# ── Cabecera y filtros ── #}
+  {# Este bloque ya solo se pinta dentro de /panel, asi que no lleva el boton
+     de "Pantalla completa": apuntaria a la pagina que se esta mirando. #}
   <div class="kpi-biz-toolbar">
     <div class="d-flex align-items-center gap-2 flex-wrap">
       <h2 class="kpi-biz-titulo mb-0">
         <i class="bi bi-graph-up-arrow"></i> KPIs de Ventas y Almacen
       </h2>
-      <a href="{{ url_for('kpi_biz.panel_completo') }}" class="btn btn-sm btn-outline-warning" target="_blank" title="Abrir en ventana completa">
-        <i class="bi bi-fullscreen"></i> Pantalla completa
-      </a>
     </div>
 
     <form method="GET" id="kpiBizFiltros" class="kpi-biz-filtros">
@@ -510,9 +509,6 @@
     <h2 class="kpi-biz-titulo mb-0">
       <i class="bi bi-graph-up-arrow"></i> KPIs de Ventas y Almacen
     </h2>
-    <a href="{{ url_for('kpi_biz.panel_completo') }}" class="btn btn-sm btn-outline-warning" target="_blank">
-      <i class="bi bi-fullscreen"></i> Pantalla completa
-    </a>
   </div>
   <div class="kpi-biz-error visible">
     <i class="bi bi-database-exclamation"></i>

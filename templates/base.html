@@ -342,13 +342,10 @@ function bloquearBotones(){
 })();
 </script>
 
-{# Boton flotante para abrir el dashboard de KPIs de Ventas y Almacen #}
-{% if session.get('rol') in ['admin','administrador'] %}
-<button class="kpi-biz-float-btn" onclick="window.open('{{ url_for('kpi_biz.panel_completo') }}', '_blank')"
-        title="Abrir KPIs de Ventas y Almacen en ventana completa" aria-label="KPIs Ventas y Almacen">
-  <i class="bi bi-graph-up-arrow"></i>
-</button>
-{% endif %}
+{# El boton flotante de KPIs se elimino de la base: aparecia en todas las
+   pantallas de administrador pero su hoja de estilos (kpi_biz.css) solo se
+   carga en /panel, asi que se veia sin formato en el resto. Los KPIs se
+   alcanzan desde Accesos Rapidos en /dashboard. #}
 
 {# Scripts propios de cada pagina, cargados al final para no frenar el pintado #}
 {% block scripts %}{% endblock %}

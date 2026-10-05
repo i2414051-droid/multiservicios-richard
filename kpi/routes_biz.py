@@ -4,10 +4,11 @@ Rutas del modulo de KPIs de Ventas y Almacen.
 Se registra como blueprint 'kpi_biz' para no mezclar con los KPIs tecnicos
 existentes. Todas las rutas exigen sesion de administrador.
 
-El panel vive en /kpi-biz/panel y se puede abrir en ventana completa desde
-cualquier pagina con el boton flotante. El fragmento que se incrusta en
-/admin usa el mismo endpoint que el panel completo, solo cambia la plantilla
-base.
+El panel vive en /panel (el blueprint se registra sin url_prefix) y se abre
+desde el boton "KPIs" de Accesos Rapidos en /dashboard. Antes se incrustaba
+tambien en /admin con `{% include %}`; ya no. El fragmento que se reinyecta
+al cambiar de periodo usa el mismo endpoint que el panel completo, solo
+cambia la plantilla base.
 """
 import datetime
 import decimal
@@ -28,10 +29,17 @@ from . import repository, schema, service, settings
 kpi_biz_bp = Blueprint('kpi_biz', __name__)
 
 # Plantillas
-PANEL_FRAGMENTO = 'kpi_biz/_bloque.html'      # se incrusta en /admin
-PANEL_COMPLETO = 'kpi_biz/panel.html'         # ventana completa
+PANEL_FRAGMENTO = 'kpi_biz/_bloque.html'      # se reinyecta al cambiar periodo
+PANEL_COMPLETO = 'kpi_biz/panel.html'         # pagina /panel
 
-ENDPOINTS_CON_KPIS_BIZ = frozenset({'admin', 'kpi_biz.api_panel'})
+# Endpoints que reciben el snapshot en la plantilla.
+#
+# `kpi_biz.panel_completo` es la pagina /panel, a la que llega el boton "KPIs"
+# de Accesos Rapidos en /dashboard. `kpi_biz.api_panel` la replenish cuando el
+# administrador cambia el periodo sin recargar la pagina anfitriona.
+#
+# `admin` ya no entra: los KPIs se movieron fuera del panel de productos.
+ENDPOINTS_CON_KPIS_BIZ = frozenset({'kpi_biz.api_panel', 'kpi_biz.panel_completo'})
 
 
 # ─────────────────────────────────────────────
@@ -122,7 +130,10 @@ def api_panel():
     if not _es_admin():
         return _no_autorizado()
     try:
-        return render_template(PANEL_FRAGMENTO, kpis=get_snapshot())
+        # No se pasa `kpis` a proposito: la plantilla lee `kpis_biz`, que
+        # inyecta el context processor para este mismo endpoint. Pasarlo
+        # ademas aqui calcularia el snapshot dos veces por peticion.
+        return render_template(PANEL_FRAGMENTO)
     except Exception as exc:
         current_app.logger.error('KPI-BIZ: fallo al construir panel: %s', exc)
         return (
