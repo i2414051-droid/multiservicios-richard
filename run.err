@@ -1,0 +1,13 @@
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.38:5000
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:47:44] "GET /carrito HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:49:07] "GET /login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:49:11] "[32mPOST /registro HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:49:14] "GET /login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:49:17] "[32mPOST /login HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:49:23] "GET /agregar/12 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:49:27] "GET /agregar/14 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [09/Oct/2026 20:49:30] "GET /carrito HTTP/1.1" 200 -

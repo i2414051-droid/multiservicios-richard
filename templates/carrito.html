@@ -33,12 +33,16 @@
                                 <button class="btn btn-sm btn-danger btn-cantidad"
                                         data-id="{{ p.producto_id }}"
                                         data-accion="reducir">-</button>
-                                <input type="number" class="form-control form-control-sm cantidad-input"
+                                <input type="text" class="form-control form-control-sm cantidad-input"
                                        id="cant-{{ p.producto_id }}"
                                        value="{{ p.cantidad|int }}"
                                        min="0" max="{{ maximo }}"
+                                       inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+                                       oninput="this.value=this.value.replace(/[^0-9]/g,'')"
+                                       onkeypress="return /[0-9]/.test(event.key)"
                                        data-id="{{ p.producto_id }}"
                                        data-stock="{{ p.stock|int }}"
+                                       data-precio="{{ '%.2f'|format(p.precio|float) }}"
                                        aria-label="Cantidad de {{ p.nombre }}">
                                 <button class="btn btn-sm btn-success btn-cantidad"
                                         data-id="{{ p.producto_id }}"
@@ -81,7 +85,8 @@
          style="display:none;" role="status" aria-live="polite"></div>
 
     <div class="text-end mt-4">
-        <a href="/checkout" class="btn btn-lg shadow-sm text-white fw-bold custom-btn-buy">
+        <a href="/checkout" class="btn btn-lg shadow-sm text-white fw-bold custom-btn-buy"
+           data-sin-carga data-sin-bloqueo>
             <i class="bi bi-bag-check me-1"></i> Comprar ahora
         </a>
     </div>
@@ -93,7 +98,7 @@
         </div>
         <div class="card-body">
             {% if sugeridos %}
-            <div class="row">
+            <div class="row" id="sugeridos-grid">
                 {% for p in sugeridos %}
                 <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
                     <div class="card producto-card h-100">
@@ -120,9 +125,11 @@
                             <p class="descripcion">{{ p.descripcion }}</p>
                             <div class="precio">S/. {{ "%.2f"|format(p.precio|float) }}</div>
                             {% if p.stock > 0 %}
-                            <a href="/agregar/{{ p.id }}?next=/carrito" class="btn btn-agregar">
+                            <button type="button" class="btn btn-agregar w-100"
+                                    onclick="agregarProductoAjax({{ p.id }}, this)"
+                                    data-producto-id="{{ p.id }}">
                                 <i class="bi bi-cart"></i> Agregar al carrito
-                            </a>
+                            </button>
                             {% else %}
                             <button class="btn btn-secondary w-100" disabled>No disponible</button>
                             {% endif %}
@@ -192,48 +199,42 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 });
 
-/* Cantidad del carrito: input editable con limites de stock y 500, y
-   una sola accion a la vez en TODO el carrito (no solo en la fila). */
+/* Cantidad del carrito:
+   - los botones + y - funcionan como un contador (instantaneo, sin esperar
+     al servidor y sin bloquear el carrito).
+   - Enter (o salir del campo) confirma el numero escrito y lo ajusta al
+     tope real: si escribes 10000 y solo hay 5, queda en 5.
+   - El minimo es 1 (no 0) y el '+' se apaga al llegar al tope.
+   - Al volver con "Atras" a esta pagina, nada queda bloqueado. */
 (function(){
-  var ocupado = false;
+  var sincronizando = false;
 
-  function controles() {
-    return document.querySelectorAll('.btn-cantidad, .cantidad-input');
+  function entero(v){
+    var n = parseInt(v, 10);
+    return isNaN(n) ? 0 : n;
   }
 
-  function bloquear(){
-    ocupado = true;
-    controles().forEach(function(c){ c.disabled = true; });
+  function inputDe(id){
+    return document.getElementById('cant-' + id);
   }
 
-  function desbloquear(){
-    ocupado = false;
-    controles().forEach(function(c){
-      // Re-habilitar, salvo el '+' que llego al tope de stock o de 500
-      var esMas = c.dataset && c.dataset.accion === 'aumentar';
-      if (esMas) {
-        var input = document.getElementById('cant-' + c.dataset.id);
-        var tope = input ? parseInt(input.getAttribute('max') || '0', 10) : 0;
-        var cant = input ? parseInt(input.value || '0', 10) : 0;
-        var alTope = cant >= tope;
-        c.disabled = alTope;
-        // Marca para que la reactivacion global no lo vuelva a habilitar
-        c.dataset.bloqueoFijo = alTope ? '1' : '0';
-      } else {
-        c.disabled = false;
-        if (c.dataset) c.dataset.bloqueoFijo = '0';
-      }
-    });
+  function stockDe(id){
+    var el = inputDe(id);
+    return el ? parseInt(el.dataset.stock || '0', 10) : 0;
   }
 
-  function pintar(id, data){
-    var input = document.getElementById('cant-' + id);
-    if (input) {
-      input.value = data.cantidad;
-      if (data.maximo) input.setAttribute('max', data.maximo);
-    }
-    document.getElementById('sub-' + id).textContent = 'S/. ' + data.subtotal.toFixed(2);
-    document.getElementById('total-carrito').textContent = 'S/. ' + data.total.toFixed(2);
+  function precioDe(id){
+    var el = inputDe(id);
+    return parseFloat(el ? el.dataset.precio : '0');
+  }
+
+  // Tope real por producto: el menor entre su stock y 500.
+  // Minimo 1 (en vez de 0), salvo que no haya stock disponible.
+  function limites(id){
+    var st  = stockDe(id);
+    var max = Math.max(0, Math.min(st, 500));
+    var min = max >= 1 ? 1 : 0;
+    return { min: min, max: max };
   }
 
   function avisar(mensaje){
@@ -245,70 +246,259 @@ document.addEventListener('DOMContentLoaded', function () {
     avisar._t = setTimeout(function(){ box.style.display = 'none'; }, 3500);
   }
 
-  function pedir(id, cuerpo, fila){
-    bloquear();
-    fetch('/actualizar-cantidad/' + id, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cuerpo)
-    })
-    .then(function(r){ return r.json().then(function(d){ return {ok: r.ok, datos: d}; }); })
-    .then(function(res){
-      if (!res.ok) {
-        avisar(res.datos.mensaje || 'No se pudo actualizar.');
-        desbloquear();
-        return;
-      }
-      var data = res.datos;
-      if (data.eliminado) {
-        fila.style.transition = 'opacity .3s';
-        fila.style.opacity = '0';
-        setTimeout(function(){ fila.remove(); }, 300);
-      } else {
-        pintar(id, data);
-      }
-      // Liberar SIEMPRE, tambien al eliminar: si no, los demas productos
-      // quedan bloqueados y no se pueden editar.
-      desbloquear();
-      document.getElementById('total-carrito').textContent = 'S/. ' + data.total.toFixed(2);
-    })
-    .catch(function(){
-      avisar('Error de conexion. Intenta de nuevo.');
-      desbloquear();
+  function mostrarTotales(){
+    var total = 0;
+    document.querySelectorAll('.cantidad-input').forEach(function(input){
+      var id  = input.dataset.id;
+      var q   = entero(input.value);
+      var sub = q * precioDe(id);
+      total += sub;
+      var celda = document.getElementById('sub-' + id);
+      if (celda) celda.textContent = 'S/. ' + sub.toFixed(2);
     });
+    document.getElementById('total-carrito').textContent = 'S/. ' + total.toFixed(2);
   }
 
-  /* Botones - y + */
+  // El boton '+' se apaga cuando la cantidad llego al tope del producto
+  function actualizarBotones(){
+    document.querySelectorAll('.btn-cantidad').forEach(function(btn){
+      if (btn.dataset.accion !== 'aumentar') return;
+      var el = inputDe(btn.dataset.id);
+      var llegoAlTope = el && entero(el.value) >= limites(btn.dataset.id).max;
+      btn.disabled = llegoAlTope;
+    });
+    mostrarTotales();
+  }
+
+  /* Agregar producto via AJAX (sin recargar) desde "Otros productos disponibles" */
+  function agregarProductoAjax(id, btn){
+    if (btn) btn.disabled = true;
+    fetch('/agregar/' + id, {
+      method: 'GET',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin'
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { avisar(d.mensaje || 'No se pudo agregar'); return; }
+
+      // 1) Si ya existe en el carrito, actualiza cantidad y subtotal
+      var inputExist = document.getElementById('cant-' + d.producto_id);
+      if (inputExist) {
+        inputExist.value = d.cantidad;
+        var subCell = document.getElementById('sub-' + d.producto_id);
+        if (subCell) subCell.textContent = 'S/. ' + d.subtotal.toFixed(2);
+        actualizarBotones();
+      } else {
+        // 2) Nueva fila en la tabla del carrito
+        var tbody = document.querySelector('#tabla-carrito tbody');
+        var maximo = d.maximo;
+        var tr = document.createElement('tr');
+        tr.id = 'fila-' + d.producto_id;
+        tr.innerHTML =
+          '<td>' + d.nombre + '</td>' +
+          '<td>S/. ' + d.precio.toFixed(2) + '</td>' +
+          '<td>' +
+            '<div class="d-flex align-items-center justify-content-center gap-2">' +
+              '<button class="btn btn-sm btn-danger btn-cantidad" data-id="' + d.producto_id + '" data-accion="reducir">-</button>' +
+              '<input type="text" class="form-control form-control-sm cantidad-input" id="cant-' + d.producto_id + '"' +
+                ' value="' + d.cantidad + '" min="1" max="' + maximo + '"' +
+                ' inputmode="numeric" pattern="[0-9]*" autocomplete="off"' +
+                ' oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onkeypress="return /[0-9]/.test(event.key)"' +
+                ' data-id="' + d.producto_id + '" data-stock="' + d.stock + '" data-precio="' + d.precio.toFixed(2) + '"' +
+                ' aria-label="Cantidad de ' + d.nombre + '">' +
+              '<button class="btn btn-sm btn-success btn-cantidad" data-id="' + d.producto_id + '" data-accion="aumentar"' +
+                (d.cantidad >= maximo ? ' disabled title="No hay mas stock disponible"' : '') + '>+</button>' +
+            '</div>' +
+            '<small class="text-muted d-block mt-1 stock-producto">' +
+              (d.stock >= 500 ? 'M&Aacute;XIMO ' + maximo + ' POR PRODUCTO' : 'STOCK: ' + d.stock + ' DISPONIBLES') +
+            '</small>' +
+          '</td>' +
+          '<td id="sub-' + d.producto_id + '">S/. ' + d.subtotal.toFixed(2) + '</td>' +
+          '<td>' +
+            '<a href="/eliminar_carrito/' + d.producto_id + '" class="btn btn-danger btn-sm"' +
+              ' onclick="return confirm(\'¿Eliminar producto del carrito?\')">' +
+              '<i class="bi bi-trash"></i> Eliminar</a>' +
+          '</td>';
+        tbody.appendChild(tr);
+
+        // Enlazar handlers para los nuevos botones/input
+        var newInput = document.getElementById('cant-' + d.producto_id);
+        var newBtns = tr.querySelectorAll('.btn-cantidad');
+        newBtns.forEach(function(btn){
+          btn.addEventListener('click', function(){
+            if (sincronizando) return;
+            var id2 = this.dataset.id;
+            var el2 = inputDe(id2);
+            if (!el2) return;
+            var lim2 = limites(id2);
+            var q2 = entero(el2.value);
+            q2 = this.dataset.accion === 'aumentar' ? q2 + 1 : q2 - 1;
+            if (q2 > lim2.max) q2 = lim2.max;
+            if (q2 < lim2.min) q2 = lim2.min;
+            el2.value = q2;
+            actualizarBotones();
+          });
+        });
+        newInput.addEventListener('keydown', function(e){
+          if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
+        });
+        newInput.addEventListener('change', function(){
+          if (sincronizando) return;
+          var id2 = this.dataset.id;
+          var lim2 = limites(id2);
+          var q2 = entero(this.value);
+          if (q2 > lim2.max) { avisar('Stock insuficiente: solo hay ' + stockDe(id2) + ' unidades disponibles.'); q2 = lim2.max; }
+          if (q2 < lim2.min) q2 = lim2.min;
+          this.value = q2;
+          actualizarBotones();
+        });
+      }
+
+      // 3) Actualizar total global
+      document.getElementById('total-carrito').textContent = 'S/. ' + d.total.toFixed(2);
+
+      // 4) Quitar de "Otros productos disponibles"
+      if (btn) {
+        var col = btn.closest('.col-lg-3, .col-md-4, .col-sm-6');
+        if (col) col.remove();
+      }
+
+      // 5) Si no quedan sugeridos, ocultar sección
+      var grid = document.getElementById('sugeridos-grid');
+      if (grid && grid.children.length === 0) {
+        var section = grid.closest('.card');
+        if (section) section.style.display = 'none';
+      }
+
+      actualizarBotones();
+    })
+    .catch(function(){ avisar('Error de conexion'); })
+    .finally(function(){ if (btn) btn.disabled = false; });
+  }
+
+  /* Botones + y - : contador local, con tope (no pasa del stock/500)
+     y minimo 1. No bloquea ni espera al servidor. */
   document.querySelectorAll('.btn-cantidad').forEach(function(btn){
     btn.addEventListener('click', function(){
-      if (ocupado) return;   // una sola accion a la vez en todo el carrito
-      var id  = this.dataset.id;
-      pedir(id, { accion: this.dataset.accion }, document.getElementById('fila-' + id));
+      if (sincronizando) return;
+      var id   = this.dataset.id;
+      var el   = inputDe(id);
+      if (!el) return;
+      var lim  = limites(id);
+      var q    = entero(el.value);
+      q = this.dataset.accion === 'aumentar' ? q + 1 : q - 1;
+      if (q > lim.max) q = lim.max;   // no sigue subiendo pasando el tope
+      if (q < lim.min) q = lim.min;   // minimo 1
+      el.value = q;
+      actualizarBotones();
     });
   });
 
-  /* Edicion directa del numero */
+  /* El input solo acepta digitos (ya lo filtra oninput). Enter confirma y
+     ajusta al tope: si pones 10000 y solo hay 5, queda en 5. */
   document.querySelectorAll('.cantidad-input').forEach(function(input){
-    input.addEventListener('change', function(){
-      if (ocupado) return;
-      var id    = this.dataset.id;
-      var val   = parseInt(this.value, 10);
-      var tope  = parseInt(this.getAttribute('max') || '0', 10);
-      var stock = parseInt(this.dataset.stock || '0', 10);
-
-      if (isNaN(val) || val < 0) { this.value = 0; val = 0; }
-
-      if (val > tope) {
-        // El tope real es el menor entre el stock y el maximo de 500
-        if (val > stock) {
-          avisar('Stock insuficiente: solo hay ' + stock + ' unidades disponibles.');
-        } else {
-          avisar('No puedes comprar mas de ' + tope + ' unidades de un mismo producto.');
-        }
-        val = tope;
-        this.value = tope;
+    input.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') {
+        e.preventDefault();   // no envie formularios ni navegue
+        input.blur();         // confirma el numero (fire change)
       }
-      pedir(id, { accion: 'fijar', cantidad: val }, document.getElementById('fila-' + id));
+    });
+    input.addEventListener('change', function(){
+      if (sincronizando) return;
+      var id  = input.dataset.id;
+      var lim = limites(id);
+      var q   = entero(input.value);
+      if (q > lim.max) {
+        avisar('Stock insuficiente: solo hay ' + stockDe(id) + ' unidades disponibles.');
+        q = lim.max;
+      }
+      if (q < lim.min) q = lim.min;
+      input.value = q;
+      actualizarBotones();
+    });
+  });
+
+  /* Al volver con "Atras" (o desde el cache del navegador), los botones
+     vuelven a quedar habilitados: no quedan bloqueados. */
+  window.addEventListener('pageshow', function(){
+    sincronizando = false;
+    document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+      .forEach(function(c){ c.disabled = false; });
+    actualizarBotones();
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', actualizarBotones);
+  } else {
+    actualizarBotones();
+  }
+
+  /* Comprar ahora: recien aqui se guarda en la BD y se pasa al checkout */
+  document.querySelector('.custom-btn-buy').addEventListener('click', function(ev){
+    if (sincronizando) return;
+    ev.preventDefault();   // la navegacion la controlamos nosotros
+
+    var filas  = [];
+    var vacio  = true;
+    var error  = null;
+
+    document.querySelectorAll('.cantidad-input').forEach(function(input){
+      if (error) return;
+      var id  = input.dataset.id;
+      var q   = entero(input.value);
+      var lim = limites(id);
+      if (q > 0) vacio = false;
+
+      if (q > lim.max) {
+        error = 'Stock insuficiente: solo hay ' + stockDe(id) + ' unidades disponibles.';
+      } else if (q < lim.min) {
+        error = 'La cantidad minima es ' + lim.min + '.';
+      } else {
+        filas.push({ id: id, q: q });
+      }
+    });
+
+    if (error) { avisar(error); return; }
+    if (vacio)  { avisar('Tu carrito esta vacio.'); return; }
+
+    // Sincronizar todo de una vez (paralelo), sin esperas por producto
+    sincronizando = true;
+    document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+      .forEach(function(c){ c.disabled = true; });
+
+    Promise.all(filas.map(function(f){
+      return fetch('/actualizar-cantidad/' + f.id, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'fijar', cantidad: f.q })
+      });
+    }))
+    .then(function(resp){
+      return Promise.all(resp.map(function(r){
+        return r.json().then(function(d){ return { ok: r.ok, datos: d }; });
+      }));
+    })
+    .then(function(resultados){
+      for (var i = 0; i < resultados.length; i++) {
+        if (!resultados[i].ok) {
+          // El stock pudo bajar mientras tanto: avisamos y quedamos en el carrito
+          avisar(resultados[i].datos.mensaje || 'No se pudo actualizar el carrito.');
+          document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+            .forEach(function(c){ c.disabled = false; });
+          sincronizando = false;
+          actualizarBotones();
+          return;
+        }
+      }
+      window.location.href = '/checkout';
+    })
+    .catch(function(){
+      avisar('Error de conexion. Intenta de nuevo.');
+      document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+        .forEach(function(c){ c.disabled = false; });
+      sincronizando = false;
+      actualizarBotones();
     });
   });
 })();

@@ -113,7 +113,7 @@ def _current_route() -> str:
 # ─────────────────────────────────────────────
 def register_hooks(app) -> None:
     """Instala los hooks que alimentan el modulo de KPIs."""
-    start_flusher(app)
+    # start_flusher(app)  # DESACTIVADO: falta insert_request_metrics en repository
 
     @app.before_request
     def _kpi_mark_start():

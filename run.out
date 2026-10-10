@@ -1,0 +1,6 @@
+PATCH APPLIED
+DEBUG connect: MYSQL_HOST = mysql-proyecto.alwaysdata.net
+DEBUG connect: MYSQL_USER = proyecto
+DEBUG connect: MYSQL_PASSWORD = EZ9BN...
+ * Serving Flask app 'run_app'
+ * Debug mode: off

@@ -8,58 +8,91 @@
 
         <h3 class="text-center mb-3">📝 Registrarse</h3>
 
-        <form method="POST">
+        <div class="text-center mb-3" style="font-size:.9rem;color:var(--text-muted)">
+            <span id="indicador1">1. Tus datos</span>
+            <span class="mx-2">·</span>
+            <span id="indicador2" style="opacity:.4">2. Contraseña</span>
+        </div>
+
+        <form method="POST" id="registroForm">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
-            <!-- NOMBRES -->
-            <div class="mb-3">
-                <label class="form-label">Nombres</label>
-                <input type="text" name="nombres" class="form-control" required>
-            </div>
+            <!-- ═══ PASO 1: DATOS PERSONALES ═══ -->
+            <div id="paso1">
 
-            <!-- APELLIDOS -->
-            <div class="mb-3">
-                <label class="form-label">Apellidos</label>
-                <input type="text" name="apellidos" class="form-control" required>
-            </div>
-
-            <!-- CORREO -->
-            <div class="mb-3">
-                <label class="form-label">Correo electrónico</label>
-                <input type="email" name="correo" class="form-control" required>
-            </div>
-
-            <!-- CONTRASEÑA CON OJO -->
-            <div class="mb-3">
-                <label class="form-label">Contraseña</label>
-                <div class="position-relative">
-                    <input type="password" name="password" id="password" class="form-control pe-5" required>
-                    <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
-                            onclick="togglePassword()"
-                            data-sin-carga data-sin-bloqueo
-                            style="border:none; background:none; cursor:pointer; z-index:5;">
-                        <i id="eye-icon" class="bi bi-eye" style="color: var(--color-ojo);"></i>
-                    </button>
+                <!-- NOMBRES -->
+                <div class="mb-3">
+                    <label class="form-label">Nombres</label>
+                    <input type="text" name="nombres" id="regNombres" class="form-control" required>
                 </div>
-            </div>
 
-            <!-- CONFIRMAR CONTRASEÑA CON OJO -->
-            <div class="mb-3">
-                <label class="form-label">Confirmar contraseña</label>
-                <div class="position-relative">
-                    <input type="password" name="confirmar" id="confirmar" class="form-control pe-5" required>
-                    <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
-                            onclick="toggleConfirmPassword()"
-                            data-sin-carga data-sin-bloqueo
-                            style="border:none; background:none; cursor:pointer; z-index:5;">
-                        <i id="eye-icon-confirm" class="bi bi-eye" style="color: var(--color-ojo);"></i>
-                    </button>
+                <!-- APELLIDOS -->
+                <div class="mb-3">
+                    <label class="form-label">Apellidos</label>
+                    <input type="text" name="apellidos" id="regApellidos" class="form-control" required>
                 </div>
+
+                <!-- CORREO -->
+                <div class="mb-3">
+                    <label class="form-label">Correo electrónico</label>
+                    <input type="email" name="correo" id="regCorreo" class="form-control" required>
+                </div>
+
+                <div class="alert alert-danger py-2 mb-3" id="avisoPaso1" style="display:none"></div>
+
+                <button type="button" class="btn btn-warning w-100 fw-bold"
+                        onclick="irAPaso2()" data-sin-carga data-sin-bloqueo>
+                    Siguiente <i class="bi bi-arrow-right"></i>
+                </button>
+
             </div>
 
-            <button class="btn btn-success w-100">
-                Registrarse
-            </button>
+            <!-- ═══ PASO 2: CONTRASEÑA ═══ -->
+            <div id="paso2" style="display:none">
+
+                <p class="mb-3" style="font-size:.9rem;color:var(--text-muted)">
+                    Casi listo, <strong id="nombrePaso2"></strong>. Ahora crea tu contraseña.
+                </p>
+
+                <!-- CONTRASEÑA CON OJO -->
+                <div class="mb-3">
+                    <label class="form-label">Contraseña</label>
+                    <div class="position-relative">
+                        <input type="password" name="password" id="password" class="form-control pe-5" required>
+                        <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
+                                onclick="togglePassword()"
+                                data-sin-carga data-sin-bloqueo
+                                style="border:none; background:none; cursor:pointer; z-index:5;">
+                            <i id="eye-icon" class="bi bi-eye" style="color: var(--color-ojo);"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- CONFIRMAR CONTRASEÑA CON OJO -->
+                <div class="mb-3">
+                    <label class="form-label">Confirmar contraseña</label>
+                    <div class="position-relative">
+                        <input type="password" name="confirmar" id="confirmar" class="form-control pe-5" required>
+                        <button type="button" class="position-absolute top-50 end-0 translate-middle-y me-3 py-0"
+                                onclick="toggleConfirmPassword()"
+                                data-sin-carga data-sin-bloqueo
+                                style="border:none; background:none; cursor:pointer; z-index:5;">
+                            <i id="eye-icon-confirm" class="bi bi-eye" style="color: var(--color-ojo);"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="alert alert-danger py-2 mb-3" id="avisoPaso2" style="display:none"></div>
+
+                <button type="submit" class="btn btn-success w-100 fw-bold">
+                    Registrarse
+                </button>
+                <button type="button" class="btn btn-link w-100 mt-1" onclick="volverAPaso1()"
+                        data-sin-carga data-sin-bloqueo>
+                    <i class="bi bi-arrow-left"></i> Volver
+                </button>
+
+            </div>
 
         </form>
 
@@ -72,6 +105,60 @@
 </div>
 
 <script>
+function mostrarAviso(id, msg) {
+    var box = document.getElementById(id);
+    box.textContent = msg;
+    box.style.display = msg ? 'block' : 'none';
+}
+
+function irAPaso2() {
+    var nombres = document.getElementById('regNombres');
+    var apellidos = document.getElementById('regApellidos');
+    var correo = document.getElementById('regCorreo');
+    var vacio = null;
+
+    if (!nombres.value.trim()) { vacio = nombres; }
+    else if (!apellidos.value.trim()) { vacio = apellidos; }
+    else if (!correo.value.trim()) { vacio = correo; }
+    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo.value.trim())) {
+        mostrarAviso('avisoPaso1', 'Escribe un correo electrónico válido.');
+        correo.focus();
+        return;
+    }
+
+    if (vacio) {
+        mostrarAviso('avisoPaso1', 'Completa todos los campos para continuar.');
+        vacio.focus();
+        return;
+    }
+
+    mostrarAviso('avisoPaso1', '');
+    document.getElementById('nombrePaso2').textContent = nombres.value.trim();
+    document.getElementById('paso1').style.display = 'none';
+    document.getElementById('paso2').style.display = 'block';
+    document.getElementById('indicador1').style.opacity = '.4';
+    document.getElementById('indicador2').style.opacity = '1';
+    document.getElementById('password').focus();
+}
+
+function volverAPaso1() {
+    document.getElementById('paso2').style.display = 'none';
+    document.getElementById('paso1').style.display = 'block';
+    document.getElementById('indicador1').style.opacity = '1';
+    document.getElementById('indicador2').style.opacity = '.4';
+    document.getElementById('regCorreo').focus();
+}
+
+document.getElementById('registroForm').addEventListener('submit', function(e) {
+    var pass = document.getElementById('password').value;
+    var conf = document.getElementById('confirmar').value;
+    if (pass !== conf) {
+        e.preventDefault();
+        mostrarAviso('avisoPaso2', 'Las contraseñas no coinciden.');
+        document.getElementById('confirmar').focus();
+    }
+});
+
 function togglePassword() {
     const input = document.getElementById('password');
     const icon  = document.getElementById('eye-icon');

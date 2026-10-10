@@ -954,7 +954,7 @@ def registro():
             flash('Ya existe una cuenta con ese correo.', 'danger')
             return redirect('/registro')
         h = bcrypt.generate_password_hash(password).decode('utf-8')
-        cur.execute("INSERT INTO usuarios (correo, password, rol, documento_tipo, documento_numero, nombres, apellidos, telefono) VALUES (%s,%s,'cliente',%s,%s,%s,%s,%s)",
+        cur.execute("INSERT INTO usuarios (correo, password, rol, documento_tipo, documento_numero, nombre, apellido, telefono) VALUES (%s,%s,'cliente',%s,%s,%s,%s,%s)",
                     (correo, h, documento_tipo, documento_numero, nombres, apellidos, telefono))
         mysql.connection.commit()
         return redirect('/login')
@@ -2999,22 +2999,29 @@ def _destino_despues_agregar():
 @app.route('/agregar/<int:id>')
 def agregar(id):
     destino = _destino_despues_agregar()
+    es_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '')
     try:
         usuario = obtener_usuario()
         cur = mysql.connection.cursor()
-        cur.execute(f"SELECT stock, estado FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
+        cur.execute(f"SELECT stock, estado, nombre, precio FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
         prod = cur.fetchone()
         if not prod or prod['estado'] != 'activo':
-            flash('Producto no disponible.', 'danger')
+            msg = 'Producto no disponible.'
+            if es_ajax: return jsonify({'ok': False, 'mensaje': msg}), 400
+            flash(msg, 'danger')
             return redirect(destino)
         stock_disponible = prod['stock']
         if stock_disponible <= 0:
-            flash('Producto sin stock disponible.', 'danger')
+            msg = 'Producto sin stock disponible.'
+            if es_ajax: return jsonify({'ok': False, 'mensaje': msg}), 400
+            flash(msg, 'danger')
             return redirect(destino)
         cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
         en_carrito = cur.fetchone()['total'] or 0
         if en_carrito + 1 > stock_disponible:
-            flash(f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).', 'danger')
+            msg = f'Stock insuficiente. Solo hay {stock_disponible} unidad(es) disponible(s).'
+            if es_ajax: return jsonify({'ok': False, 'mensaje': msg}), 400
+            flash(msg, 'danger')
             return redirect(destino)
         cur.execute("SELECT * FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
         item = cur.fetchone()
@@ -3023,7 +3030,28 @@ def agregar(id):
         else:
             cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
         mysql.connection.commit()
+
+        # Datos para respuesta AJAX
+        cur.execute("SELECT cantidad FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
+        fila = cur.fetchone()
+        nueva_cant = fila['cantidad'] if fila else 1
+        subtotal = round(nueva_cant * float(prod['precio']), 2)
+        total = _total_carrito(usuario)
         cur.close()
+
+        if es_ajax:
+            return jsonify({
+                'ok': True,
+                'producto_id': id,
+                'nombre': prod['nombre'],
+                'precio': float(prod['precio']),
+                'stock': stock_disponible,
+                'cantidad': nueva_cant,
+                'subtotal': subtotal,
+                'total': total,
+                'maximo': min(stock_disponible, 500),
+            })
+
         flash('Producto agregado al carrito', 'success')
     except Exception as e:
         print(f"[agregar_carrito] {e}")
@@ -3031,7 +3059,9 @@ def agregar(id):
             mysql.connection.rollback()
         except Exception:
             pass
-        flash('Error al agregar al carrito.', 'danger')
+        msg = 'Error al agregar al carrito.'
+        if es_ajax: return jsonify({'ok': False, 'mensaje': msg}), 500
+        flash(msg, 'danger')
     return redirect(destino)
 
 # ─────────────────────────────────────────────
