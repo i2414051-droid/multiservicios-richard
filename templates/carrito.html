@@ -127,7 +127,8 @@
                             {% if p.stock > 0 %}
                             <button type="button" class="btn btn-agregar w-100"
                                     onclick="agregarProductoAjax({{ p.id }}, this)"
-                                    data-producto-id="{{ p.id }}">
+                                    data-producto-id="{{ p.id }}"
+                                    data-sin-carga data-sin-bloqueo>
                                 <i class="bi bi-cart"></i> Agregar al carrito
                             </button>
                             {% else %}
@@ -376,6 +377,12 @@ document.addEventListener('DOMContentLoaded', function () {
     .catch(function(){ avisar('Error de conexion'); })
     .finally(function(){ if (btn) btn.disabled = false; });
   }
+
+  // El boton "Agregar al carrito" de "Otros productos disponibles" lo invoca
+  // desde un onclick inline, que corre en el ambito global. Sin esta linea la
+  // funcion vive solo dentro de este IIFE y el onclick lanza ReferenceError
+  // (por eso se quedaba "cargando" y no agregaba el producto).
+  window.agregarProductoAjax = agregarProductoAjax;
 
   /* Botones + y - : contador local, con tope (no pasa del stock/500)
      y minimo 1. No bloquea ni espera al servidor. */

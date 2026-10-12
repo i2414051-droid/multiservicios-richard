@@ -4,12 +4,12 @@ from functools import wraps
 from urllib.parse import quote
 
 from flask import (Flask, render_template, request, redirect,
-                   url_for, session, jsonify, flash, send_file)
+                   url_for, session, jsonify, flash, send_file, Response)
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail, Message
 from werkzeug.utils import secure_filename
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, NotFound
 import requests
 
 # Modulo de KPIs tecnicos (uptime servido, rendimiento, estabilidad y
@@ -179,6 +179,9 @@ def _init_db_inner():
             "ALTER TABLE usuarios ADD COLUMN telefono VARCHAR(15)",
             "ALTER TABLE usuarios ADD COLUMN documento_tipo VARCHAR(5)",
             "ALTER TABLE usuarios ADD COLUMN documento_numero VARCHAR(15)",
+            # La tabla real no tenia created_at (la creo una version previa), y
+            # /perfil la seleccionaba -> el 500 que rompia la tuerca. Se agrega.
+            "ALTER TABLE usuarios ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         ):
             try:
                 cur.execute(sql)
@@ -348,6 +351,8 @@ def _init_db_inner():
                 stock       INT DEFAULT 0,
                 categoria   VARCHAR(100),
                 imagen      VARCHAR(300),
+                imagen_datos LONGBLOB,
+                imagen_mime VARCHAR(100),
                 estado      VARCHAR(20) DEFAULT 'activo',
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -356,6 +361,18 @@ def _init_db_inner():
             cur.execute(f"ALTER TABLE {ALMACEN_DB}.productos ADD COLUMN estado VARCHAR(20) DEFAULT 'activo'")
         except Exception:
             pass
+        # Imagen persistente: el archivo en static/uploads vive en un disco
+        # efimero (Render lo borra al reiniciar y ademas esta en .gitignore),
+        # por eso la imagen se veia unos minutos y luego desaparecia. Estos
+        # campos guardan los bytes en la BD, que si es persistente.
+        for sql in (
+            f"ALTER TABLE {ALMACEN_DB}.productos ADD COLUMN imagen_datos LONGBLOB",
+            f"ALTER TABLE {ALMACEN_DB}.productos ADD COLUMN imagen_mime VARCHAR(100)",
+        ):
+            try:
+                cur.execute(sql)
+            except Exception:
+                pass
 
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.proveedores (
@@ -618,6 +635,40 @@ def cantidad_carrito():
     except:
         return dict(cantidad_carrito=0)
 
+
+@app.context_processor
+def datos_usuario_nav():
+    """Expone `usuario_nombre` (primer nombre + primer apellido) al navbar.
+
+    El navbar mostraba el correo; ahora muestra el nombre corto. Si la cuenta
+    no tiene nombre (cuentas antiguas) se cae al usuario del correo."""
+    correo = session.get('correo')
+    if not correo:
+        return {}
+    nombre   = (session.get('nombre') or '').strip()
+    apellido = (session.get('apellido') or '').strip()
+    # Logins viejos: la sesion no traia el nombre todavia -> se lee de la BD.
+    if not nombre and session.get('user_id'):
+        try:
+            cur = mysql.connection.cursor()
+            cur.execute("SELECT nombre, apellido FROM usuarios WHERE id=%s",
+                        (session['user_id'],))
+            fila = cur.fetchone()
+            cur.close()
+            if fila:
+                nombre   = (fila.get('nombre') or '').strip()
+                apellido = (fila.get('apellido') or '').strip()
+                session['nombre']   = nombre
+                session['apellido'] = apellido
+        except Exception:
+            pass
+    primer_nombre   = nombre.split()[0].upper() if nombre else ''
+    primer_apellido = apellido.split()[0].upper() if apellido else ''
+    display = (primer_nombre + ' ' + primer_apellido).strip()
+    if not display:
+        display = correo.split('@')[0].upper()
+    return dict(usuario_nombre=display, usuario_correo=correo)
+
 # ─────────────────────────────────────────────
 # TEST / INIT
 # ─────────────────────────────────────────────
@@ -855,6 +906,10 @@ def login():
             session['user_id'] = usuario['id']
             session['correo']   = usuario['correo']
             session['rol']      = usuario['rol'].lower()
+            # Nombre/apellido para mostrar en el navbar (solo primer nombre y
+            # primer apellido). Pueden ser NULL en cuentas antiguas.
+            session['nombre']   = (usuario.get('nombre') or '').strip()
+            session['apellido'] = (usuario.get('apellido') or '').strip()
             flash('Bienvenido', 'success')
             if session['rol'] in ['admin','administrador']:
                 init_db()
@@ -1054,6 +1109,30 @@ def admin():
 # ─────────────────────────────────────────────
 # PRODUCTOS CRUD
 # ─────────────────────────────────────────────
+def _procesar_imagen_producto(imagen):
+    """Procesa una imagen subida y devuelve (ruta_relativa, bytes, mime).
+
+    Los bytes se guardan ademas en la BD (columnas imagen_datos/imagen_mime)
+    porque el disco de Render es efimero: el archivo se veia unos minutos y
+    luego desaparecia. El archivo en disco queda como cache del worker y la
+    ruta relativa mantiene compatibilidad con plantillas existentes."""
+    if not imagen or not imagen.filename:
+        return None, None, None
+    base = secure_filename(imagen.filename)
+    if not base:
+        ext = os.path.splitext(imagen.filename)[1].lower()
+        base = 'imagen' + ext
+    fn = secrets.token_hex(8) + '_' + base
+    datos = imagen.read()
+    mime = imagen.mimetype or 'image/jpeg'
+    try:
+        with open(os.path.join(app.config['UPLOAD_FOLDER'], fn), 'wb') as f:
+            f.write(datos)
+    except Exception:
+        pass
+    return 'uploads/' + fn, datos, mime
+
+
 @app.route('/agregar_producto', methods=['POST'])
 def agregar_producto():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -1074,17 +1153,13 @@ def agregar_producto():
         flash('No se permiten precios negativos', 'danger')
         return redirect('/admin')
     imagen = request.files.get('imagen')
-    imagen_db = None
-    if imagen and imagen.filename:
-        fn  = secure_filename(imagen.filename)
-        imagen.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
-        imagen_db = 'uploads/' + fn
+    imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
 
     cur = mysql.connection.cursor()
     cur.execute(f"""
-        INSERT INTO {ALMACEN_DB}.productos (nombre, descripcion, precio, stock, categoria, imagen)
-        VALUES (%s,%s,%s,%s,%s,%s)
-    """, (nombre, descripcion, precio, stock, categoria, imagen_db))
+        INSERT INTO {ALMACEN_DB}.productos (nombre, descripcion, precio, stock, categoria, imagen, imagen_datos, imagen_mime)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (nombre, descripcion, precio, stock, categoria, imagen_db, imagen_datos, imagen_mime))
     mysql.connection.commit()
     nuevo_id = cur.lastrowid
     verificar_stock_bajo(cur, nuevo_id)
@@ -1119,12 +1194,11 @@ def editar_producto(id):
             return redirect(f'/editar_producto/{id}')
 
         if imagen and imagen.filename:
-            fn = secure_filename(imagen.filename)
-            imagen.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
+            imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
             cur.execute(f"""
                 UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
-                stock=%s, categoria=%s, imagen=%s WHERE id=%s
-            """, (nombre, descripcion, precio, stock, categoria, 'uploads/'+fn, id))
+                stock=%s, categoria=%s, imagen=%s, imagen_datos=%s, imagen_mime=%s WHERE id=%s
+            """, (nombre, descripcion, precio, stock, categoria, imagen_db, imagen_datos, imagen_mime, id))
         else:
             cur.execute(f"""
                 UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
@@ -2755,19 +2829,93 @@ def perfil():
         if not validate_csrf():
             flash('Token CSRF inválido.', 'danger')
             return redirect('/perfil')
-        nuevo_correo = request.form.get('correo', '').strip()
-        if nuevo_correo and nuevo_correo != session.get('correo'):
-            cur.execute("SELECT id FROM usuarios WHERE correo=%s AND id!=%s", (nuevo_correo, user_id))
+
+        accion = request.form.get('accion', 'datos')
+
+        # ── 1) Agregar / cambiar número de teléfono ──
+        if accion == 'telefono':
+            telefono = request.form.get('telefono', '').strip()
+            if telefono and not re.fullmatch(r"[0-9]+", telefono):
+                flash('El teléfono solo puede contener números.', 'danger')
+                return redirect('/perfil')
+            if len(telefono) > 9:
+                flash('El teléfono no puede tener más de 9 dígitos.', 'danger')
+                return redirect('/perfil')
+            cur.execute("UPDATE usuarios SET telefono=%s WHERE id=%s",
+                        (telefono or None, user_id))
+            mysql.connection.commit()
+            cur.close()
+            flash('Número de teléfono guardado.', 'success')
+            return redirect('/perfil')
+
+        # ── 2) Cambiar correo electrónico ──
+        if accion == 'correo':
+            nuevo_correo = request.form.get('correo', '').strip()
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", nuevo_correo):
+                flash('Ingresa un correo electrónico válido.', 'danger')
+                return redirect('/perfil')
+            cur.execute("SELECT id FROM usuarios WHERE correo=%s AND id!=%s",
+                        (nuevo_correo, user_id))
             if cur.fetchone():
                 flash('Ese correo ya está en uso.', 'danger')
             else:
-                cur.execute("UPDATE usuarios SET correo=%s WHERE id=%s", (nuevo_correo, user_id))
-                mysql.connection.commit()
+                cur.execute("UPDATE usuarios SET correo=%s WHERE id=%s",
+                            (nuevo_correo, user_id))
                 session['correo'] = nuevo_correo
-                flash('Correo actualizado.', 'success')
+                mysql.connection.commit()
+                flash('Correo electrónico actualizado.', 'success')
+            cur.close()
+            return redirect('/perfil')
+
+        # ── 3) Datos personales (nombre, apellido, documento) ──
+        nombre   = request.form.get('nombre', '').strip()
+        apellido = request.form.get('apellido', '').strip()
+        doc_tipo = request.form.get('documento_tipo', '').strip()
+        doc_num  = request.form.get('documento_numero', '').strip()
+        if doc_tipo not in ('', 'dni', 'ruc'):
+            doc_tipo = ''
+
+        # ── Validaciones de los campos ──
+        errores = []
+        if nombre and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+", nombre):
+            errores.append('Los nombres solo pueden contener letras.')
+        if apellido and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+", apellido):
+            errores.append('Los apellidos solo pueden contener letras.')
+        if doc_num and not re.fullmatch(r"[0-9]+", doc_num):
+            errores.append('El número de documento solo puede contener números.')
+        if doc_tipo == 'dni' and len(doc_num) > 8:
+            errores.append('El DNI no puede tener más de 8 dígitos.')
+        if doc_tipo == 'ruc' and len(doc_num) > 11:
+            errores.append('El RUC no puede tener más de 11 dígitos.')
+
+        if errores:
+            for e in errores:
+                flash(e, 'danger')
+            cur.execute("""SELECT id, correo, rol, estado, created_at, nombre, apellido,
+                           telefono, documento_tipo, documento_numero
+                           FROM usuarios WHERE id=%s""", (user_id,))
+            usuario = cur.fetchone()
+            cur.close()
+            usuario['nombre']   = nombre or usuario['nombre']
+            usuario['apellido'] = apellido or usuario['apellido']
+            usuario['documento_tipo']   = doc_tipo
+            usuario['documento_numero'] = doc_num
+            return render_template('perfil.html', usuario=usuario)
+
+        cur.execute("""
+            UPDATE usuarios SET nombre=%s, apellido=%s,
+            documento_tipo=%s, documento_numero=%s WHERE id=%s
+        """, (nombre or None, apellido or None,
+              doc_tipo or None, doc_num or None, user_id))
+        session['nombre']   = nombre
+        session['apellido'] = apellido
+        mysql.connection.commit()
         cur.close()
+        flash('Datos actualizados.', 'success')
         return redirect('/perfil')
-    cur.execute("SELECT id, correo, rol, estado, created_at FROM usuarios WHERE id=%s", (user_id,))
+    cur.execute("""SELECT id, correo, rol, estado, created_at, nombre, apellido,
+                   telefono, documento_tipo, documento_numero
+                   FROM usuarios WHERE id=%s""", (user_id,))
     usuario = cur.fetchone()
     cur.close()
     return render_template('perfil.html', usuario=usuario)
@@ -3108,6 +3256,51 @@ def _ensure_db_fallback():
         # en cada request. Las tablas se crearán cuando se acceda a ellas.
         _db_initialized = True
         app.logger.error('init_db falló definitivamente, continuando sin tablas: %s', e)
+
+# ─────────────────────────────────────────────
+# IMAGENES PERSISTENTES DE PRODUCTOS
+# ─────────────────────────────────────────────
+# Los archivos subidos viven en static/uploads, un disco EFIMERO: en Render se
+# borra al reiniciar/spin-down (por eso la imagen se veia unos minutos y luego
+# desaparecia) y ademas esta en .gitignore. Para que persistan, al subir se
+# guardan los bytes en la BD (productos.imagen_datos). Aqui se envuelve la
+# vista estatica de Flask: si el archivo no esta en disco, se busca el blob en
+# la BD y se devuelve. Asi las plantillas que ya usan
+# url_for('static', filename='uploads/...') siguen funcionando sin cambios.
+_static_original = app.view_functions.get('static')
+
+
+def _servir_imagen_desde_db(filename):
+    """Devuelve el blob guardado en la BD para 'uploads/<filename>' o None."""
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute(
+            f"SELECT imagen_datos, imagen_mime FROM {ALMACEN_DB}.productos "
+            f"WHERE imagen=%s AND imagen_datos IS NOT NULL LIMIT 1",
+            ('uploads/' + filename,),
+        )
+        fila = cur.fetchone()
+        cur.close()
+    except Exception:
+        return None
+    if not fila or not fila['imagen_datos']:
+        return None
+    return Response(fila['imagen_datos'], mimetype=fila['imagen_mime'] or 'image/jpeg')
+
+
+def _static_con_db(filename):
+    try:
+        return _static_original(filename=filename)
+    except NotFound:
+        if filename.startswith('uploads/'):
+            resp = _servir_imagen_desde_db(filename[len('uploads/'):])
+            if resp is not None:
+                return resp
+        raise
+
+
+if _static_original is not None:
+    app.view_functions['static'] = _static_con_db
 
 # ─────────────────────────────────────────────
 # KPIs TECNICOS

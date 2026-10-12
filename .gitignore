@@ -11,6 +11,8 @@ static/uploads/*.webp
 static/boleta_*.pdf
 # Logs locales de prueba
 arrancar/*.log
+local.out
+local.err
 
 _fijar_ojo.py
 _ojofix.py

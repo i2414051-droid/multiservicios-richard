@@ -151,6 +151,46 @@ padding:10px 25px;
 transform:translateY(-3px);
 }
 
+/* TUERCA: menu de gestion de cuenta */
+.boton-tuerca{
+padding:10px 14px;
+border-radius:50%;
+}
+.menu-cuenta{
+background: var(--bg-card);
+border:1px solid var(--border-card);
+box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+min-width: 240px;
+padding:6px;
+transition: background 0.3s ease, border-color 0.3s ease;
+}
+.menu-cuenta .dropdown-header{
+color: var(--text-muted);
+font-size:12px;
+text-transform:uppercase;
+letter-spacing:.5px;
+}
+.menu-cuenta .dropdown-item{
+color: var(--text-primary);
+border-radius:10px;
+padding:8px 12px;
+}
+.menu-cuenta .dropdown-item:hover,
+.menu-cuenta .dropdown-item:focus{
+background: rgba(243,156,18,0.15);
+color: var(--text-primary);
+}
+.menu-cuenta .dropdown-item.text-danger{
+color:#ff6b6b !important;
+}
+.menu-cuenta .dropdown-item.text-danger:hover,
+.menu-cuenta .dropdown-item.text-danger:focus{
+background: rgba(255,107,107,0.15);
+}
+.menu-cuenta .dropdown-divider{
+border-color: var(--border-subtle);
+}
+
 /* THEME TOGGLE */
 .theme-toggle{
 background: var(--bg-usuario);
@@ -619,7 +659,7 @@ width:100%;
 small, .small {
   color: var(--text-muted);
 }
-td, th, p, label, span, a:not(.btn):not(.menu-item):not(.nav-link) {
+td, th, p, label, span, a:not(.btn):not(.menu-item):not(.nav-link):not(.dropdown-item) {
   color: inherit;
 }
 [data-theme="light"] .text-white {

@@ -1,47 +1,117 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="container mt-4" style="max-width:700px">
+<div class="container mt-4" style="max-width:920px">
   <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-person-circle"></i> Mi Perfil</h2>
 
   <div class="row g-4 mt-2">
     <!-- DATOS -->
-    <div class="col-md-6">
+    <div class="col-md-7">
       <div class="card h-100 tc">
-        <div class="card-body">
-          <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-envelope me-1"></i> Datos de cuenta</h5>
+        <div class="card-body p-4">
+          <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-person-vcard me-1"></i> Datos personales</h5>
           <form method="POST" action="/perfil">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <div class="mb-3">
-              <label class="form-label" style="color:var(--text-muted)">Correo electrónico</label>
-              <input type="email" class="form-control bg-dark text-white border-0" name="correo"
-                     value="{{ usuario.correo }}">
+            <input type="hidden" name="accion" value="datos">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label" style="color:var(--text-muted)">Nombres</label>
+                <input type="text" class="form-control bg-dark text-white border-0" name="nombre"
+                       pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+" title="Solo letras"
+                       oninput="this.value=this.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g,'')"
+                       value="{{ usuario.nombre or '' }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" style="color:var(--text-muted)">Apellidos</label>
+                <input type="text" class="form-control bg-dark text-white border-0" name="apellido"
+                       pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]+" title="Solo letras"
+                       oninput="this.value=this.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g,'')"
+                       value="{{ usuario.apellido or '' }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" style="color:var(--text-muted)">Tipo de documento</label>
+                <select class="form-select bg-dark text-white border-0" name="documento_tipo" id="docTipo">
+                  <option value="">—</option>
+                  <option value="dni" {% if usuario.documento_tipo == 'dni' %}selected{% endif %}>DNI</option>
+                  <option value="ruc" {% if usuario.documento_tipo == 'ruc' %}selected{% endif %}>RUC</option>
+                </select>
+              </div>
+              <div class="col-md-8">
+                <label class="form-label" style="color:var(--text-muted)">N° documento</label>
+                <input type="text" class="form-control bg-dark text-white border-0" name="documento_numero"
+                       id="docNumero" inputmode="numeric" title="Solo números"
+                       oninput="cleanDoc(this)"
+                       value="{{ usuario.documento_numero or '' }}">
+              </div>
             </div>
-            <div class="mb-3">
-              <label class="form-label" style="color:var(--text-muted)">Rol</label>
-              <input type="text" class="form-control bg-dark text-white border-0" value="{{ usuario.rol }}" disabled>
-            </div>
-            <div class="mb-3">
-              <label class="form-label" style="color:var(--text-muted)">Estado</label>
+
+            <div class="mt-3 d-flex align-items-center gap-2 flex-wrap">
+              <span class="badge bg-secondary text-uppercase">{{ usuario.rol }}</span>
               <span class="badge {% if usuario.estado=='activo' %}bg-success{% else %}bg-danger{% endif %}">
                 {{ usuario.estado }}
               </span>
+              <small style="color:var(--text-muted)">Miembro desde {{ usuario.created_at }}</small>
             </div>
-            <div class="mb-3">
-              <label class="form-label" style="color:var(--text-muted)">Miembro desde</label>
-              <p style="color:var(--text-secondary);margin:0">{{ usuario.created_at }}</p>
-            </div>
-            <button type="submit" class="btn btn-warning fw-bold">
-              <i class="bi bi-check-lg me-1"></i> Actualizar correo
+
+            <button type="submit" class="btn btn-warning fw-bold mt-3">
+              <i class="bi bi-check-lg me-1"></i> Guardar cambios
             </button>
           </form>
+
+          <!-- TELÉFONO -->
+          <div class="mt-4 pt-3" style="border-top:1px solid var(--border-subtle)">
+            <h6 style="color:#f39c12;font-weight:700"><i class="bi bi-telephone me-1"></i> Teléfono</h6>
+            {% if usuario.telefono %}
+              <p class="mb-2" style="color:var(--text-secondary);font-size:1.05rem"><strong>{{ usuario.telefono }}</strong></p>
+            {% else %}
+              <p class="mb-2" style="color:var(--text-muted)"><i class="bi bi-info-circle me-1"></i>No has registrado un número de teléfono.</p>
+            {% endif %}
+            <button type="button" class="btn btn-sm fw-bold {% if usuario.telefono %}btn-outline-warning{% else %}btn-warning{% endif %}"
+                    data-sin-carga data-sin-bloqueo onclick="toggleForm('formTelefono')">
+              {% if usuario.telefono %}
+                <i class="bi bi-pencil me-1"></i> Cambiar número de teléfono
+              {% else %}
+                <i class="bi bi-plus-lg me-1"></i> Agregar número de teléfono
+              {% endif %}
+            </button>
+            <form id="formTelefono" class="campo-extra mt-2" method="POST" action="/perfil" style="display:none">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="accion" value="telefono">
+              <div class="input-group">
+                <input type="text" class="form-control bg-dark text-white border-0" name="telefono"
+                       inputmode="numeric" maxlength="9" pattern="[0-9]{0,9}" title="Solo números (máx. 9)"
+                       oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,9)"
+                       placeholder="Número de teléfono (máx. 9)" required>
+                <button class="btn btn-warning fw-bold" type="submit">Guardar</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- CORREO -->
+          <div class="mt-4 pt-3" style="border-top:1px solid var(--border-subtle)">
+            <h6 style="color:#f39c12;font-weight:700"><i class="bi bi-envelope me-1"></i> Correo electrónico</h6>
+            <p class="mb-2" style="color:var(--text-secondary);font-size:1.05rem"><strong>{{ usuario.correo }}</strong></p>
+            <button type="button" class="btn btn-outline-warning btn-sm fw-bold" data-sin-carga data-sin-bloqueo
+                    onclick="toggleForm('formCorreo')">
+              <i class="bi bi-pencil me-1"></i> Cambiar correo electrónico
+            </button>
+            <form id="formCorreo" class="campo-extra mt-2" method="POST" action="/perfil" style="display:none">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="accion" value="correo">
+              <div class="input-group">
+                <input type="email" class="form-control bg-dark text-white border-0" name="correo"
+                       value="{{ usuario.correo }}" placeholder="Nuevo correo electrónico" required>
+                <button class="btn btn-warning fw-bold" type="submit">Guardar</button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- CONTRASEÑA -->
-    <div class="col-md-6">
+    <div class="col-md-5" id="contrasena">
       <div class="card h-100 tc">
-        <div class="card-body">
+        <div class="card-body p-4">
           <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-lock me-1"></i> Cambiar contraseña</h5>
           <form method="POST" action="/cambiar-password">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -66,4 +136,34 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleForm(id){
+  var forms = document.querySelectorAll('.campo-extra');
+  for (var i = 0; i < forms.length; i++){
+    if (forms[i].id !== id){ forms[i].style.display = 'none'; }
+  }
+  var el = document.getElementById(id);
+  if (el){ el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+}
+function cleanDoc(inp){
+  inp.value = inp.value.replace(/[^0-9]/g, '').slice(0, 11);
+}
+(function(){
+  var tipo = document.getElementById('docTipo');
+  var num  = document.getElementById('docNumero');
+  if (tipo && num){
+    var aplicar = function(){
+      var max = tipo.value === 'dni' ? 8 : 11;
+      num.setAttribute('maxlength', max);
+      num.setAttribute('placeholder', tipo.value === 'dni' ? 'Máx. 8 dígitos' : 'Máx. 11 dígitos');
+      if (num.value.length > max){ num.value = num.value.slice(0, max); }
+    };
+    tipo.addEventListener('change', aplicar);
+    aplicar();
+  }
+})();
+</script>
 {% endblock %}
