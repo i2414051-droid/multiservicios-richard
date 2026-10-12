@@ -27,6 +27,8 @@ font-family:'Montserrat',sans-serif;
   --border-main: rgba(243,156,18,0.3);
   --border-card: rgba(243,156,18,0.3);
   --border-usuario: #1e3d5e;
+  --border-usuario-hover: #2d5a8a;
+  --bg-usuario-hover: #0d1b2a;
   --border-subtle: rgba(255,255,255,0.05);
   --shadow-nav: 0 0 25px rgba(243,156,18,0.3);
   --shadow-card: 0px 0px 25px rgba(243,156,18,0.6);
@@ -57,6 +59,8 @@ font-family:'Montserrat',sans-serif;
   --border-main: rgba(200,130,10,0.4);
   --border-card: rgba(0,0,0,0.1);
   --border-usuario: #dee2e6;
+  --border-usuario-hover: #cddce8;
+  --bg-usuario-hover: #e4e8ed;
   --border-subtle: rgba(0,0,0,0.08);
   --shadow-nav: 0 2px 15px rgba(0,0,0,0.08);
   --shadow-card: 0px 4px 20px rgba(0,0,0,0.08);
@@ -152,9 +156,20 @@ transform:translateY(-3px);
 }
 
 /* TUERCA: menu de gestion de cuenta */
-.boton-tuerca{
+.boton-menu-cuenta{
 padding:10px 14px;
-border-radius:50%;
+border-radius:25px;
+background: var(--bg-usuario);
+border:1px solid var(--border-usuario);
+transition: background 0.3s ease, border-color 0.3s ease;
+}
+.boton-menu-cuenta:hover{
+background: var(--bg-usuario-hover);
+border-color: var(--border-usuario-hover);
+}
+.boton-menu-cuenta i{
+font-size:22px;
+color:#f39c12;
 }
 .menu-cuenta{
 background: var(--bg-card);

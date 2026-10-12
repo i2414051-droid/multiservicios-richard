@@ -1071,6 +1071,7 @@ def registro():
         cur.execute("INSERT INTO usuarios (correo, password, rol, documento_tipo, documento_numero, nombre, apellido, telefono) VALUES (%s,%s,'cliente',%s,%s,%s,%s,%s)",
                     (correo, h, documento_tipo, documento_numero, nombres, apellidos, telefono))
         mysql.connection.commit()
+        flash('¡Registro exitoso! Ya puedes iniciar sesión.', 'success')
         return redirect('/login')
     return render_template('registro.html')
 
