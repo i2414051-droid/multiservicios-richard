@@ -7,6 +7,10 @@
 .campo-select .campo-select-input{padding-right:28px;cursor:text}
 .campo-select-lista{position:absolute;z-index:1050;top:calc(100% + 4px);left:0;right:0;max-height:230px;overflow:auto;background:var(--bg-card);border:1px solid var(--border-main);border-radius:10px;box-shadow:0 8px 22px rgba(0,0,0,.35);display:none}
 .campo-select.abierto .campo-select-lista{display:block}
+/* La tabla vive dentro de .table-responsive (Bootstrap: overflow:auto), que
+   recortaria la lista desplegable del buscador de producto. Mientras hay un
+   combo abierto se libera ese recorte; al cerrarlo vuelve el scroll en movil. */
+body.combo-abierto .table-responsive{overflow:visible}
 .campo-select-item{padding:7px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--text-primary);border-bottom:1px solid var(--border-subtle)}
 .campo-select-item:last-child{border-bottom:none}
 .campo-select-item:hover,.campo-select-item.activo{background:rgba(243,156,18,.15)}
@@ -203,15 +207,20 @@
     }
 
     function abrir(){
-      if (listaAbiertas.has(wrapper)) return;
+      if (!listaAbiertas.has(wrapper)){
+        listaAbiertas.add(wrapper);
+        wrapper.classList.add('abierto');
+        document.body.classList.toggle('combo-abierto', listaAbiertas.size > 0);
+      }
+      // Siempre se repinta: asi al escribir se filtran los resultados
+      // aunque el evento focus no se haya disparado antes.
       indice = -1;
       pintar(coinciden(cfg.datos, input.value));
-      listaAbiertas.add(wrapper);
-      wrapper.classList.add('abierto');
     }
     function cerrar(){
       listaAbiertas.delete(wrapper);
       wrapper.classList.remove('abierto');
+      document.body.classList.toggle('combo-abierto', listaAbiertas.size > 0);
       lista.innerHTML = '';
       indice = -1;
     }
@@ -257,7 +266,7 @@
         }
       }
       indice = -1;
-      pintar(coinciden(cfg.datos, input.value));
+      abrir();
     });
     input.addEventListener('keydown', function(ev){
       var items = lista.children;
