@@ -60,7 +60,7 @@
         </tbody>
       </table>
       </div>
-      {{ paginacion(page, total_pages, total, '/salidas?', buscar) }}
+      {{ paginacion(page, total_pages, total, '/salidas?', {'buscar': buscar}) }}
     </div>
   </div>
   {% else %}

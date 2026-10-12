@@ -193,7 +193,7 @@
     </div>
     {% endfor %}
 
-  {{ paginacion(page, total_pages, total, '/historial-compras?', buscar) }}
+  {{ paginacion(page, total_pages, total, '/historial-compras?', {'buscar': buscar}) }}
 
   {% else %}
     <div class="text-center py-5">

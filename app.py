@@ -1966,22 +1966,61 @@ def enviar_email_a_proveedor(proveedor_id):
 def ingresos():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    buscar = request.args.get('buscar', '')
+    
+    # Filtros
+    buscar_proveedor = request.args.get('buscar_proveedor', '').strip()
+    buscar_producto = request.args.get('buscar_producto', '').strip()
+    fecha_desde = request.args.get('fecha_desde', '').strip()
+    fecha_hasta = request.args.get('fecha_hasta', '').strip()
     page = int(request.args.get('page', 1))
+    
     cur = mysql.connection.cursor()
-    sql_count = """SELECT COUNT(*) AS total FROM {0}.ingresos i
-        LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
-        WHERE p.nombre LIKE %s""".format(ALMACEN_DB)
-    sql_data = """SELECT i.id, i.fecha, i.notas,
+    
+    # WHERE dinámico
+    where_parts = []
+    params = []
+    
+    if buscar_proveedor:
+        where_parts.append("p.nombre LIKE %s")
+        params.append(f'%{buscar_proveedor}%')
+    if buscar_producto:
+        where_parts.append("EXISTS (SELECT 1 FROM {0}.detalle_ingreso di2 JOIN {0}.productos pr ON di2.producto_id=pr.id WHERE di2.ingreso_id=i.id AND pr.nombre LIKE %s)".format(ALMACEN_DB))
+        params.append(f'%{buscar_producto}%')
+    if fecha_desde:
+        where_parts.append("DATE(i.fecha) >= %s")
+        params.append(fecha_desde)
+    if fecha_hasta:
+        where_parts.append("DATE(i.fecha) <= %s")
+        params.append(fecha_hasta)
+    
+    where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+    
+    # Consulta con agregados: categoría, productos distintos, cantidad total
+    sql_count = f"""SELECT COUNT(*) AS total FROM {ALMACEN_DB}.ingresos i
+        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
+        {where_sql}"""
+    
+    sql_data = f"""SELECT i.id, i.fecha, i.notas,
                p.nombre AS proveedor_nombre,
-               (SELECT SUM(di.cantidad) FROM {0}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS total_items
-        FROM {0}.ingresos i
-        LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
-        WHERE p.nombre LIKE %s
-        ORDER BY i.fecha DESC""".format(ALMACEN_DB)
-    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
+               p.categoria AS proveedor_categoria,
+               COUNT(DISTINCT di.producto_id) AS productos_distintos,
+               COALESCE(SUM(di.cantidad), 0) AS total_cantidad
+        FROM {ALMACEN_DB}.ingresos i
+        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
+        LEFT JOIN {ALMACEN_DB}.detalle_ingreso di ON di.ingreso_id=i.id
+        {where_sql}
+        GROUP BY i.id, i.fecha, i.notas, p.nombre, p.categoria
+        ORDER BY i.fecha DESC"""
+    
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
     cur.close()
-    return render_template('ingresos.html', ingresos=items, buscar=buscar,
+    
+    return render_template('ingresos.html', 
+                           ingresos=items,
+                           buscar_proveedor=buscar_proveedor,
+                           buscar_producto=buscar_producto,
+                           fecha_desde=fecha_desde,
+                           fecha_hasta=fecha_hasta,
                            page=page, total_pages=total_pages, total=total,
                            has_prev=page > 1, has_next=page < total_pages)
 

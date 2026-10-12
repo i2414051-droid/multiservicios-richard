@@ -9,13 +9,37 @@
     </a>
   </div>
 
-  <!-- BUSCADOR -->
+  <!-- FILTROS COMBINABLES -->
   <form method="GET" class="mb-3">
-    <div class="input-group" style="max-width:400px">
-      <input type="text" name="buscar" class="form-control" placeholder="Buscar por proveedor..."
-             value="{{ buscar }}">
-      <button class="btn btn-warning" type="submit"><i class="bi bi-search"></i></button>
-      {% if buscar %}<a href="/ingresos" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+    <div class="row g-2 align-items-end flex-wrap">
+      <div class="col-md-3 col-sm-6">
+        <label class="form-label small fw-bold mb-1">Proveedor</label>
+        <input type="text" name="buscar_proveedor" class="form-control form-control-sm"
+               placeholder="Nombre o parte..." value="{{ buscar_proveedor }}">
+      </div>
+      <div class="col-md-3 col-sm-6">
+        <label class="form-label small fw-bold mb-1">Producto (en el ingreso)</label>
+        <input type="text" name="buscar_producto" class="form-control form-control-sm"
+               placeholder="Nombre del producto..." value="{{ buscar_producto }}">
+      </div>
+      <div class="col-md-2 col-sm-6">
+        <label class="form-label small fw-bold mb-1">Desde</label>
+        <input type="date" name="fecha_desde" class="form-control form-control-sm"
+               value="{{ fecha_desde }}">
+      </div>
+      <div class="col-md-2 col-sm-6">
+        <label class="form-label small fw-bold mb-1">Hasta</label>
+        <input type="date" name="fecha_hasta" class="form-control form-control-sm"
+               value="{{ fecha_hasta }}">
+      </div>
+      <div class="col-md-2 col-sm-12">
+        <button type="submit" class="btn btn-warning w-100"><i class="bi bi-search"></i> Filtrar</button>
+      </div>
+      <div class="col-md-2 col-sm-12">
+        {% if buscar_proveedor or buscar_producto or fecha_desde or fecha_hasta %}
+        <a href="/ingresos" class="btn btn-outline-secondary w-100">Limpiar</a>
+        {% endif %}
+      </div>
     </div>
   </form>
 
@@ -28,7 +52,9 @@
           <tr>
             <th>#</th>
             <th>Proveedor</th>
-            <th>Items</th>
+            <th>Categoría</th>
+            <th>Prod. distintos</th>
+            <th>Cant. total</th>
             <th>Fecha</th>
             <th>Acciones</th>
           </tr>
@@ -38,7 +64,9 @@
           <tr>
             <td><span class="badge" style="background:#f39c12;color:#000;font-size:14px">#{{ i.id }}</span></td>
             <td>{{ i.proveedor_nombre or 'Sin proveedor' }}</td>
-            <td><span class="badge bg-info text-dark">{{ i.total_items or 0 }}</span></td>
+            <td><span class="badge bg-secondary">{{ i.proveedor_categoria or '-' }}</span></td>
+            <td><span class="badge bg-info text-dark">{{ i.productos_distintos }}</span></td>
+            <td><span class="badge bg-success">{{ i.total_cantidad }}</span></td>
             <td style="color:var(--text-muted)">{{ i.fecha.strftime('%d/%m/%Y %H:%M') if i.fecha else '-' }}</td>
             <td>
               <div class="d-flex gap-1 justify-content-center">
@@ -52,7 +80,12 @@
         </tbody>
       </table>
       </div>
-      {{ paginacion(page, total_pages, total, '/ingresos?', buscar) }}
+      {{ paginacion(page, total_pages, total, '/ingresos?', {
+        'buscar_proveedor': buscar_proveedor,
+        'buscar_producto': buscar_producto,
+        'fecha_desde': fecha_desde,
+        'fecha_hasta': fecha_hasta
+      }) }}
     </div>
   </div>
   {% else %}

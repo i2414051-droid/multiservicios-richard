@@ -112,7 +112,7 @@
           </tbody>
         </table>
       </div>
-      {{ paginacion(page, total_pages, total, '/verificar-inventario?', buscar, filtro) }}
+      {{ paginacion(page, total_pages, total, '/verificar-inventario?', {'buscar': buscar, 'filtro': filtro}) }}
       {% else %}
       <div class="text-center py-5">
         <i class="bi bi-check-circle" style="font-size:48px;color:#27ae60"></i>
