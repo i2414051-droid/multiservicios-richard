@@ -18,7 +18,15 @@ agregadas, con las claves que la vista espera aunque no haya datos.
 from datetime import datetime, timedelta
 import threading
 
-import MySQLdb
+# Driver MySQL: mysqlclient (MySQLdb) en produccion; PyMySQL como respaldo
+# cuando no hay librerias nativas (por ejemplo en Windows local).
+try:
+    import MySQLdb
+except ImportError:  # pragma: no cover - depende del entorno
+    import pymysql
+    pymysql.install_as_MySQLdb()
+    import MySQLdb
+
 from MySQLdb import cursors as mysql_cursors
 from flask import current_app
 

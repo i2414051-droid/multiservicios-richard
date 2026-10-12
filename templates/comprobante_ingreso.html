@@ -37,8 +37,9 @@
           <tr>
             <th>Producto</th>
             <th>Cantidad</th>
-            <th>Precio Compra</th>
-            <th>Subtotal</th>
+            <th>P. Compra (unidad)</th>
+            <th>P. Venta (unidad)</th>
+            <th>Subtotal (compra)</th>
           </tr>
         </thead>
         <tbody>
@@ -47,14 +48,19 @@
             <td style="color:var(--text-primary)">{{ item.producto_nombre }}</td>
             <td><span class="badge bg-info text-dark">{{ item.cantidad }}</span></td>
             <td style="color:var(--text-secondary)">S/ {{ "%.2f"|format(item.precio_compra|float) }}</td>
+            <td style="color:var(--text-secondary)">S/ {{ "%.2f"|format(item.precio_venta|float) }}</td>
             <td style="color:#f39c12;font-weight:700">S/ {{ "%.2f"|format(item.cantidad * item.precio_compra|float) }}</td>
           </tr>
           {% endfor %}
         </tbody>
         <tfoot>
           <tr style="background:rgba(243,156,18,.1)">
-            <td colspan="3" class="text-end fw-bold" style="color:var(--text-primary);font-size:16px">TOTAL</td>
-            <td style="color:#f39c12;font-weight:800;font-size:18px">S/ {{ "%.2f"|format(total_general) }}</td>
+            <td colspan="4" class="text-end fw-bold" style="color:var(--text-primary);font-size:16px">TOTAL COMPRA</td>
+            <td style="color:#f39c12;font-weight:800;font-size:18px">S/ {{ "%.2f"|format(total_compra) }}</td>
+          </tr>
+          <tr style="background:rgba(243,156,18,.05)">
+            <td colspan="4" class="text-end fw-bold" style="color:var(--text-muted)">TOTAL VENTA (estimado)</td>
+            <td style="color:var(--text-secondary);font-weight:700">S/ {{ "%.2f"|format(total_venta) }}</td>
           </tr>
         </tfoot>
       </table>

@@ -9,6 +9,11 @@ itsdangerous==2.2.0
 click==8.4.1
 blinker==1.9.0
 mysqlclient==2.2.8
+# Respaldo de driver MySQL en Python puro (Windows/local sin librerias nativas).
+# app.py lo activa automaticamente solo si `mysqlclient` no esta disponible.
+PyMySQL==1.1.1
+# Carga del archivo .env en desarrollo local (no-op en Render, no hay .env).
+python-dotenv==1.2.4
 reportlab==4.5.1
 requests==2.34.2
 Pillow==12.2.0

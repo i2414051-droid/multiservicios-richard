@@ -1,3 +1,26 @@
+# ─────────────────────────────────────────────
+# DRIVER MySQL
+# En produccion (Render) se usa mysqlclient, que expone el modulo `MySQLdb`.
+# En local/Windows ese driver necesita compilador y librerias nativas, asi que
+# si `MySQLdb` no esta disponible se cae a PyMySQL (Python puro) instalando el
+# mismo alias. Flask-MySQLdb y el modulo de KPI importan `MySQLdb`, por lo que
+# el alias debe quedar registrado ANTES de importarlos.
+# ─────────────────────────────────────────────
+try:
+    import MySQLdb  # noqa: F401
+except ImportError:  # pragma: no cover - depende del entorno
+    import pymysql
+    pymysql.install_as_MySQLdb()
+
+# Carga el .env local si existe. En Render no hay archivo .env (las variables
+# llegan por el panel de entorno), por lo que esta llamada es un no-op alli.
+# Es lo que permite que `python app.py` funcione en local sin exportar nada.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:  # python-dotenv no instalado: se usan las variables del sistema
+    pass
+
 import os, uuid, io, threading, secrets, time, re, logging, traceback
 from datetime import datetime, timedelta
 from functools import wraps
@@ -330,6 +353,21 @@ def _init_db_inner():
             )
         """)
 
+        # ── FKs corruptas (BD principal) ────────────────────────────────
+        # Estas claves foraneas NO las define la app: quedaron apuntando el
+        # 'id' de una tabla al 'id' de OTRA sin relacion (probablemente al
+        # importar/restaurar datos). Bloquean inserts legitimos (p. ej.
+        # registrar un cliente) y el codigo nunca dependio de ellas.
+        # Se eliminan; si ya no existen el ALTER falla y se ignora.
+        for sql in (
+            "ALTER TABLE clientes DROP FOREIGN KEY clientes_ibfk_1",
+            "ALTER TABLE bloqueos_ip DROP FOREIGN KEY bloqueos_ip_ibfk_1",
+        ):
+            try:
+                cur.execute(sql)
+            except Exception:
+                pass
+
         mysql.connection.commit()
         app.logger.info("[init_db] Tablas BD principal OK")
 
@@ -412,9 +450,17 @@ def _init_db_inner():
                 ingreso_id  INT NOT NULL,
                 producto_id INT NOT NULL,
                 cantidad    INT NOT NULL,
-                precio_compra DECIMAL(10,2) DEFAULT 0
+                precio_compra DECIMAL(10,2) DEFAULT 0,
+                precio_venta  DECIMAL(10,2) DEFAULT 0
             )
         """)
+        # Migracion: tabla ya existente -> anadir precio_venta (el que se
+        # define al ingresar) para poder mostrarlo luego en la boleta.
+        try:
+            cur.execute(f"ALTER TABLE {ALMACEN_DB}.detalle_ingreso "
+                        f"ADD COLUMN precio_venta DECIMAL(10,2) DEFAULT 0")
+        except Exception:
+            pass
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.salidas (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -431,6 +477,19 @@ def _init_db_inner():
                 cantidad    INT NOT NULL
             )
         """)
+
+        # ── FKs corruptas (BD almacén) ──────────────────────────────────
+        # Ver nota en la BD principal: apuntan el 'id' al 'id' de otra tabla
+        # sin relacion y hoy bloquean crear proveedores, ingresos y salidas.
+        for sql in (
+            f"ALTER TABLE {ALMACEN_DB}.proveedores DROP FOREIGN KEY proveedores_ibfk_1",
+            f"ALTER TABLE {ALMACEN_DB}.ingresos DROP FOREIGN KEY ingresos_ibfk_1",
+            f"ALTER TABLE {ALMACEN_DB}.detalle_salida DROP FOREIGN KEY detalle_salida_ibfk_1",
+        ):
+            try:
+                cur.execute(sql)
+            except Exception:
+                pass
 
         # Migración única: copiar datos de BD principal si almacén está vacía
         for tabla in ('productos', 'proveedores', 'productos_para_pedir'):
@@ -1930,45 +1989,159 @@ def ingresos():
 def registrar_ingreso():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    cur = mysql.connection.cursor()
-    cur.execute(f"SELECT id, nombre, stock, precio FROM {ALMACEN_DB}.productos WHERE estado='activo' ORDER BY nombre")
-    productos = cur.fetchall()
-    cur.execute(f"SELECT id, nombre FROM {ALMACEN_DB}.proveedores ORDER BY nombre")
-    proveedores = cur.fetchall()
-    cur.close()
+
+    def _cargar_catalogos():
+        """Productos y proveedores ya normalizados para el selector buscador."""
+        cur = mysql.connection.cursor()
+        cur.execute(f"SELECT id, nombre, stock, precio FROM {ALMACEN_DB}.productos "
+                    f"ORDER BY nombre")
+        prod = [{'id': r['id'], 'nombre': r['nombre'],
+                 'stock': int(r['stock'] or 0), 'precio': float(r['precio'] or 0)}
+                for r in cur.fetchall()]
+        cur.execute(f"SELECT id, nombre FROM {ALMACEN_DB}.proveedores ORDER BY nombre")
+        prov = [{'id': r['id'], 'nombre': r['nombre']} for r in cur.fetchall()]
+        cur.close()
+        return prod, prov
 
     if request.method == 'POST':
         if not validate_csrf():
             flash('Token CSRF inválido.', 'danger')
             return redirect('/registrar-ingreso')
-        proveedor_id = request.form.get('proveedor_id') or None
-        notas = request.form.get('notas', '')
+
+        proveedor_id = (request.form.get('proveedor_id') or '').strip()
+        notas = request.form.get('notas', '').strip()
         producto_ids = request.form.getlist('producto_id[]')
         cantidades = request.form.getlist('cantidad[]')
-        precios = request.form.getlist('precio_compra[]')
+        precios_compra = request.form.getlist('precio_compra[]')
+        precios_venta = request.form.getlist('precio_venta[]')
 
-        cur = mysql.connection.cursor()
-        cur.execute(f"INSERT INTO {ALMACEN_DB}.ingresos (proveedor_id, notas) VALUES (%s, %s)", (proveedor_id, notas))
-        ingreso_id = cur.lastrowid
+        errores = []
+        filas = []
+        vistos = set()
 
-        for i in range(len(producto_ids)):
-            try:
-                pid = int(producto_ids[i])
-                cant = int(cantidades[i])
-                prec = float(precios[i]) if precios[i] else 0
-            except (ValueError, IndexError):
+        if not proveedor_id:
+            errores.append('Debes seleccionar un proveedor.')
+
+        total_filas = max(len(producto_ids), len(cantidades),
+                          len(precios_compra), len(precios_venta))
+        for i in range(total_filas):
+            pid_raw = (producto_ids[i] if i < len(producto_ids) else '').strip()
+            cant_raw = (cantidades[i] if i < len(cantidades) else '').strip()
+            pc_raw = (precios_compra[i] if i < len(precios_compra) else '').strip()
+            pv_raw = (precios_venta[i] if i < len(precios_venta) else '').strip()
+
+            # Ignora filas completamente vacias (por ejemplo, la fila base
+            # cuando el usuario solo agrego filas nuevas).
+            if not any([pid_raw, cant_raw, pc_raw, pv_raw]):
                 continue
-            if cant > 0:
-                cur.execute(f"INSERT INTO {ALMACEN_DB}.detalle_ingreso (ingreso_id, producto_id, cantidad, precio_compra) VALUES (%s,%s,%s,%s)",
-                            (ingreso_id, pid, cant, prec))
-                cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock+%s WHERE id=%s", (cant, pid))
 
-        mysql.connection.commit()
-        cur.close()
-        flash(f'Ingreso #{ingreso_id} registrado correctamente.', 'success')
-        return redirect(f'/comprobante-ingreso/{ingreso_id}')
+            n = i + 1
+            fallos = []
+            pid = cant = pc = pv = None
 
-    return render_template('registrar_ingreso.html', productos=productos, proveedores=proveedores)
+            try:
+                pid = int(pid_raw)
+            except (TypeError, ValueError):
+                fallos.append('producto inválido')
+            try:
+                cant = int(cant_raw)
+                if cant <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                fallos.append('cantidad debe ser mayor a 0')
+            try:
+                pc = float(pc_raw)
+                if pc < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                fallos.append('precio de compra inválido')
+            try:
+                pv = float(pv_raw)
+                if pv <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                fallos.append('precio de venta debe ser mayor a 0')
+            if pid is not None and pid in vistos:
+                fallos.append('producto repetido en el ingreso')
+
+            if fallos:
+                errores.append(f'Fila {n}: ' + ', '.join(fallos) + '.')
+                continue
+
+            vistos.add(pid)
+            filas.append({'producto_id': pid, 'cantidad': cant,
+                          'precio_compra': pc, 'precio_venta': pv})
+
+        # "Sin productos" solo si no hubo errores por fila (esos ya explican el
+        # motivo). Asi, si faltan varias cosas, se reportan todas.
+        if not filas and not any(e.startswith('Fila ') for e in errores):
+            errores.append('Agrega al menos un producto al ingreso.')
+
+        # El proveedor debe existir si se envio.
+        if not errores and proveedor_id:
+            cur = mysql.connection.cursor()
+            cur.execute(f"SELECT id FROM {ALMACEN_DB}.proveedores WHERE id=%s",
+                        (proveedor_id,))
+            if not cur.fetchone():
+                errores.append('El proveedor seleccionado no existe.')
+            cur.close()
+
+        if not errores:
+            cur = mysql.connection.cursor()
+            try:
+                # Se fija la fecha desde Python (mismo reloj que usan los KPIs).
+                cur.execute(
+                    f"INSERT INTO {ALMACEN_DB}.ingresos (proveedor_id, notas, fecha) "
+                    f"VALUES (%s,%s,%s)",
+                    (proveedor_id, notas, datetime.now()))
+                ingreso_id = cur.lastrowid
+
+                for f in filas:
+                    cur.execute(
+                        f"INSERT INTO {ALMACEN_DB}.detalle_ingreso "
+                        f"(ingreso_id, producto_id, cantidad, precio_compra, precio_venta) "
+                        f"VALUES (%s,%s,%s,%s,%s)",
+                        (ingreso_id, f['producto_id'], f['cantidad'],
+                         f['precio_compra'], f['precio_venta']))
+                    # El ingreso repone stock y actualiza el precio de venta.
+                    # Si el producto estaba inactivo por quedarse sin stock,
+                    # vuelve a estar disponible en la tienda.
+                    cur.execute(
+                        f"UPDATE {ALMACEN_DB}.productos "
+                        f"SET stock=stock+%s, precio=%s, estado='activo' WHERE id=%s",
+                        (f['cantidad'], f['precio_venta'], f['producto_id']))
+
+                mysql.connection.commit()
+                cur.close()
+                flash(f'Ingreso #{ingreso_id} registrado correctamente.', 'success')
+                return redirect(f'/comprobante-ingreso/{ingreso_id}')
+            except Exception as exc:
+                mysql.connection.rollback()
+                cur.close()
+                app.logger.error('registrar_ingreso fallo: %s', exc)
+                errores.append('No se pudo registrar el ingreso. Intenta de nuevo.')
+
+        for e in errores:
+            flash(e, 'danger')
+
+        # Se devuelve el formulario con lo que el usuario ya habia escrito.
+        productos, proveedores = _cargar_catalogos()
+        valores = {
+            'proveedor_id': proveedor_id,
+            'notas': notas,
+            'filas': [{
+                'producto_id': (producto_ids[i] if i < len(producto_ids) else ''),
+                'cantidad':    (cantidades[i] if i < len(cantidades) else ''),
+                'precio_compra': (precios_compra[i] if i < len(precios_compra) else ''),
+                'precio_venta':  (precios_venta[i] if i < len(precios_venta) else ''),
+            } for i in range(total_filas)],
+        }
+        return render_template('registrar_ingreso.html', productos=productos,
+                               proveedores=proveedores, valores=valores)
+
+    productos, proveedores = _cargar_catalogos()
+    return render_template('registrar_ingreso.html', productos=productos,
+                           proveedores=proveedores)
 
 @app.route('/comprobante-ingreso/<int:id>')
 def comprobante_ingreso(id):
@@ -1988,16 +2161,19 @@ def comprobante_ingreso(id):
         flash('Ingreso no encontrado.', 'danger')
         return redirect('/ingresos')
     cur.execute("""
-        SELECT di.cantidad, di.precio_compra,
+        SELECT di.cantidad, di.precio_compra, di.precio_venta,
                pr.nombre AS producto_nombre, pr.stock AS stock_actual
         FROM {0}.detalle_ingreso di
         JOIN {0}.productos pr ON di.producto_id=pr.id
         WHERE di.ingreso_id=%s
     """.format(ALMACEN_DB), (id,))
     items = cur.fetchall()
-    total_general = sum(i['cantidad'] * float(i['precio_compra']) for i in items)
+    total_compra = sum(i['cantidad'] * float(i['precio_compra'] or 0) for i in items)
+    total_venta = sum(i['cantidad'] * float(i['precio_venta'] or 0) for i in items)
     cur.close()
-    return render_template('comprobante_ingreso.html', ingreso=ingreso, items=items, total_general=total_general)
+    return render_template('comprobante_ingreso.html', ingreso=ingreso, items=items,
+                           total_general=total_compra, total_compra=total_compra,
+                           total_venta=total_venta)
 
 @app.route('/eliminar-ingreso/<int:id>')
 def eliminar_ingreso(id):
