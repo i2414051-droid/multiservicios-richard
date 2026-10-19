@@ -92,6 +92,13 @@
         </table>
       </div>
       {% endif %}
+      {% if e.estado not in ('entregado', 'cancelado') %}
+      <div style="margin-top:14px">
+        <button type="button" class="btn btn-danger" style="border-radius:15px" onclick="abrirCancelar({{ e.venta_id }})">
+          <i class="bi bi-x-circle me-1"></i> Cancelar pedido
+        </button>
+      </div>
+      {% endif %}
     </div>
   </div>
   {% endfor %}

@@ -353,6 +353,39 @@ def _init_db_inner():
             )
         """)
 
+        # ── Cancelación de pedidos: catálogo de motivos + registro ──
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS motivos_cancelacion (
+                codigo VARCHAR(30) PRIMARY KEY,
+                texto  VARCHAR(150) NOT NULL,
+                activo TINYINT DEFAULT 1
+            )
+        """)
+        for _cod, _txt in (
+            ('cambio_opinion', 'Cambié de opinión'),
+            ('mejor_precio', 'Encontré mejor precio'),
+            ('demora_entrega', 'Demora en la entrega'),
+            ('error_pedido', 'Error en el pedido'),
+            ('producto_equivocado', 'Producto equivocado'),
+            ('otro', 'Otro'),
+        ):
+            try:
+                cur.execute("INSERT IGNORE INTO motivos_cancelacion (codigo, texto) VALUES (%s,%s)",
+                            (_cod, _txt))
+            except Exception:
+                pass
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS cancelacion (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                venta_id        INT NOT NULL UNIQUE,
+                motivo_codigo   VARCHAR(30) NOT NULL DEFAULT 'otro',
+                motivo_detalle  TEXT,
+                cancelado_por   VARCHAR(10) NOT NULL DEFAULT 'cliente',
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX ix_cancel_motivo (motivo_codigo)
+            )
+        """)
+
         # ── FKs corruptas (BD principal) ────────────────────────────────
         # Estas claves foraneas NO las define la app: quedaron apuntando el
         # 'id' de una tabla al 'id' de OTRA sin relacion (probablemente al
@@ -672,6 +705,46 @@ def verificar_stock_bajo(cur, producto_id):
             threading.Thread(target=_enviar_proveedor, daemon=True).start()
     except Exception as e:
         print(f"[stock_bajo] {e}")
+
+# ─────────────────────────────────────────────
+# CANCELACIÓN DE PEDIDOS: motivos y stock
+# ─────────────────────────────────────────────
+
+MOTIVOS_CANCELACION = {
+    'cambio_opinion': 'Cambié de opinión',
+    'mejor_precio': 'Encontré mejor precio',
+    'demora_entrega': 'Demora en la entrega',
+    'error_pedido': 'Error en el pedido',
+    'producto_equivocado': 'Producto equivocado',
+    'otro': 'Otro',
+}
+
+def motivo_cancelacion_valido(codigo):
+    return codigo in MOTIVOS_CANCELACION
+
+app.jinja_env.globals['motivos_cancelacion'] = MOTIVOS_CANCELACION
+app.jinja_env.globals['motivo_cancelacion_valido'] = motivo_cancelacion_valido
+
+def restaurar_stock_venta(cur, venta_id):
+    """Devuelve al almacén el stock de cada artículo de la venta cancelada."""
+    cur.execute(f"SELECT producto_id, cantidad FROM detalle_venta WHERE venta_id=%s", (venta_id,))
+    lineas = cur.fetchall() or []
+    for it in lineas:
+        cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock+%s WHERE id=%s",
+                    (it['cantidad'], it['producto_id']))
+    return len(lineas)
+
+def registrar_cancelacion(cur, venta_id, motivo_codigo, motivo_detalle, cancelado_por):
+    """Registra el motivo de cancelación (idempotente por UNIQUE de venta_id)."""
+    if not motivo_cancelacion_valido(motivo_codigo):
+        motivo_codigo = 'otro'
+    try:
+        cur.execute(
+            "INSERT IGNORE INTO cancelacion (venta_id, motivo_codigo, motivo_detalle, cancelado_por)"
+            " VALUES (%s,%s,%s,%s)",
+            (venta_id, motivo_codigo, (motivo_detalle or None), cancelado_por))
+    except Exception:
+        pass
 
 def whatsapp_url(celular, mensaje):
     """Genera URL de WhatsApp con mensaje prefill."""
@@ -1675,6 +1748,18 @@ def actualizar_estado_venta(venta_id):
     if estado not in ['entregado', 'en espera', 'cancelado']:
         estado = 'en espera'
     cur = mysql.connection.cursor()
+    cur.execute("SELECT id, estado, total FROM ventas WHERE id=%s", (venta_id,))
+    venta = cur.fetchone()
+    if not venta:
+        cur.close()
+        flash('Venta no encontrada.', 'danger')
+        return redirect('/historial-compras')
+    anterior = venta['estado']
+    # Cancelado es terminal: ni se reabre ni se edita su motivo
+    if anterior == 'cancelado':
+        cur.close()
+        flash(f'Venta #{venta_id} ya está cancelada. Motivo no editable.', 'warning')
+        return redirect('/historial-compras')
     cur.execute("UPDATE ventas SET estado=%s WHERE id=%s", (estado, venta_id))
     # Replicar al seguimiento de entregas si existe (para que se comuniquen)
     if estado == 'entregado':
@@ -1682,6 +1767,16 @@ def actualizar_estado_venta(venta_id):
     else:
         seg_estado = {'en espera': 'pendiente', 'cancelado': 'cancelado'}.get(estado, 'pendiente')
         cur.execute("UPDATE seguimiento_entregas SET estado=%s WHERE venta_id=%s", (seg_estado, venta_id))
+    # Al cancelar como admin: devolver stock, reducir monto y registrar motivo
+    if estado == 'cancelado' and anterior != 'cancelado':
+        cur.execute(f"SELECT COALESCE(SUM(d.cantidad * d.precio), 0) AS monto_articulos "
+                    f"FROM detalle_venta d WHERE d.venta_id=%s", (venta_id,))
+        fila = cur.fetchone()
+        monto_articulos = float(fila['monto_articulos'] or 0) if fila else 0.0
+        nuevo_total = max(0.0, float(venta['total'] or 0) - monto_articulos)
+        cur.execute("UPDATE ventas SET total=%s WHERE id=%s", (nuevo_total, venta_id))
+        restaurar_stock_venta(cur, venta_id)
+        registrar_cancelacion(cur, venta_id, 'otro', 'Cancelado por administrador', 'admin')
     mysql.connection.commit()
     cur.close()
     flash(f'Venta #{venta_id} actualizada a "{estado}".', 'success')
@@ -2297,6 +2392,27 @@ def actualizar_entrega(id):
     nuevo_estado = request.form.get('estado', 'pendiente')
     notas = request.form.get('notas', '')
     cur = mysql.connection.cursor()
+    cur.execute("SELECT id, venta_id, estado FROM seguimiento_entregas WHERE id=%s", (id,))
+    fila = cur.fetchone()
+    if not fila:
+        cur.close()
+        flash('Entrega no encontrada.', 'danger')
+        return redirect('/entregas')
+    anterior = fila['estado']
+    venta_id = fila['venta_id']
+    cur.execute("SELECT id, estado, total FROM ventas WHERE id=%s", (venta_id,))
+    venta = cur.fetchone()
+    if not venta:
+        cur.close()
+        flash('Venta no encontrada.', 'danger')
+        return redirect('/entregas')
+    venta_anterior = venta['estado']
+    # Cancelado es terminal en ambos lados
+    cancelada = (anterior == 'cancelado' or venta_anterior == 'cancelado')
+    if cancelada:
+        cur.close()
+        flash(f'Venta #{venta_id} ya está cancelada. Motivo no editable.', 'warning')
+        return redirect('/entregas')
     if nuevo_estado == 'entregado':
         cur.execute("UPDATE seguimiento_entregas SET estado=%s, notas=%s, fecha_entrega=NOW() WHERE id=%s",
                     (nuevo_estado, notas, id))
@@ -2306,8 +2422,17 @@ def actualizar_entrega(id):
     # Replicar al historial de compras (ventas.estado) para que se comuniquen
     venta_estado = {'pendiente': 'en espera', 'en camino': 'en espera',
                     'entregado': 'entregado', 'cancelado': 'cancelado'}.get(nuevo_estado, 'en espera')
-    cur.execute("UPDATE ventas SET estado=%s WHERE id=(SELECT venta_id FROM seguimiento_entregas WHERE id=%s)",
-                (venta_estado, id))
+    cur.execute("UPDATE ventas SET estado=%s WHERE id=%s", (venta_estado, venta_id))
+    # Al cancelar como admin: devolver stock (una sola vez), reducir monto y registrar motivo
+    if nuevo_estado == 'cancelado' and venta_anterior != 'cancelado':
+        cur.execute(f"SELECT COALESCE(SUM(d.cantidad * d.precio), 0) AS monto_articulos "
+                    f"FROM detalle_venta d WHERE d.venta_id=%s", (venta_id,))
+        fila2 = cur.fetchone()
+        monto_articulos = float(fila2['monto_articulos'] or 0) if fila2 else 0.0
+        nuevo_total = max(0.0, float(venta['total'] or 0) - monto_articulos)
+        cur.execute("UPDATE ventas SET total=%s WHERE id=%s", (nuevo_total, venta_id))
+        restaurar_stock_venta(cur, venta_id)
+        registrar_cancelacion(cur, venta_id, 'otro', 'Cancelado por administrador', 'admin')
     mysql.connection.commit()
     cur.close()
     flash('Estado de entrega actualizado.', 'success')
@@ -3199,6 +3324,56 @@ def mis_entregas():
         entregas.append({**v, 'productos': cur.fetchall()})
     cur.close()
     return render_template('mis_entregas.html', entregas=entregas)
+
+@app.route('/mis-entregas/cancelar/<int:venta_id>', methods=['POST'])
+def cancelar_pedido(venta_id):
+    """El cliente cancela su propio pedido (pendiente o en espera)."""
+    if 'user_id' not in session:
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect('/mis-entregas')
+    user_id = session['user_id']
+    motivo = (request.form.get('motivo') or '').strip()
+    detalle = (request.form.get('detalle') or '').strip()[:300]
+    if not motivo_cancelacion_valido(motivo):
+        flash('Elige un motivo de cancelación.', 'danger')
+        return redirect('/mis-entregas')
+    if motivo == 'otro' and not detalle:
+        flash('Describe el motivo de la cancelación.', 'danger')
+        return redirect('/mis-entregas')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, estado, cliente_id, total FROM ventas WHERE id=%s", (venta_id,))
+    venta = cur.fetchone()
+    if not venta or venta['cliente_id'] != user_id:
+        cur.close()
+        flash('Pedido no encontrado.', 'danger')
+        return redirect('/mis-entregas')
+    if venta['estado'] == 'cancelado':
+        cur.close()
+        flash('Este pedido ya está cancelado.', 'info')
+        return redirect('/mis-entregas')
+    if venta['estado'] == 'entregado':
+        cur.close()
+        flash('Ya no se puede cancelar (pedido entregado). Contacta al administrador.', 'warning')
+        return redirect('/mis-entregas')
+    # Calcular monto de los artículos a cancelar y reducir el total de la venta
+    cur.execute(f"SELECT COALESCE(SUM(d.cantidad * d.precio), 0) AS monto_articulos "
+                f"FROM detalle_venta d WHERE d.venta_id=%s", (venta_id,))
+    fila = cur.fetchone()
+    monto_articulos = float(fila['monto_articulos'] or 0) if fila else 0.0
+    nuevo_total = max(0.0, float(venta['total'] or 0) - monto_articulos)
+    # Cambiar estado de venta y seguimiento a cancelado
+    cur.execute("UPDATE ventas SET estado='cancelado', total=%s WHERE id=%s", (nuevo_total, venta_id))
+    cur.execute("UPDATE seguimiento_entregas SET estado='cancelado' WHERE venta_id=%s", (venta_id,))
+    # Reponer stock de los artículos
+    restaurar_stock_venta(cur, venta_id)
+    # Registrar motivo de cancelación
+    registrar_cancelacion(cur, venta_id, motivo, detalle or None, 'cliente')
+    mysql.connection.commit()
+    cur.close()
+    flash(f'Pedido #{venta_id} cancelado. El stock fue devuelto y el monto actualizado.', 'success')
+    return redirect('/mis-entregas')
 
 @app.route('/api/mis-entregas-estados')
 def api_mis_entregas_estados():
