@@ -1,0 +1,285 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container-fluid mt-4">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+    <h2 class="mb-0"><i class="bi bi-x-circle me-2"></i>Reporte de Ventas Canceladas</h2>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="/reporte-cancelaciones.csv?{{ querystring }}"
+         class="btn btn-outline-success" title="Descargar los datos crudos para Excel/Sheets">
+        <i class="bi bi-filetype-csv me-1"></i> Exportar CSV
+      </a>
+      <a href="/reporte-cancelaciones.pdf?{{ querystring }}"
+         class="btn btn-outline-danger" title="Reporte formal para imprimir o sustentar">
+        <i class="bi bi-filetype-pdf me-1"></i> Exportar PDF
+      </a>
+      <a href="/historial-compras" class="btn btn-outline-secondary">
+        <i class="bi bi-clock-history me-1"></i> Ir al historial
+      </a>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────
+       FILTROS
+       ───────────────────────────────────────────── -->
+  <div class="card shadow-sm border-0 mb-4 tc-admin">
+    <div class="card-body">
+      <form method="GET" class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label text-muted mb-1" style="font-size:.8rem">Periodo</label>
+          <select name="preset" class="form-select bg-dark text-white border-secondary"
+                  onchange="this.form.submit()">
+            <option value="hoy"    {% if periodo.preset=='hoy' %}selected{% endif %}>Hoy</option>
+            <option value="7d"     {% if periodo.preset=='7d' %}selected{% endif %}>Últimos 7 días</option>
+            <option value="30d"    {% if periodo.preset=='30d' %}selected{% endif %}>Últimos 30 días</option>
+            <option value="mes"    {% if periodo.preset=='mes' %}selected{% endif %}>Mes actual</option>
+            <option value="todo"   {% if periodo.preset=='todo' %}selected{% endif %}>Todo el historial</option>
+            <option value="personalizado" {% if periodo.preset=='personalizado' %}selected{% endif %}>Personalizado</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label text-muted mb-1" style="font-size:.8rem">Desde</label>
+          <input type="date" name="desde" class="form-control bg-dark text-white border-secondary"
+                 value="{{ periodo.desde.strftime('%Y-%m-%d') }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label text-muted mb-1" style="font-size:.8rem">Hasta</label>
+          <input type="date" name="hasta" class="form-control bg-dark text-white border-secondary"
+                 value="{{ periodo.hasta.strftime('%Y-%m-%d') }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label text-muted mb-1" style="font-size:.8rem">Quién canceló</label>
+          <select name="quien" class="form-select bg-dark text-white border-secondary"
+                  onchange="this.form.submit()">
+            <option value="">Todos</option>
+            <option value="cliente" {% if quien_filtro=='cliente' %}selected{% endif %}>Cliente</option>
+            <option value="admin"   {% if quien_filtro=='admin' %}selected{% endif %}>Administrador</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label text-muted mb-1" style="font-size:.8rem">Buscar cliente / documento</label>
+          <input type="text" name="buscar" class="form-control bg-dark text-white border-secondary"
+                 placeholder="correo, DNI o nombre" value="{{ buscar }}">
+        </div>
+        {% if motivo_filtro %}<input type="hidden" name="motivo" value="{{ motivo_filtro }}">{% endif %}
+        <div class="col-12 d-flex gap-2 mt-2">
+          <button class="btn btn-primary" type="submit"><i class="bi bi-funnel me-1"></i> Aplicar</button>
+          <a href="/reporte-cancelaciones" class="btn btn-outline-secondary">Limpiar filtros</a>
+          <span class="ms-auto text-muted align-self-center" style="font-size:.8rem">
+            Mostrando del {{ periodo.desde.strftime('%d/%m/%Y') }} al {{ periodo.hasta.strftime('%d/%m/%Y') }}
+          </span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────
+       TARJETAS RESUMEN
+       ───────────────────────────────────────────── -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 tc-admin h-100">
+        <div class="card-body text-center">
+          <div class="text-muted" style="font-size:.8rem">MONTO TOTAL CANCELADO</div>
+          <div class="text-danger fw-bold" style="font-size:1.8rem">
+            S/ {{ "%.2f"|format(resumen.monto_cancelado) }}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 tc-admin h-100">
+        <div class="card-body text-center">
+          <div class="text-muted" style="font-size:.8rem">VENTAS CANCELADAS</div>
+          <div class="text-white fw-bold" style="font-size:1.8rem">{{ resumen.n_canceladas }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 tc-admin h-100">
+        <div class="card-body text-center">
+          <div class="text-muted" style="font-size:.8rem">TICKET PROMEDIO CANCELADO</div>
+          <div class="text-warning fw-bold" style="font-size:1.8rem">
+            S/ {{ "%.2f"|format(resumen.ticket_promedio) }}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 tc-admin h-100">
+        <div class="card-body text-center">
+          <div class="text-muted" style="font-size:.8rem">% DEL MONTO VENDIDO</div>
+          <div class="fw-bold" style="font-size:1.8rem;color:#f39c12">
+            {{ "%.2f"|format(resumen.pct_cancelado) }}%
+          </div>
+          <div class="text-muted" style="font-size:.75rem">
+            de S/ {{ "%.2f"|format(resumen.monto_vendido) }} vendidos
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────
+       FILTRO RÁPIDO POR MOTIVO
+       ───────────────────────────────────────────── -->
+  <div class="d-flex gap-2 flex-wrap mb-3">
+    <a href="/reporte-cancelaciones?preset={{ periodo.preset }}&desde={{ periodo.desde.strftime('%Y-%m-%d') }}&hasta={{ periodo.hasta.strftime('%Y-%m-%d') }}"
+       class="btn btn-sm {{ 'btn-warning fw-bold' if not motivo_filtro else 'btn-outline-secondary' }}">Todos</a>
+    {% for codigo, texto in motivos_cancelacion.items() %}
+    <a href="/reporte-cancelaciones?preset={{ periodo.preset }}&desde={{ periodo.desde.strftime('%Y-%m-%d') }}&hasta={{ periodo.hasta.strftime('%Y-%m-%d') }}&motivo={{ codigo }}"
+       class="btn btn-sm {{ 'btn-warning fw-bold' if motivo_filtro==codigo else 'btn-outline-secondary' }}">
+      {{ texto }}
+      {% set mm = por_motivo | selectattr('codigo','equalto',codigo) | list %}
+      <span class="badge bg-dark ms-1">{{ mm[0].n if mm else 0 }}</span>
+    </a>
+    {% endfor %}
+    {% set sm = por_motivo | selectattr('codigo','equalto',motivo_sin_registro) | list %}
+    {% if sm %}
+    <a href="/reporte-cancelaciones?preset={{ periodo.preset }}&desde={{ periodo.desde.strftime('%Y-%m-%d') }}&hasta={{ periodo.hasta.strftime('%Y-%m-%d') }}&motivo={{ motivo_sin_registro }}"
+       class="btn btn-sm {{ 'btn-warning fw-bold' if motivo_filtro==motivo_sin_registro else 'btn-outline-secondary' }}">
+      Sin motivo registrado <span class="badge bg-dark ms-1">{{ sm[0].n }}</span>
+    </a>
+    {% endif %}
+  </div>
+
+  <div class="row g-4">
+
+    <!-- ─────────────────────────────────────────────
+         POR MOTIVO
+         ───────────────────────────────────────────── -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm border-0 tc-admin h-100">
+        <div class="card-header tc-admin-header">
+          <i class="bi bi-tags me-2"></i><strong>Montos por motivo</strong>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 align-middle">
+              <thead class="tc-admin-thead">
+                <tr>
+                  <th>Motivo</th>
+                  <th class="text-center">N ventas</th>
+                  <th class="text-end">Monto</th>
+                  <th class="text-end">% monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in por_motivo %}
+                <tr>
+                  <td>
+                    <a href="/reporte-cancelaciones?preset={{ periodo.preset }}&desde={{ periodo.desde.strftime('%Y-%m-%d') }}&hasta={{ periodo.hasta.strftime('%Y-%m-%d') }}&motivo={{ m.codigo }}"
+                       class="text-decoration-none text-warning">{{ m.etiqueta }}</a>
+                  </td>
+                  <td class="text-center"><span class="badge bg-secondary">{{ m.n }}</span></td>
+                  <td class="text-end text-danger fw-bold">S/ {{ "%.2f"|format(m.monto) }}</td>
+                  <td class="text-end text-muted">{{ "%.1f"|format(m.pct) }}%</td>
+                </tr>
+                {% endfor %}
+                {% if not por_motivo %}
+                <tr><td colspan="4" class="text-center text-muted py-4">Sin cancelaciones en el periodo.</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────
+         PRODUCTOS MÁS CANCELADOS
+         ───────────────────────────────────────────── -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm border-0 tc-admin h-100">
+        <div class="card-header tc-admin-header">
+          <i class="bi bi-box-seam me-2"></i><strong>Productos más cancelados</strong>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 align-middle">
+              <thead class="tc-admin-thead">
+                <tr>
+                  <th>Producto</th>
+                  <th class="text-center">Unidades</th>
+                  <th class="text-end">Monto</th>
+                  <th class="text-center">Veces</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in por_producto %}
+                <tr>
+                  <td>{{ p.nombre }}</td>
+                  <td class="text-center"><span class="badge bg-danger">{{ p.unidades }}</span></td>
+                  <td class="text-end text-danger fw-bold">S/ {{ "%.2f"|format(p.monto) }}</td>
+                  <td class="text-center text-muted">{{ p.veces }}</td>
+                </tr>
+                {% endfor %}
+                {% if not por_producto %}
+                <tr><td colspan="4" class="text-center text-muted py-4">Sin productos cancelados.</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────
+       DETALLE DE VENTAS CANCELADAS
+       ───────────────────────────────────────────── -->
+  <div class="card shadow-sm border-0 tc-admin mt-4">
+    <div class="card-header tc-admin-header">
+      <i class="bi bi-list-ul me-2"></i><strong>Detalle de ventas canceladas</strong>
+      <span class="text-muted ms-2" style="font-size:.8rem">(máximo 300 más recientes)</span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0 align-middle">
+          <thead class="tc-admin-thead">
+            <tr>
+              <th># Venta</th>
+              <th>Fecha</th>
+              <th>Cliente</th>
+              <th>Documento</th>
+              <th class="text-end">Total</th>
+              <th>Motivo</th>
+              <th>Cancelado por</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in detalle %}
+            <tr>
+              <td><span class="badge bg-primary">#{{ d.id }}</span></td>
+              <td class="text-muted" style="font-size:.85rem">{{ d.fecha }}</td>
+              <td>
+                {{ d.correo }}
+                {% if d.titular %}<br><small class="text-muted">{{ d.titular }}</small>{% endif %}
+              </td>
+              <td class="text-muted">{{ d.documento or '—' }}</td>
+              <td class="text-end text-danger fw-bold">S/ {{ "%.2f"|format(d.total) }}</td>
+              <td>
+                <span class="badge bg-dark" title="{{ d.motivo_detalle or '' }}">{{ d.motivo_etiqueta }}</span>
+                {% if d.motivo_detalle %}<br><small class="text-muted">{{ d.motivo_detalle }}</small>{% endif %}
+              </td>
+              <td>
+                {% if d.cancelado_por=='admin' %}
+                <span class="badge bg-warning text-dark"><i class="bi bi-shield me-1"></i>Admin</span>
+                {% else %}
+                <span class="badge bg-info text-dark"><i class="bi bi-person me-1"></i>Cliente</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            {% if not detalle %}
+            <tr><td colspan="7" class="text-center text-muted py-4">Sin ventas canceladas en el periodo.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

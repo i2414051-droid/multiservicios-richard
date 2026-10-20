@@ -90,12 +90,10 @@ def get_snapshot():
         # Estructura mínima que la plantilla espera
         return {
             'periodo': {'preset': '30d', 'dias': 30},
-            'exito': {},
-            'cancelaciones': {},
-            'problemas': {},
-            'resumen': {},
-            'tendencia': [],
+            'ventas': {},
             'almacen': {},
+            'seguridad': {},
+            'carritos': {},
             'generado_en': datetime.datetime.now(),
         }
 

@@ -21,10 +21,10 @@ try:
 except ImportError:  # python-dotenv no instalado: se usan las variables del sistema
     pass
 
-import os, uuid, io, threading, secrets, time, re, logging, traceback
+import os, uuid, io, csv, threading, secrets, time, re, logging, traceback
 from datetime import datetime, timedelta
 from functools import wraps
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from flask import (Flask, render_template, request, redirect,
                    url_for, session, jsonify, flash, send_file, Response)
@@ -35,10 +35,10 @@ from werkzeug.utils import secure_filename
 from werkzeug.exceptions import HTTPException, NotFound
 import requests
 
-# Modulo de KPIs tecnicos (uptime servido, rendimiento, estabilidad y
-# seguridad). Se registra mas abajo, despues de crear la app, porque
-# necesita el esquema de la BD ya disponible.
-from kpi import init_kpi, init_kpi_biz
+# Modulo de KPIs de negocio (ventas y almacen). Se registra mas abajo,
+# despues de crear la app, porque necesita el esquema de la BD ya disponible.
+from kpi import init_kpi_biz
+from kpi import registro as kpi_reg
 
 logging.basicConfig(level=logging.ERROR)
 
@@ -114,6 +114,66 @@ TOKEN = os.environ.get('APIPERU_TOKEN', '')
 
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
+# ─────────────────────────────────────────────
+# ESTADOS DE CLIENTE (P0)
+# ─────────────────────────────────────────────
+# Catálogo de estados de cliente.
+#
+# Este dict es la ÚNICA fuente de verdad. Antes existía la tabla
+# `estados_cliente` en la BD, pero no se leía en ningún request (cero
+# SELECT), no tenía FKs apuntando a ella y solo se creaba y se sembraba al
+# arrancar: una tabla fantasma que el código rellenaba por su cuenta y que
+# el admin no podía controlar. Se eliminó por completo (tabla + código).
+#
+# El estado de cada cliente vive en `usuarios.estado`, que guarda el código
+# de este catálogo; el historial de cambios en `historial_estado_cliente`.
+ESTADOS_CLIENTE = {
+    'activo':                 {'nombre': 'Activo',                 'color': '#28a745'},
+    'inactivo':               {'nombre': 'Inactivo',               'color': '#6c757d'},
+    'bloqueado':              {'nombre': 'Bloqueado',              'color': '#dc3545'},
+    'pendiente_verificacion': {'nombre': 'Pendiente verificación', 'color': '#ffc107'},
+    'moroso':                 {'nombre': 'Moroso',                 'color': '#fd7e14'},
+}
+
+def estado_cliente_valido(codigo):
+    return codigo in ESTADOS_CLIENTE
+
+def color_estado_cliente(codigo):
+    return ESTADOS_CLIENTE.get(codigo, {}).get('color', '#6c757d')
+
+app.jinja_env.globals['color_estado_cliente'] = color_estado_cliente
+app.jinja_env.globals['estados_cliente'] = ESTADOS_CLIENTE
+
+# ─────────────────────────────────────────────
+# MOTIVOS DE CANCELACIÓN (catálogo único; la tabla
+# motivos_cancelacion es la fuente de verdad y este
+# dict solo da la etiqueta para selects/badges)
+# ─────────────────────────────────────────────
+MOTIVOS_CANCELACION = {
+    'cambio_opinion':      'Cambié de opinión',
+    'mejor_precio':        'Encontré mejor precio',
+    'demora_entrega':      'Demora en la entrega',
+    'error_pedido':        'Error en el pedido',
+    'producto_equivocado': 'Producto equivocado',
+    'otro':                'Otro',
+}
+
+# Etiqueta para cancelaciones sin fila en `cancelaciones` (p.ej. datos viejos
+# o un INSERT que falló). No es un motivo del catálogo: solo evita que esas
+# ventas desaparezcan del reporte.
+MOTIVO_SIN_REGISTRO = 'sin_motivo'
+
+def motivo_cancelacion_valido(codigo):
+    return codigo in MOTIVOS_CANCELACION
+
+def etiqueta_motivo(codigo):
+    """Texto legible de un motivo, incluyendo el caso 'sin_motivo'."""
+    if codigo == MOTIVO_SIN_REGISTRO:
+        return 'Sin motivo registrado'
+    return MOTIVOS_CANCELACION.get(codigo, codigo or 'Otro')
+
+app.jinja_env.globals['motivos_cancelacion'] = MOTIVOS_CANCELACION
+
 PER_PAGE = 15
 
 def paginate_query(cur, sql_count, sql_data, params, page, per_page=PER_PAGE):
@@ -125,16 +185,6 @@ def paginate_query(cur, sql_count, sql_data, params, page, per_page=PER_PAGE):
     cur.execute(sql_data + " LIMIT %s OFFSET %s", params + (per_page, offset))
     items = cur.fetchall()
     return items, total, page, total_pages
-
-def render_paginated(template, cur, sql_count, sql_data, params, page, extra=None):
-    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, params, page)
-    ctx = {
-        'items': items, 'total': total, 'page': page,
-        'total_pages': total_pages, 'has_prev': page > 1, 'has_next': page < total_pages,
-    }
-    if extra:
-        ctx.update(extra)
-    return render_template(template, **ctx)
 
 # ─────────────────────────────────────────────
 # INIT TABLAS NUEVAS
@@ -252,6 +302,8 @@ def _init_db_inner():
             "ALTER TABLE ventas ADD COLUMN notas_entrega TEXT",
             "ALTER TABLE ventas ADD COLUMN comprobante_pago VARCHAR(255)",
             "ALTER TABLE ventas ADD COLUMN doc_tipo VARCHAR(10)",
+            # 1 = oculta en paneles admin (no borra de BD). 0 = visible.
+            "ALTER TABLE ventas ADD COLUMN oculta TINYINT DEFAULT 0",
         ):
             try:
                 cur.execute(sql)
@@ -321,6 +373,76 @@ def _init_db_inner():
                 (DIAS_LIMPIEZA_INTENTOS, DIAS_LIMPIEZA_INTENTOS))
         except Exception:
             pass
+
+        # ── P0: Control de estado de clientes ──────────────────────────
+        # Historial de cambios de estado. Idempotente para Render/Alwaysdata.
+        #
+        # El catalogo de estados vive en el dict ESTADOS_CLIENTE (arriba).
+        # La tabla `estados_cliente` se elimino: no se leia en ningun request
+        # y el app la repoblaba sola al arrancar. El estado real de cada
+        # cliente va en `usuarios.estado`.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS historial_estado_cliente (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                usuario_id      INT NOT NULL,
+                estado_anterior VARCHAR(30),
+                estado_nuevo    VARCHAR(30) NOT NULL,
+                motivo          TEXT,
+                admin_id        INT,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX ix_hist_usuario (usuario_id)
+            )
+        """)
+        # Normalizar valores nulos o desconocidos a 'activo'
+        try:
+            cur.execute("UPDATE usuarios SET estado='activo' WHERE estado IS NULL OR estado=''")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE usuarios ADD INDEX ix_usuarios_estado (estado)")
+        except Exception:
+            pass
+
+        # ── Cancelación de pedidos: catálogo de motivos + registro ──
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS motivos_cancelacion (
+                codigo VARCHAR(30) PRIMARY KEY,
+                texto  VARCHAR(150) NOT NULL,
+                activo TINYINT DEFAULT 1
+            )
+        """)
+        for _cod, _txt in (
+            ('cambio_opinion', 'Cambié de opinión'),
+            ('mejor_precio', 'Encontré mejor precio'),
+            ('demora_entrega', 'Demora en la entrega'),
+            ('error_pedido', 'Error en el pedido'),
+            ('producto_equivocado', 'Producto equivocado'),
+            ('otro', 'Otro'),
+        ):
+            try:
+                cur.execute("INSERT IGNORE INTO motivos_cancelacion (codigo, texto) VALUES (%s,%s)",
+                            (_cod, _txt))
+            except Exception:
+                pass
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS cancelaciones (
+                id              INT AUTO_INCREMENT PRIMARY KEY,
+                venta_id        INT NOT NULL UNIQUE,
+                motivo_codigo   VARCHAR(30) NOT NULL DEFAULT 'otro',
+                motivo_detalle  TEXT,
+                cancelado_por   VARCHAR(10) NOT NULL DEFAULT 'cliente',
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX ix_cancel_motivo (motivo_codigo)
+            )
+        """)
+        # Normalizar estados legacy de ventas al vocabulario válido
+        # (en espera/entregado/cancelado). 'pendiente' pertenece a
+        # seguimiento_entregas y en ventas equivale a 'en espera'.
+        try:
+            cur.execute("UPDATE ventas SET estado='en espera' "
+                        "WHERE estado IS NULL OR estado NOT IN ('en espera','entregado','cancelado')")
+        except Exception:
+            pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS seguimiento_entregas (
                 id               INT AUTO_INCREMENT PRIMARY KEY,
@@ -374,17 +496,11 @@ def _init_db_inner():
                             (_cod, _txt))
             except Exception:
                 pass
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS cancelacion (
-                id              INT AUTO_INCREMENT PRIMARY KEY,
-                venta_id        INT NOT NULL UNIQUE,
-                motivo_codigo   VARCHAR(30) NOT NULL DEFAULT 'otro',
-                motivo_detalle  TEXT,
-                cancelado_por   VARCHAR(10) NOT NULL DEFAULT 'cliente',
-                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX ix_cancel_motivo (motivo_codigo)
-            )
-        """)
+        # La tabla del motivo de cancelacion es `cancelaciones` (plural), la
+        # que usan TODAS las consultas y la que lee el modulo de KPIs. Antes
+        # se creaba tambien `cancelacion` (singular) y el motivo se guards
+        # ahi: una tabla para nadie, con los motivos de cancelacion
+        # invisibles para el reporte y para los indicadores.
 
         # ── FKs corruptas (BD principal) ────────────────────────────────
         # Estas claves foraneas NO las define la app: quedaron apuntando el
@@ -740,7 +856,7 @@ def registrar_cancelacion(cur, venta_id, motivo_codigo, motivo_detalle, cancelad
         motivo_codigo = 'otro'
     try:
         cur.execute(
-            "INSERT IGNORE INTO cancelacion (venta_id, motivo_codigo, motivo_detalle, cancelado_por)"
+            "INSERT IGNORE INTO cancelaciones (venta_id, motivo_codigo, motivo_detalle, cancelado_por)"
             " VALUES (%s,%s,%s,%s)",
             (venta_id, motivo_codigo, (motivo_detalle or None), cancelado_por))
     except Exception:
@@ -1030,6 +1146,12 @@ def login():
         cur.execute("SELECT * FROM usuarios WHERE correo=%s", (correo,))
         usuario = cur.fetchone()
 
+        # P0: cuentas inactivas/bloqueadas no entran aunque la clave sea correcta.
+        if usuario and (usuario.get('estado') in ('bloqueado', 'inactivo')):
+            flash('Tu cuenta está %s. Contacta al administrador.' % usuario.get('estado'), 'danger')
+            cur.close()
+            return redirect('/login')
+
         if usuario and bcrypt.check_password_hash(usuario['password'], password):
             # La fila NO se borra y el contador NO se baja: queda el historial de
             # los fallos de esta cuenta para poder revisarlo.
@@ -1157,11 +1279,17 @@ def dashboard():
         return redirect('/login')
     cur = mysql.connection.cursor()
 
-    cur.execute("SELECT COUNT(*) AS total FROM ventas")
+    # Una venta cancelada no cuenta como venta: ni en el conteo ni en los ingresos.
+    cur.execute("SELECT COUNT(*) AS total FROM ventas WHERE COALESCE(estado,'') <> 'cancelado'")
     total_ventas = cur.fetchone()['total'] or 0
 
-    cur.execute("SELECT COALESCE(SUM(total), 0) AS total FROM ventas")
+    # Ingresos totales = SOLO ventas ENTREGADAS
+    cur.execute("SELECT COALESCE(SUM(total), 0) AS total FROM ventas WHERE estado='entregado'")
     ingresos_totales = float(cur.fetchone()['total'] or 0)
+
+    # Monto en espera = ventas con estado 'en espera'
+    cur.execute("SELECT COALESCE(SUM(total), 0) AS total FROM ventas WHERE estado='en espera'")
+    monto_en_espera = float(cur.fetchone()['total'] or 0)
 
     cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos WHERE estado='activo'")
     productos_activos = cur.fetchone()['total'] or 0
@@ -1199,6 +1327,7 @@ def dashboard():
     return render_template('dashboard.html',
                            total_ventas=total_ventas,
                            ingresos_totales=ingresos_totales,
+                           monto_en_espera=monto_en_espera,
                            productos_activos=productos_activos,
                            stock_bajo=stock_bajo,
                            total_usuarios=total_usuarios,
@@ -1482,6 +1611,9 @@ def index():
         vals.append(categoria)
     cur.execute(sql, tuple(vals))
     productos = cur.fetchall()
+    # KPI: lo que el cliente escribe en el buscador. Sirve para saber que
+    # busca la gente (y que no tenemos) y cuanto convierte el buscador.
+    kpi_reg.registrar_busqueda(buscar, len(productos))
     return render_template('index.html', productos=productos, categorias=CATEGORIAS)
 
 @app.route('/carrito')
@@ -1699,7 +1831,11 @@ def historial():
         return redirect('/login')
     user_id = session['user_id']
     cur = mysql.connection.cursor()
-    cur.execute("SELECT id, total, fecha FROM ventas WHERE cliente_id=%s ORDER BY fecha DESC", (user_id,))
+    cur.execute("""
+        SELECT v.id, v.total, v.fecha, v.estado, c.motivo_codigo, c.motivo_detalle
+        FROM ventas v LEFT JOIN cancelaciones c ON c.venta_id=v.id
+        WHERE v.cliente_id=%s ORDER BY v.fecha DESC
+    """, (user_id,))
     ventas = cur.fetchall()
     hist = []
     for v in ventas:
@@ -1708,7 +1844,11 @@ def historial():
             FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
             WHERE d.venta_id=%s
         """, (v['id'],))
-        hist.append({'id':v['id'],'total':v['total'],'fecha':v['fecha'],'productos':cur.fetchall()})
+        hist.append({'id':v['id'],'total':v['total'],'fecha':v['fecha'],
+                     'estado':v['estado'],
+                     'motivo_codigo':v.get('motivo_codigo'),
+                     'motivo_detalle':v.get('motivo_detalle'),
+                     'productos':cur.fetchall()})
     cur.close()
     return render_template('historial.html', historial=hist)
 
@@ -1717,16 +1857,32 @@ def historial_compras():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/')
     buscar = request.args.get('buscar','')
+    motivo_filtro = request.args.get('motivo','').strip()
+    mostrar_ocultas = request.args.get('ocultas', '0') == '1'
     page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
-    cur.execute("SELECT SUM(total) AS gran_total FROM ventas")
+    # TOTAL GENERAL = SOLO ventas ENTREGADAS
+    cur.execute("SELECT SUM(total) AS gran_total FROM ventas WHERE COALESCE(oculta,0)=0 AND estado='entregado'")
     res = cur.fetchone()
     gran_total = res['gran_total'] or 0
-    sql_count = "SELECT COUNT(*) AS total FROM ventas v JOIN usuarios u ON v.cliente_id=u.id WHERE u.correo LIKE %s"
-    sql_data = """SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular, v.estado
-        FROM ventas v JOIN usuarios u ON v.cliente_id=u.id
-        WHERE u.correo LIKE %s ORDER BY v.fecha DESC"""
-    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, (f'%{buscar}%',), page)
+
+    # Monto en espera = ventas con estado 'en espera' (no ocultas)
+    cur.execute("SELECT SUM(total) AS monto_espera FROM ventas WHERE COALESCE(oculta,0)=0 AND estado='en espera'")
+    res = cur.fetchone()
+    monto_en_espera = res['monto_espera'] or 0
+    join_cancel = "LEFT JOIN cancelaciones c ON c.venta_id=v.id"
+    ocultas_cond = "" if mostrar_ocultas else "AND COALESCE(v.oculta,0)=0"
+    where = f"WHERE u.correo LIKE %s {ocultas_cond}"
+    params = [f'%{buscar}%']
+    if motivo_cancelacion_valido(motivo_filtro):
+        where += " AND c.motivo_codigo=%s"
+        params.append(motivo_filtro)
+    sql_count = f"SELECT COUNT(*) AS total FROM ventas v JOIN usuarios u ON v.cliente_id=u.id {join_cancel} {where}"
+    sql_data = f"""SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular, v.estado,
+        COALESCE(v.oculta,0) AS oculta, c.motivo_codigo, c.motivo_detalle, c.cancelado_por
+        FROM ventas v JOIN usuarios u ON v.cliente_id=u.id {join_cancel}
+        {where} ORDER BY v.fecha DESC"""
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
     historial = []
     for v in items:
         cur.execute(f"""
@@ -1735,10 +1891,395 @@ def historial_compras():
             WHERE d.venta_id=%s
         """, (v['id'],))
         historial.append({**v, 'productos': cur.fetchall()})
+    n_ocultas = 0
+    try:
+        cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE oculta=1")
+        n_ocultas = cur.fetchone()['n'] or 0
+    except Exception:
+        pass
+    try:
+        cur.execute("SELECT motivo_codigo, COUNT(*) AS n FROM cancelaciones GROUP BY motivo_codigo")
+        conteo_motivos = {r['motivo_codigo']: r['n'] for r in cur.fetchall()}
+    except Exception:
+        conteo_motivos = {}
     cur.close()
     return render_template('historial_compras_admin.html', historial=historial, buscar=buscar,
-                           gran_total=gran_total, page=page, total_pages=total_pages,
+                           motivo_filtro=motivo_filtro, conteo_motivos=conteo_motivos,
+                           mostrar_ocultas=mostrar_ocultas, n_ocultas=n_ocultas,
+                           gran_total=gran_total, monto_en_espera=monto_en_espera,
+                           page=page, total_pages=total_pages,
                            total=total, has_prev=page > 1, has_next=page < total_pages)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# REPORTE DE VENTAS CANCELADAS (panel admin)
+# ═══════════════════════════════════════════════════════════════════
+# No hay tabla nueva: todo se agrega en vivo desde `ventas` (total, estado,
+# fecha) + `cancelaciones` (motivo, quién) + `detalle_venta` (productos).
+# Una tabla física duplicaría datos que ya existen y podría desincronizarse.
+_PRESETS_PERIODO = ('hoy', '7d', '30d', 'mes', 'todo', 'personalizado')
+
+
+def _parse_fecha(valor):
+    """Acepta dd/mm/aaaa o aaaa-mm-dd. Devuelve datetime o None."""
+    valor = (valor or '').strip()
+    if not valor:
+        return None
+    for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(valor, fmt)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def resolver_periodo_cancelaciones(args):
+    """Rango [desde, hasta) para el reporte, con presets tipo KPI.
+
+    'todo' arranca en 1970 y termina ahora: permite ver el historial completo
+    sin tener que inventar una fecha de inicio.
+
+    El `hasta` se calcula con holgura (un dia extra) porque el reloj del
+    servidor MySQL puede ir adelantado respecto al local; sin ese margen las
+    ventas canceladas de hoy quedarian fuera del rango.
+    """
+    hoy = datetime.now()
+    inicio_dia = hoy.replace(hour=0, minute=0, second=0, microsecond=0)
+    preset = (args.get('preset') or '30d').strip()
+    if preset not in _PRESETS_PERIODO:
+        preset = '30d'
+
+    fin = hoy + timedelta(days=1)  # holgura por desfase de zona horaria
+    if preset == 'hoy':
+        desde, hasta = inicio_dia, fin
+    elif preset == '7d':
+        desde, hasta = hoy - timedelta(days=7), fin
+    elif preset == '30d':
+        desde, hasta = hoy - timedelta(days=30), fin
+    elif preset == 'mes':
+        desde, hasta = datetime(hoy.year, hoy.month, 1), fin
+    elif preset == 'todo':
+        desde, hasta = datetime(1970, 1, 1), fin
+    else:  # personalizado
+        desde = _parse_fecha(args.get('desde')) or (hoy - timedelta(days=30))
+        hasta_f = _parse_fecha(args.get('hasta')) or hoy
+        desde = desde.replace(hour=0, minute=0, second=0, microsecond=0)
+        # El dia "hasta" es inclusivo: se suma un dia y medio de holgura.
+        hasta = (hasta_f + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if desde > hasta:
+        desde, hasta = hasta, desde
+    return {'preset': preset, 'desde': desde, 'hasta': hasta}
+
+
+def _where_cancelaciones(periodo, motivo, quien, buscar):
+    """Construye el WHERE del reporte y sus parametros.
+
+    El filtro de estado es 'cancelado' (regla transversal: una venta cancelada
+    no es una venta). LEFT JOIN a `cancelaciones` para no perder las ventas
+    canceladas que no tengan motivo registrado.
+    """
+    where = ["COALESCE(v.estado,'') = 'cancelado'",
+             "v.fecha >= %s", "v.fecha < %s"]
+    params = [periodo['desde'], periodo['hasta']]
+    if motivo_cancelacion_valido(motivo):
+        where.append("COALESCE(c.motivo_codigo,'sin_motivo') = %s")
+        params.append(motivo)
+    elif motivo == MOTIVO_SIN_REGISTRO:
+        where.append("COALESCE(c.motivo_codigo,'sin_motivo') = %s")
+        params.append(MOTIVO_SIN_REGISTRO)
+    if quien in ('cliente', 'admin'):
+        where.append("COALESCE(c.cancelado_por,'cliente') = %s")
+        params.append(quien)
+    if buscar:
+        where.append("(u.correo LIKE %s OR v.documento LIKE %s OR v.nombre LIKE %s)")
+        like = f'%{buscar}%'
+        params.extend([like, like, like])
+    return " AND ".join(where), params
+
+
+def datos_reporte_cancelaciones(periodo, motivo='', quien='', buscar=''):
+    """Consulta todos los agregados del reporte en una sola pasada.
+
+    Devuelve dict con: resumen, por_motivo, por_producto, detalle.
+    Es tolerante a fallos: si algo rompe, devuelve estructura vacia para que
+    la pagina muestre 'sin datos' en vez de un 500.
+    """
+    vacio = {
+        'resumen': {'monto_cancelado': 0.0, 'n_canceladas': 0, 'ticket_promedio': 0.0,
+                    'monto_vendido': 0.0, 'pct_cancelado': 0.0},
+        'por_motivo': [], 'por_producto': [], 'detalle': [],
+    }
+    try:
+        cur = mysql.connection.cursor()
+    except Exception:
+        return vacio
+
+    try:
+        where, params = _where_cancelaciones(periodo, motivo, quien, buscar)
+        # LEFT JOIN a usuarios: una venta cancelada de un cliente eliminado debe
+        # seguir apareciendo en el reporte (no se pierde por el join).
+        base = (f"FROM ventas v "
+                f"LEFT JOIN usuarios u ON u.id = v.cliente_id "
+                f"LEFT JOIN cancelaciones c ON c.venta_id = v.id "
+                f"WHERE {where}")
+        # Para productos el JOIN a detalle_venta va ANTES del WHERE (SQL no
+        # admite un JOIN despues de WHERE).
+        base_productos = (f"FROM ventas v "
+                          f"JOIN detalle_venta d ON d.venta_id = v.id "
+                          f"LEFT JOIN usuarios u ON u.id = v.cliente_id "
+                          f"LEFT JOIN cancelaciones c ON c.venta_id = v.id "
+                          f"LEFT JOIN {ALMACEN_DB}.productos p ON p.id = d.producto_id "
+                          f"WHERE {where}")
+
+        # ── Resumen general ──
+        cur.execute(f"SELECT COUNT(*) AS n, COALESCE(SUM(v.total),0) AS monto {base}", tuple(params))
+        fila = cur.fetchone() or {}
+        n_canceladas = int(fila.get('n') or 0)
+        monto_cancelado = float(fila.get('monto') or 0.0)
+
+        # Monto total vendido del periodo (válidas + canceladas) para el %.
+        try:
+            cur.execute(
+                "SELECT COALESCE(SUM(total),0) AS monto FROM ventas "
+                "WHERE fecha >= %s AND fecha < %s",
+                (periodo['desde'], periodo['hasta']))
+            r = cur.fetchone() or {}
+            monto_vendido = float(r.get('monto') or 0.0)
+        except Exception:
+            monto_vendido = 0.0
+
+        pct_cancelado = (monto_cancelado / monto_vendido * 100) if monto_vendido else 0.0
+        ticket_promedio = (monto_cancelado / n_canceladas) if n_canceladas else 0.0
+
+        # ── Por motivo ──
+        cur.execute(
+            f"""SELECT COALESCE(c.motivo_codigo,'sin_motivo') AS motivo,
+                       COUNT(*) AS n,
+                       COALESCE(SUM(v.total),0) AS monto
+                {base}
+                GROUP BY motivo ORDER BY monto DESC""",
+            tuple(params))
+        por_motivo = []
+        for r in cur.fetchall():
+            m = float(r['monto'] or 0.0)
+            por_motivo.append({
+                'codigo': r['motivo'],
+                'etiqueta': etiqueta_motivo(r['motivo']),
+                'n': int(r['n'] or 0),
+                'monto': m,
+                'pct': (m / monto_cancelado * 100) if monto_cancelado else 0.0,
+            })
+
+        # ── Productos mas cancelados ──
+        cur.execute(
+            f"""SELECT d.producto_id,
+                       COALESCE(p.nombre, CONCAT('Producto #', d.producto_id)) AS nombre,
+                       SUM(d.cantidad) AS unidades,
+                       COALESCE(SUM(d.cantidad * d.precio),0) AS monto,
+                       COUNT(DISTINCT v.id) AS veces
+                {base_productos}
+                GROUP BY d.producto_id, nombre
+                ORDER BY unidades DESC, monto DESC
+                LIMIT 50""",
+            tuple(params))
+        por_producto = [{
+            'producto_id': r['producto_id'],
+            'nombre': r['nombre'],
+            'unidades': int(r['unidades'] or 0),
+            'monto': float(r['monto'] or 0.0),
+            'veces': int(r['veces'] or 0),
+        } for r in cur.fetchall()]
+
+        # ── Detalle de ventas canceladas ──
+        cur.execute(
+            f"""SELECT v.id, v.total, v.fecha, v.documento, v.nombre AS titular,
+                       COALESCE(u.correo, '(cliente eliminado)') AS correo,
+                       COALESCE(c.motivo_codigo,'sin_motivo') AS motivo_codigo,
+                       c.motivo_detalle, COALESCE(c.cancelado_por,'cliente') AS cancelado_por,
+                       c.created_at AS cancelado_en
+                {base}
+                ORDER BY v.fecha DESC
+                LIMIT 300""",
+            tuple(params))
+        detalle = []
+        for r in cur.fetchall():
+            detalle.append({
+                'id': r['id'],
+                'total': float(r['total'] or 0.0),
+                'fecha': r['fecha'],
+                'documento': r['documento'],
+                'titular': r['titular'],
+                'correo': r['correo'],
+                'motivo_codigo': r['motivo_codigo'],
+                'motivo_etiqueta': etiqueta_motivo(r['motivo_codigo']),
+                'motivo_detalle': r['motivo_detalle'],
+                'cancelado_por': r['cancelado_por'],
+                'cancelado_en': r['cancelado_en'],
+            })
+
+        return {
+            'resumen': {
+                'monto_cancelado': round(monto_cancelado, 2),
+                'n_canceladas': n_canceladas,
+                'ticket_promedio': round(ticket_promedio, 2),
+                'monto_vendido': round(monto_vendido, 2),
+                'pct_cancelado': round(pct_cancelado, 2),
+            },
+            'por_motivo': por_motivo,
+            'por_producto': por_producto,
+            'detalle': detalle,
+        }
+    except Exception as exc:
+        app.logger.warning('Reporte cancelaciones fallo: %s', exc)
+        return vacio
+    finally:
+        cur.close()
+
+
+def _es_admin():
+    return 'rol' in session and session['rol'] in ['admin', 'administrador']
+
+
+@app.route('/reporte-cancelaciones')
+def reporte_cancelaciones():
+    if not _es_admin():
+        return redirect('/login')
+    periodo = resolver_periodo_cancelaciones(request.args)
+    motivo = (request.args.get('motivo') or '').strip()
+    quien = (request.args.get('quien') or '').strip()
+    buscar = (request.args.get('buscar') or '').strip()
+    datos = datos_reporte_cancelaciones(periodo, motivo, quien, buscar)
+    # Querystring para que los botones de exportar respeten los filtros activos.
+    querystring = urlencode({
+        'preset': periodo['preset'],
+        'desde': periodo['desde'].strftime('%Y-%m-%d'),
+        'hasta': periodo['hasta'].strftime('%Y-%m-%d'),
+        'motivo': motivo,
+        'quien': quien,
+        'buscar': buscar,
+    })
+    return render_template('reporte_cancelaciones.html',
+                           **datos, periodo=periodo, motivo_filtro=motivo,
+                           quien_filtro=quien, buscar=buscar,
+                           motivo_sin_registro=MOTIVO_SIN_REGISTRO,
+                           querystring=querystring)
+
+
+@app.route('/reporte-cancelaciones.csv')
+def reporte_cancelaciones_csv():
+    """Exporta el detalle de ventas canceladas a CSV (Excel-friendly)."""
+    if not _es_admin():
+        return redirect('/login')
+    periodo = resolver_periodo_cancelaciones(request.args)
+    motivo = (request.args.get('motivo') or '').strip()
+    quien = (request.args.get('quien') or '').strip()
+    buscar = (request.args.get('buscar') or '').strip()
+    datos = datos_reporte_cancelaciones(periodo, motivo, quien, buscar)
+
+    buf = io.StringIO()
+    buf.write('\ufeff')  # BOM: Excel abre el UTF-8 con tildes correctamente
+    w = csv.writer(buf, delimiter=';')
+    w.writerow(['Reporte de ventas canceladas - Multiservicios Richard'])
+    w.writerow([f"Periodo: {periodo['desde'].strftime('%d/%m/%Y')} a {periodo['hasta'].strftime('%d/%m/%Y')}"])
+    w.writerow([])
+    r = datos['resumen']
+    w.writerow(['Monto total cancelado', f"S/ {r['monto_cancelado']:.2f}"])
+    w.writerow(['Ventas canceladas', r['n_canceladas']])
+    w.writerow(['Ticket promedio cancelado', f"S/ {r['ticket_promedio']:.2f}"])
+    w.writerow(['% del monto vendido', f"{r['pct_cancelado']:.2f}%"])
+    w.writerow([])
+    w.writerow(['--- POR MOTIVO ---'])
+    w.writerow(['Motivo', 'N ventas', 'Monto', '% del monto'])
+    for m in datos['por_motivo']:
+        w.writerow([m['etiqueta'], m['n'], f"{m['monto']:.2f}", f"{m['pct']:.2f}%"])
+    w.writerow([])
+    w.writerow(['--- PRODUCTOS MAS CANCELADOS ---'])
+    w.writerow(['Producto', 'Unidades', 'Monto', 'Veces en pedidos cancelados'])
+    for p in datos['por_producto']:
+        w.writerow([p['nombre'], p['unidades'], f"{p['monto']:.2f}", p['veces']])
+    w.writerow([])
+    w.writerow(['--- DETALLE ---'])
+    w.writerow(['Venta', 'Fecha', 'Cliente', 'Documento', 'Total', 'Motivo', 'Cancelado por', 'Detalle'])
+    for d in datos['detalle']:
+        w.writerow([d['id'], d['fecha'], d['correo'], d['documento'],
+                    f"{d['total']:.2f}", d['motivo_etiqueta'],
+                    d['cancelado_por'], (d['motivo_detalle'] or '')])
+
+    resp = Response(buf.getvalue(), mimetype='text/csv')
+    resp.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    nombre = f"cancelaciones_{periodo['desde'].strftime('%Y%m%d')}_{periodo['hasta'].strftime('%Y%m%d')}.csv"
+    resp.headers['Content-Disposition'] = f'attachment; filename={nombre}'
+    return resp
+
+
+@app.route('/reporte-cancelaciones.pdf')
+def reporte_cancelaciones_pdf():
+    """Exporta el reporte de cancelaciones a PDF (sustento formal imprimible)."""
+    if not _es_admin():
+        return redirect('/login')
+    periodo = resolver_periodo_cancelaciones(request.args)
+    motivo = (request.args.get('motivo') or '').strip()
+    quien = (request.args.get('quien') or '').strip()
+    buscar = (request.args.get('buscar') or '').strip()
+    datos = datos_reporte_cancelaciones(periodo, motivo, quien, buscar)
+    r = datos['resumen']
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf)
+    styles = getSampleStyleSheet()
+    elems = []
+    elems.append(Paragraph("<b>MULTISERVICIOS RICHARD</b>", styles['Title']))
+    elems.append(Paragraph("Reporte de ventas canceladas", styles['Normal']))
+    elems.append(Paragraph(
+        f"Periodo: {periodo['desde'].strftime('%d/%m/%Y')} a {periodo['hasta'].strftime('%d/%m/%Y')}",
+        styles['Normal']))
+    elems.append(Spacer(1, 0.3 * inch))
+
+    resumen_data = [
+        ["Monto total cancelado", f"S/ {r['monto_cancelado']:.2f}"],
+        ["Ventas canceladas", str(r['n_canceladas'])],
+        ["Ticket promedio cancelado", f"S/ {r['ticket_promedio']:.2f}"],
+        ["% del monto vendido", f"{r['pct_cancelado']:.2f}%"],
+    ]
+    t0 = Table(resumen_data, colWidths=[220, 130])
+    t0.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ('BACKGROUND', (0, 0), (0, -1), colors.whitesmoke),
+    ]))
+    elems.append(t0)
+    elems.append(Spacer(1, 0.3 * inch))
+
+    elems.append(Paragraph("<b>Por motivo</b>", styles['Heading3']))
+    data = [["Motivo", "N ventas", "Monto", "% monto"]]
+    for m in datos['por_motivo']:
+        data.append([m['etiqueta'], str(m['n']), f"S/ {m['monto']:.2f}", f"{m['pct']:.2f}%"])
+    t1 = Table(data, colWidths=[200, 60, 80, 70])
+    t1.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+    ]))
+    elems.append(t1)
+    elems.append(Spacer(1, 0.3 * inch))
+
+    elems.append(Paragraph("<b>Productos mas cancelados</b>", styles['Heading3']))
+    data = [["Producto", "Unidades", "Monto", "Veces"]]
+    for p in datos['por_producto'][:30]:
+        data.append([p['nombre'][:45], str(p['unidades']), f"S/ {p['monto']:.2f}", str(p['veces'])])
+    t2 = Table(data, colWidths=[230, 60, 80, 50])
+    t2.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+    ]))
+    elems.append(t2)
+
+    doc.build(elems)
+    buf.seek(0)
+    nombre = f"cancelaciones_{periodo['desde'].strftime('%Y%m%d')}_{periodo['hasta'].strftime('%Y%m%d')}.pdf"
+    return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=nombre)
+
 
 @app.route('/historial-compras/estado/<int:venta_id>', methods=['POST'])
 def actualizar_estado_venta(venta_id):
@@ -1782,16 +2323,26 @@ def actualizar_estado_venta(venta_id):
     flash(f'Venta #{venta_id} actualizada a "{estado}".', 'success')
     return redirect('/historial-compras')
 
-@app.route('/historial-compras/eliminar/<int:venta_id>')
-def eliminar_venta(venta_id):
+@app.route('/historial-compras/ocultar/<int:venta_id>')
+def ocultar_venta(venta_id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
-        return redirect('/')
+        return redirect('/login')
     cur = mysql.connection.cursor()
-    cur.execute("DELETE FROM detalle_venta WHERE venta_id=%s", (venta_id,))
-    cur.execute("DELETE FROM ventas WHERE id=%s", (venta_id,))
+    cur.execute("UPDATE ventas SET oculta=1 WHERE id=%s", (venta_id,))
     mysql.connection.commit()
     cur.close()
-    flash(f'Venta #{venta_id} eliminada.', 'success')
+    flash(f'Venta #{venta_id} oculta del panel. Sigue en la base de datos.', 'success')
+    return redirect('/historial-compras')
+
+@app.route('/historial-compras/mostrar/<int:venta_id>')
+def mostrar_venta(venta_id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("UPDATE ventas SET oculta=0 WHERE id=%s", (venta_id,))
+    mysql.connection.commit()
+    cur.close()
+    flash(f'Venta #{venta_id} visible de nuevo.', 'success')
     return redirect('/historial-compras')
 
 @app.route('/historial-compras/limpiar')
@@ -1852,6 +2403,116 @@ def permisos():
     return render_template('permisos.html', usuarios=items, buscar=buscar,
                            es_superadmin=es_superadmin, page=page, total_pages=total_pages,
                            total=total, has_prev=page > 1, has_next=page < total_pages)
+
+# ─────────────────────────────────────────────
+# P1: CLIENTES — control de estado (admin)
+# ─────────────────────────────────────────────
+def _es_admin():
+    return session.get('rol') in ['admin', 'administrador']
+
+def _es_superadmin():
+    return session.get('correo') == 'admin@mail.com'
+
+@app.route('/clientes')
+def clientes():
+    if not _es_admin():
+        return redirect('/login')
+    buscar = request.args.get('buscar', '').strip()
+    filtro = request.args.get('filtro', 'todos').strip()
+    page = int(request.args.get('page', 1))
+    cur = mysql.connection.cursor()
+    where = "WHERE (u.correo LIKE %s OR COALESCE(u.nombre,'') LIKE %s OR COALESCE(u.apellido,'') LIKE %s)"
+    params = [f'%{buscar}%', f'%{buscar}%', f'%{buscar}%']
+    if filtro in ESTADOS_CLIENTE:
+        where += " AND COALESCE(u.estado,'activo')=%s"
+        params.append(filtro)
+    sql_count = f"SELECT COUNT(*) AS total FROM usuarios u {where}"
+    sql_data = f"""SELECT u.id, u.correo, u.nombre, u.apellido, u.telefono, u.rol,
+        COALESCE(u.estado,'activo') AS estado, u.created_at,
+        (SELECT COUNT(*) FROM ventas v WHERE v.cliente_id=u.id AND COALESCE(v.estado,'') <> 'cancelado') AS num_compras,
+        (SELECT COALESCE(SUM(v2.total),0) FROM ventas v2 WHERE v2.cliente_id=u.id AND COALESCE(v2.estado,'') <> 'cancelado') AS total_compras
+        FROM usuarios u {where} ORDER BY u.created_at DESC"""
+    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
+    # Conteos por estado para las píldoras de filtro
+    conteos = {}
+    try:
+        cur.execute("SELECT COALESCE(estado,'activo') AS e, COUNT(*) AS n FROM usuarios GROUP BY COALESCE(estado,'activo')")
+        for r in cur.fetchall():
+            conteos[r['e']] = r['n']
+    except Exception:
+        pass
+    cur.close()
+    return render_template('clientes.html', clientes=items, buscar=buscar, filtro=filtro,
+                           conteos=conteos, page=page, total_pages=total_pages,
+                           total=total, has_prev=page > 1, has_next=page < total_pages)
+
+@app.route('/clientes/<int:user_id>/estado', methods=['POST'])
+def cambiar_estado_cliente(user_id):
+    if not _es_admin():
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect('/clientes')
+    nuevo = (request.form.get('estado') or '').strip()
+    motivo = (request.form.get('motivo') or '').strip()[:300]
+    if not estado_cliente_valido(nuevo):
+        flash('Estado no válido.', 'danger')
+        return redirect('/clientes')
+    if user_id == session.get('user_id') and nuevo in ('bloqueado', 'inactivo'):
+        flash('No puedes bloquearte a ti mismo.', 'danger')
+        return redirect('/clientes')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, correo, rol, COALESCE(estado,'activo') AS estado FROM usuarios WHERE id=%s", (user_id,))
+    objetivo = cur.fetchone()
+    if not objetivo:
+        cur.close()
+        flash('Cliente no encontrado.', 'danger')
+        return redirect('/clientes')
+    # Solo el superadmin puede cambiar el estado de otros admins
+    if objetivo['rol'] in ('admin', 'administrador') and not _es_superadmin():
+        cur.close()
+        flash('Solo admin@mail.com puede cambiar el estado de otro administrador.', 'danger')
+        return redirect('/clientes')
+    anterior = objetivo['estado']
+    if anterior == nuevo:
+        cur.close()
+        flash('El cliente ya está en ese estado.', 'info')
+        return redirect('/clientes')
+    cur.execute("UPDATE usuarios SET estado=%s WHERE id=%s", (nuevo, user_id))
+    try:
+        cur.execute(
+            "INSERT INTO historial_estado_cliente (usuario_id, estado_anterior, estado_nuevo, motivo, admin_id)"
+            " VALUES (%s,%s,%s,%s,%s)",
+            (user_id, anterior, nuevo, motivo or None, session.get('user_id')))
+    except Exception:
+        pass
+    mysql.connection.commit()
+    cur.close()
+    flash(f"Cliente {objetivo['correo']}: {anterior} → {nuevo}.", 'success')
+    return redirect('/clientes')
+
+@app.route('/clientes/<int:user_id>/historial')
+def historial_estado_cliente(user_id):
+    if not _es_admin():
+        return jsonify({'ok': False}), 403
+    cur = mysql.connection.cursor()
+    try:
+        cur.execute("""
+            SELECT h.id, h.estado_anterior, h.estado_nuevo, h.motivo, h.created_at,
+                   a.correo AS admin_correo
+            FROM historial_estado_cliente h
+            LEFT JOIN usuarios a ON h.admin_id=a.id
+            WHERE h.usuario_id=%s ORDER BY h.created_at DESC LIMIT 50
+        """, (user_id,))
+        filas = cur.fetchall()
+    except Exception:
+        filas = []
+    cur.close()
+    return jsonify({'ok': True, 'historial': [
+        {'id': f['id'], 'anterior': f['estado_anterior'], 'nuevo': f['estado_nuevo'],
+         'motivo': f['motivo'], 'admin': f.get('admin_correo'),
+         'fecha': str(f['created_at'])} for f in filas
+    ]})
 
 # ─────────────────────────────────────────────
 # PROVEEDORES
@@ -2343,27 +3004,39 @@ def entregas():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     filtro = request.args.get('filtro', 'todas')
+    motivo_filtro = request.args.get('motivo', '').strip()
     cur = mysql.connection.cursor()
     sql = """
         SELECT e.id, e.venta_id, e.estado, e.direccion_envio, e.fecha_estimada,
                e.fecha_entrega, e.notas, e.created_at,
                v.total, v.nombre AS cliente_nombre, v.documento AS cliente_doc,
-               u.correo AS cliente_correo
+               u.correo AS cliente_correo,
+               c.motivo_codigo, c.motivo_detalle, c.cancelado_por
         FROM seguimiento_entregas e
         JOIN ventas v ON e.venta_id=v.id
         LEFT JOIN usuarios u ON v.cliente_id=u.id
+        LEFT JOIN cancelaciones c ON c.venta_id=v.id
     """
+    conds = ["COALESCE(v.oculta,0)=0"]
+    params = []
     if filtro == 'pendientes':
-        sql += " WHERE e.estado='pendiente'"
+        conds.append("e.estado='pendiente'")
     elif filtro == 'en_camino':
-        sql += " WHERE e.estado='en camino'"
+        conds.append("e.estado='en camino'")
     elif filtro == 'entregado':
-        sql += " WHERE e.estado='entregado'"
+        conds.append("e.estado='entregado'")
+    elif filtro == 'cancelado':
+        conds.append("e.estado='cancelado'")
+    if motivo_cancelacion_valido(motivo_filtro):
+        conds.append("c.motivo_codigo=%s")
+        params.append(motivo_filtro)
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
     sql += " ORDER BY e.created_at DESC"
-    cur.execute(sql)
+    cur.execute(sql, tuple(params))
     lista = cur.fetchall()
     cur.close()
-    return render_template('entregas.html', entregas=lista, filtro=filtro)
+    return render_template('entregas.html', entregas=lista, filtro=filtro, motivo_filtro=motivo_filtro)
 
 @app.route('/entregas/crear/<int:venta_id>', methods=['POST'])
 def crear_entrega(venta_id):
@@ -2390,6 +3063,8 @@ def actualizar_entrega(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     nuevo_estado = request.form.get('estado', 'pendiente')
+    if nuevo_estado not in ('pendiente', 'en camino', 'entregado', 'cancelado'):
+        nuevo_estado = 'pendiente'
     notas = request.form.get('notas', '')
     cur = mysql.connection.cursor()
     cur.execute("SELECT id, venta_id, estado FROM seguimiento_entregas WHERE id=%s", (id,))
@@ -2823,9 +3498,9 @@ def informe_diario():
 
     cur.execute("SELECT id, total, fecha, estado, nombre, documento FROM ventas WHERE DATE(fecha)=%s ORDER BY fecha", (fecha_str,))
     ventas_dia = cur.fetchall()
-    cur.execute("SELECT COALESCE(SUM(total),0) AS total FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
+    cur.execute("SELECT COALESCE(SUM(total),0) AS total FROM ventas WHERE DATE(fecha)=%s AND COALESCE(estado,'') <> 'cancelado'", (fecha_str,))
     ingresos_ventas = float(cur.fetchone()['total'])
-    cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
+    cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s AND COALESCE(estado,'') <> 'cancelado'", (fecha_str,))
     num_ventas = cur.fetchone()['n']
 
     cur.execute(f"""
@@ -2879,6 +3554,9 @@ def detalle_producto(id):
     if not producto:
         flash('Producto no encontrado.', 'danger')
         return redirect('/')
+    # KPI: si venia buscando algo, esta visita a un producto es lo que hizo
+    # que esa busqueda valiera.
+    kpi_reg.marcar_producto_visto(id)
     return render_template('producto_detalle.html', producto=producto)
 
 # ─────────────────────────────────────────────
@@ -2994,6 +3672,9 @@ def checkout():
     cur.execute("SELECT correo, nombre, apellido, telefono, documento_tipo, documento_numero FROM usuarios WHERE id=%s", (user_id,))
     usuario = cur.fetchone()
     cur.close()
+    # KPI: paso 2 del recorrido. Aqui se sabe que el cliente llego al
+    # formulario; si no llega a comprar, se quedo aqui.
+    kpi_reg.sesion_compra(kpi_reg.PASO_CHECKOUT)
     return render_template('checkout.html', items=items, total=total,
                            direcciones=direcciones, usuario=usuario)
 
@@ -3003,6 +3684,10 @@ def procesar_compra():
     es_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
     def _chk_error(msg, destino='/checkout'):
+        # KPI: el cliente llego al formulario pero no lo completo. Se guarda
+        # el motivo (dni invalido, stock, campos vacios...) porque saber DONDE
+        # se queda la gente no sirve de nada si no se sabe POR QUE.
+        kpi_reg.fallo_checkout(msg)
         flash(msg, 'danger')
         if es_ajax:
             return jsonify({'ok': False, 'error': msg})
@@ -3050,17 +3735,7 @@ def procesar_compra():
         if not re.match(solo_letras, valor):
             return _chk_error(f'El {campo} solo puede contener letras.')
 
-    comprobante_filename = ''
-    if metodo_pago in ['yape', 'plin', 'transferencia']:
-        comprobante = request.files.get('comprobante_pago')
-        if comprobante and comprobante.filename:
-            ext = os.path.splitext(comprobante.filename)[1].lower()
-            if ext in ['.jpg', '.jpeg', '.png', '.webp', '.pdf']:
-                fn = f"comprobante_{user_id}_{int(time.time())}{ext}"
-                comprobante.save(os.path.join(app.config['UPLOAD_FOLDER'], fn))
-                comprobante_filename = 'uploads/' + fn
-            else:
-                return _chk_error('Formato de comprobante no válido. Use JPG, PNG o PDF.')
+    comprobante_filename = None  # Se guardará tras integración con Culqi
 
     cur = mysql.connection.cursor()
     try:
@@ -3099,9 +3774,9 @@ def procesar_compra():
             total += item['precio'] * item['cantidad']
 
         cur.execute("""INSERT INTO ventas
-            (cliente_id, total, metodo_pago, direccion_envio, documento, doc_tipo, nombre, apellido, telefono, correo, notas_entrega, comprobante_pago)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo, nombres, apellidos, telefono, correo, notas_entrega, comprobante_filename or None))
+            (cliente_id, total, metodo_pago, direccion_envio, documento, doc_tipo, nombre, apellido, telefono, correo, notas_entrega)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo, nombres, apellidos, telefono, correo, notas_entrega))
         venta_id = cur.lastrowid
         for item in items:
             cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
@@ -3118,6 +3793,13 @@ def procesar_compra():
             (nombres, apellidos, telefono, doc_tipo, doc_numero, user_id))
 
         mysql.connection.commit()
+
+        # KPI: la compra se completo. Se cierra la sesion de compra y se
+        # marcan las busquedas de esta visita como convertidas, que es lo que
+        # permite medir si el buscador vende.
+        kpi_reg.sesion_compra(kpi_reg.PASO_VENTA, venta_id=venta_id,
+                              estado=kpi_reg.ESTADO_CONVERTIDA)
+        kpi_reg.marcar_busqueda_convertida(user_id)
 
         try:
             enviar_boleta_cliente(correo, venta_id)
@@ -3241,7 +3923,7 @@ def perfil():
             usuario['apellido'] = apellido or usuario['apellido']
             usuario['documento_tipo']   = doc_tipo
             usuario['documento_numero'] = doc_num
-            return render_template('perfil.html', usuario=usuario)
+            return render_template('perfil.html', usuario=usuario, mi_historial=[])
 
         cur.execute("""
             UPDATE usuarios SET nombre=%s, apellido=%s,
@@ -3258,8 +3940,58 @@ def perfil():
                    telefono, documento_tipo, documento_numero
                    FROM usuarios WHERE id=%s""", (user_id,))
     usuario = cur.fetchone()
+    # P2: historial de estados propio (últimos 10) para timeline en perfil
+    try:
+        cur.execute("""
+            SELECT estado_anterior, estado_nuevo, motivo, created_at
+            FROM historial_estado_cliente WHERE usuario_id=%s
+            ORDER BY created_at DESC LIMIT 10
+        """, (user_id,))
+        mi_historial = cur.fetchall()
+    except Exception:
+        mi_historial = []
     cur.close()
-    return render_template('perfil.html', usuario=usuario)
+    return render_template('perfil.html', usuario=usuario, mi_historial=mi_historial)
+
+@app.route('/perfil/solicitar-revision', methods=['POST'])
+def solicitar_revision_estado():
+    """Botón del cliente: pide revisión sin cambiar su estado (queda registrado)."""
+    if 'user_id' not in session:
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect('/perfil')
+    user_id = session['user_id']
+    motivo = (request.form.get('motivo') or 'Solicitud de revisión de estado').strip()[:300]
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT COALESCE(estado,'activo') AS estado FROM usuarios WHERE id=%s", (user_id,))
+    fila = cur.fetchone()
+    actual = (fila['estado'] if fila else 'activo')
+    try:
+        cur.execute(
+            "INSERT INTO historial_estado_cliente (usuario_id, estado_anterior, estado_nuevo, motivo, admin_id)"
+            " VALUES (%s,%s,%s,%s,NULL)", (user_id, actual, actual, motivo))
+        mysql.connection.commit()
+    except Exception:
+        pass
+    cur.close()
+    flash('Solicitud enviada. Un administrador la revisará.', 'success')
+    return redirect('/perfil')
+
+@app.route('/api/mi-estado')
+def api_mi_estado():
+    """Badge en tiempo real para el cliente."""
+    if 'user_id' not in session:
+        return jsonify({'ok': False}), 401
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT COALESCE(estado,'activo') AS estado FROM usuarios WHERE id=%s",
+                (session['user_id'],))
+    fila = cur.fetchone()
+    cur.close()
+    est = (fila['estado'] if fila else 'activo')
+    return jsonify({'ok': True, 'estado': est,
+                    'nombre': ESTADOS_CLIENTE.get(est, {}).get('nombre', est),
+                    'color': color_estado_cliente(est)})
 
 @app.route('/cambiar-password', methods=['POST'])
 def cambiar_password():
@@ -3303,16 +4035,25 @@ def mis_entregas():
     if 'user_id' not in session:
         return redirect('/login')
     user_id = session['user_id']
+    motivo_filtro = request.args.get('motivo', '').strip()
     cur = mysql.connection.cursor()
-    cur.execute("""
+    cond_motivo = ""
+    params = [user_id]
+    if motivo_cancelacion_valido(motivo_filtro):
+        cond_motivo = " AND c.motivo_codigo=%s"
+        params.append(motivo_filtro)
+    cur.execute(f"""
         SELECT v.id AS venta_id, v.total, v.fecha AS venta_fecha, v.estado,
                v.direccion_envio, v.notas_entrega, v.metodo_pago,
-               s.id AS seg_id, s.fecha_estimada, s.fecha_entrega, s.notas AS seg_notas
+               s.id AS seg_id, s.estado AS seg_estado,
+               s.fecha_estimada, s.fecha_entrega, s.notas AS seg_notas,
+               c.motivo_codigo, c.motivo_detalle
         FROM ventas v
         LEFT JOIN seguimiento_entregas s ON s.venta_id = v.id
-        WHERE v.cliente_id=%s
+        LEFT JOIN cancelaciones c ON c.venta_id = v.id
+        WHERE v.cliente_id=%s{cond_motivo}
         ORDER BY v.fecha DESC
-    """, (user_id,))
+    """, tuple(params))
     filas = cur.fetchall()
     entregas = []
     for v in filas:
@@ -3321,9 +4062,43 @@ def mis_entregas():
             FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
             WHERE d.venta_id=%s
         """, (v['venta_id'],))
-        entregas.append({**v, 'productos': cur.fetchall()})
+        # Cancelable: todo lo que no sea terminal (cubre 'en espera' y
+        # cualquier valor legacy como 'pendiente')
+        entregas.append({**v, 'productos': cur.fetchall(),
+                         'cancelable': (v['estado'] not in ('entregado', 'cancelado'))})
+    cur.execute("SELECT COALESCE(estado,'activo') AS estado FROM usuarios WHERE id=%s", (user_id,))
+    f = cur.fetchone()
+    mi_estado = (f['estado'] if f else 'activo')
+
+    # Resumen de cancelaciones del propio cliente (solo las suyas). Sin filtro
+    # de fecha: el cliente quiere ver "que se me cancelo", no analizar tendencias.
+    mis_cancelaciones = []
+    resumen_cancel = {'n': 0, 'monto': 0.0}
+    try:
+        cur.execute("""
+            SELECT v.id, v.total, v.fecha,
+                   COALESCE(c.motivo_codigo,'sin_motivo') AS motivo_codigo,
+                   c.motivo_detalle
+            FROM ventas v
+            LEFT JOIN cancelaciones c ON c.venta_id = v.id
+            WHERE v.cliente_id=%s AND COALESCE(v.estado,'')='cancelado'
+            ORDER BY v.fecha DESC
+        """, (user_id,))
+        for m in cur.fetchall():
+            motivo_txt = etiqueta_motivo(m['motivo_codigo'])
+            mis_cancelaciones.append({**m, 'motivo_etiqueta': motivo_txt})
+            resumen_cancel['n'] += 1
+            resumen_cancel['monto'] += float(m['total'] or 0.0)
+        resumen_cancel['monto'] = round(resumen_cancel['monto'], 2)
+    except Exception:
+        mis_cancelaciones = []
+        resumen_cancel = {'n': 0, 'monto': 0.0}
+
     cur.close()
-    return render_template('mis_entregas.html', entregas=entregas)
+    return render_template('mis_entregas.html', entregas=entregas, mi_estado=mi_estado,
+                           motivo_filtro=motivo_filtro,
+                           mis_cancelaciones=mis_cancelaciones,
+                           resumen_cancel=resumen_cancel)
 
 @app.route('/mis-entregas/cancelar/<int:venta_id>', methods=['POST'])
 def cancelar_pedido(venta_id):
@@ -3382,7 +4157,7 @@ def api_mis_entregas_estados():
         return jsonify({'ok': False}), 401
     user_id = session['user_id']
     cur = mysql.connection.cursor()
-    cur.execute("SELECT id, estado FROM ventas WHERE cliente_id=%s ORDER BY fecha DESC", (user_id,))
+    cur.execute("SELECT id, estado FROM ventas WHERE cliente_id=%s AND COALESCE(oculta,0)=0 ORDER BY fecha DESC", (user_id,))
     rows = cur.fetchall()
     cur.close()
     return jsonify({'ok': True, 'entregas': [
@@ -3570,6 +4345,10 @@ def agregar(id):
             cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
         mysql.connection.commit()
 
+        # KPI: paso 1 del recorrido. Armar el carrito es el primer paso de la
+        # intencion de compra; aqui nace la sesion que luego va avanzando.
+        kpi_reg.sesion_compra(kpi_reg.PASO_CARRITO)
+
         # Datos para respuesta AJAX
         cur.execute("SELECT cantidad FROM carrito WHERE usuario_id=%s AND producto_id=%s", (usuario, id))
         fila = cur.fetchone()
@@ -3692,18 +4471,6 @@ def _static_con_db(filename):
 
 if _static_original is not None:
     app.view_functions['static'] = _static_con_db
-
-# ─────────────────────────────────────────────
-# KPIs TECNICOS
-# ─────────────────────────────────────────────
-# Se registra al final del archivo, cuando ya estan definidas todas las
-# rutas, para que el blueprint de KPIs y los hooks de instrumentacion se
-# anaden a una app completa. init_db se ejecuta aqui y no en un
-# before_request porque en este momento la app todavia no ha atendido
-# ninguna peticion y MySQL puede no responder.
-# init_db ya se ejecuta en el before_request _ensure_db; no pasarlo aquí
-# para evitar doble inicialización.
-init_kpi(app)
 
 # ─────────────────────────────────────────────
 # KPIs DE NEGOCIO — VENTAS Y ALMACEN

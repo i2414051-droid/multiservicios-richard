@@ -10,6 +10,14 @@
       <a href="/permisos" class="btn btn-outline-warning">
         <i class="bi bi-shield-lock me-1"></i> Gestionar Permisos
       </a>
+      {% if n_ocultas %}
+      <a href="/historial-compras?ocultas={{ 0 if mostrar_ocultas else 1 }}"
+         class="btn {{ 'btn-warning' if mostrar_ocultas else 'btn-outline-warning' }}"
+         title="{{ 'Ocultar las ventas marcadas como ocultas' if mostrar_ocultas else 'Mostrar tambien las ventas ocultas' }}">
+        <i class="bi {{ 'bi-eye-slash' if mostrar_ocultas else 'bi-eye' }} me-1"></i>
+        {{ 'Ocultar ocultas' if mostrar_ocultas else 'Mostrar ocultas' }} ({{ n_ocultas }})
+      </a>
+      {% endif %}
       <button type="button" class="btn btn-outline-danger" onclick="limpiarHistorial()">
         <i class="bi bi-trash me-1"></i> Limpiar historial
       </button>
@@ -30,12 +38,13 @@
               <th>Total</th>
               <th>Fecha</th>
               <th>Estado</th>
+              <th>Motivo cancelación</th>
               <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {% for venta in historial %}
-            <tr>
+            <tr style="{{ 'opacity:.45;' if venta.oculta else '' }}">
               <td><span class="badge bg-primary fs-6">#{{ venta.id }}</span></td>
               <td class="text-start">
                 <span class="text-white">{{ venta.correo }}</span>
@@ -46,30 +55,58 @@
               <td class="text-success fw-bold">S/ {{ "%.2f"|format(venta.total) }}</td>
               <td class="text-muted" style="font-size:.85rem;">{{ venta.fecha }}</td>
               <td>
+                {% if venta.estado=='cancelado' %}
+                <span class="badge bg-danger" title="Cancelada: no se puede reabrir"><i class="bi bi-lock me-1"></i>Cancelado</span>
+                {% else %}
                 <form method="POST" action="/historial-compras/estado/{{ venta.id }}" style="display:inline;">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                   <select name="estado" class="form-select form-select-sm bg-dark text-white border-secondary"
                           onchange="this.form.submit()">
                     <option value="entregado" {% if venta.estado == 'entregado' %}selected{% endif %}>Entregado</option>
                     <option value="en espera" {% if venta.estado == 'en espera' %}selected{% endif %}>En espera</option>
-                    <option value="cancelado" {% if venta.estado == 'cancelado' %}selected{% endif %}>Cancelado</option>
+                    <option value="cancelado">Cancelado</option>
                   </select>
                 </form>
+                {% endif %}
               </td>
               <td>
-                <a href="/historial-compras/eliminar/{{ venta.id }}" class="btn btn-danger btn-sm"
-                   onclick="return confirm('¿Eliminar venta #{{ venta.id }}?')">
-                  <i class="bi bi-trash"></i> Eliminar
+                {% if venta.estado=='cancelado' and venta.motivo_codigo %}
+                <span class="badge bg-dark" title="{{ venta.motivo_detalle or '' }} ({{ venta.cancelado_por or '' }})">
+                  {{ motivos_cancelacion.get(venta.motivo_codigo, 'Otro') }}
+                </span>
+                {% elif venta.estado=='cancelado' %}
+                <span class="badge bg-dark">Cancelado por administrador</span>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if venta.oculta %}
+                <a href="/historial-compras/mostrar/{{ venta.id }}" class="btn btn-success btn-sm"
+                   title="Vuelve a mostrar esta venta">
+                  <i class="bi bi-eye"></i> Mostrar
                 </a>
+                {% else %}
+                <a href="/historial-compras/ocultar/{{ venta.id }}" class="btn btn-danger btn-sm"
+                   onclick="return confirm('¿Ocultar venta #{{ venta.id }}? Sigue en la base de datos.')"
+                   title="Oculta del panel. No borra de la base de datos.">
+                  <i class="bi bi-eye-slash"></i> Ocultar
+                </a>
+                {% endif %}
               </td>
             </tr>
             {% endfor %}
           </tbody>
           <tfoot>
             <tr class="tc-admin-header">
-              <td colspan="2" class="text-end fw-bold text-white fs-5">TOTAL GENERAL</td>
+              <td colspan="2" class="text-end fw-bold text-white fs-5">TOTAL GENERAL (entregado)</td>
               <td class="text-success fw-bold fs-5">S/ {{ "%.2f"|format(gran_total) }}</td>
-              <td colspan="3"></td>
+              <td colspan="4"></td>
+            </tr>
+            <tr class="tc-admin-header">
+              <td colspan="2" class="text-end fw-bold text-white fs-5">Monto en espera</td>
+              <td class="text-warning fw-bold fs-5">S/ {{ "%.2f"|format(monto_en_espera) }}</td>
+              <td colspan="4"></td>
             </tr>
           </tfoot>
         </table>
@@ -88,12 +125,24 @@
              class="form-control bg-dark text-white border-secondary"
              placeholder="Buscar por correo del cliente..."
              value="{{ buscar }}">
+      {% if motivo_filtro %}<input type="hidden" name="motivo" value="{{ motivo_filtro }}">{% endif %}
       <button class="btn btn-primary" type="submit">Buscar</button>
       {% if buscar %}
-        <a href="/historial-compras" class="btn btn-outline-secondary">Limpiar</a>
+        <a href="/historial-compras{% if motivo_filtro %}?motivo={{ motivo_filtro }}{% endif %}" class="btn btn-outline-secondary">Limpiar</a>
       {% endif %}
     </div>
   </form>
+
+  <!-- FILTRO POR MOTIVO DE CANCELACIÓN -->
+  <div class="d-flex gap-2 flex-wrap mb-3">
+    <a href="/historial-compras?buscar={{ buscar }}" class="btn btn-sm {{ 'btn-warning fw-bold' if not motivo_filtro else 'btn-outline-secondary' }}">Todos</a>
+    {% for codigo, texto in motivos_cancelacion.items() %}
+    <a href="/historial-compras?buscar={{ buscar }}&motivo={{ codigo }}"
+       class="btn btn-sm {{ 'btn-warning fw-bold' if motivo_filtro==codigo else 'btn-outline-secondary' }}">
+      {{ texto }} <span class="badge bg-dark ms-1">{{ conteo_motivos.get(codigo, 0) }}</span>
+    </a>
+    {% endfor %}
+  </div>
 
   <!-- RESUMEN -->
   <p class="text-muted mb-3">
@@ -132,6 +181,11 @@
             {% else %}bg-warning text-dark{% endif %}">
             {{ venta.estado }}
           </span>
+          {% if venta.estado=='cancelado' and venta.motivo_codigo %}
+          <span class="badge bg-dark" title="{{ venta.motivo_detalle or '' }} ({{ venta.cancelado_por or '' }})">
+            {{ motivos_cancelacion.get(venta.motivo_codigo, venta.motivo_codigo) }}
+          </span>
+          {% endif %}
           <span class="text-success fw-bold fs-6">
             <i class="bi bi-cash-coin me-1"></i>S/ {{ "%.2f"|format(venta.total) }}
           </span>
@@ -193,7 +247,9 @@
     </div>
     {% endfor %}
 
-  {{ paginacion(page, total_pages, total, '/historial-compras?', {'buscar': buscar}) }}
+  {{ paginacion(page, total_pages, total,
+                '/historial-compras?' ~ ('motivo=' ~ motivo_filtro ~ '&' if motivo_filtro else ''),
+                {'buscar': buscar}) }}
 
   {% else %}
     <div class="text-center py-5">

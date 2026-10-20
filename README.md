@@ -91,6 +91,12 @@ Luego abre:
 
 > Los scripts cargan el `.env` de la raíz y levantan cada micro con su `Procfile` interno.
 
+**Login independiente de cada micro (Arreglo 2):**
+- **Ventas (:5000):** login propio (`/login`) contra la tabla `usuarios` de la BD de ventas.
+- **Almacén (:5001):** login propio (`/login`) con las credenciales de las variables `ALMACEN_ADMIN_USER` / `ALMACEN_ADMIN_PASSWORD` (por defecto `admin` / `almacen123`).
+
+> Cada micro usa su **propia cookie de sesión** (ventas: `session`; almacén: `almacen_session`), así que son independientes: si el micro de Ventas se cae, el de Almacén sigue funcionando y viceversa.
+
 ---
 
 ## Correr en local (monolito / como Render)
@@ -144,12 +150,106 @@ Si el sitio responde *"Ocurrió un error interno. Revisa los logs."*, es un erro
 ## Bases de datos (alwaysdata)
 
 - Host: `mysql-proyecto.alwaysdata.net`
-- BD ventas: `proyecto_multiservicios_richard` (usuarios, ventas, detalle_venta, carrito, clientes, direcciones, seguimiento_entregas, entrega_productos, intentos_usuario, bloqueos_ip)
-- BD almacen: `proyecto_gestion_almacen` (productos, ingresos, detalle_ingreso, salidas, detalle_salida, proveedores, productos_para_pedir)
+- BD ventas: `proyecto_multiservicios_richard` (usuarios, ventas, detalle_venta, carrito, direcciones, seguimiento_entregas, entrega_productos, intentos_usuario, bloqueos_ip, cancelaciones, motivos_cancelacion, historial_estado_cliente, kpi_error_events, kpi_incidencias, kpi_sesiones_compra, kpi_busquedas)
+- BD almacen: `proyecto_gestion_almacen` (productos, ingresos, detalle_ingreso, salidas, detalle_salida, proveedores, productos_para_pedir, movimientos_stock, historial_stock)
+
+> Tablas retiradas (respaldo en `tablas_eliminadas_respaldo_*.sql`): `clientes`, `cancelacion`, `estados_cliente`.
+> El estado de cada cliente vive en `usuarios.estado`; el catálogo de estados válidos está en el dict `ESTADOS_CLIENTE` de `app.py` (la tabla `estados_cliente` se eliminó: no se leía en ningún request y el app la repoblaba sola al arrancar).
 
 ---
 
+## Modulo de KPIs (`kpi/`)
+
+Panel en `/panel` (boton **KPIs** de Accesos Rapidos en `/dashboard`). Se recalcula
+**en vivo** en cada peticion y se refresca solo cada 30 s.
+
+### Como esta conectado
+
+| Capa | Pieza | Que hace |
+|---|---|---|
+| Back-end | `kpi/repository.py` | Todo el SQL. Lee de las 2 bases (`ventas` de una, `almacen.productos` de la otra) |
+| Back-end | `kpi/service.py` | Formulas de los indicadores y semaforo |
+| Back-end | `kpi/settings.py` | Umbrales y catalogos (lo unico que hay que tocar para mover un objetivo) |
+| Back-end | `kpi/schema.py` | Crea `kpi_incidencias` y anade `created_at` a `carrito` y `bloqueos_ip` |
+| Front-end | `templates/kpi_biz/` | Panel (5 secciones) y macros de las tarjetas |
+| Front-end | `static/js/kpi-biz-dashboard.js` | Cambio de periodo y registro de incidencias sin recargar |
+
+### De donde sale cada dato
+
+| Indicador | Tabla |
+|---|---|
+| Volumen de ventas / Ingresos brutos | `ventas` |
+| Cancelacion por error del cliente / Indice de motivos | `cancelaciones` (LEFT JOIN `ventas`) |
+| Frecuencia de compra por ciclo | `ventas` agrupado por `cliente_id` |
+| Quiebre de stock / Dias de inventario | `almacen.productos` + `detalle_venta` |
+| Devoluciones por incompatibilidad | `kpi_incidencias` (registro manual) |
+| Bloqueo de cuentas / IPs bloqueadas | `intentos_usuario`, `bloqueos_ip` |
+| Intentos fallidos de login | `intentos_usuario` |
+| Abandono de carrito / Motivos | `carrito`, `kpi_incidencias` |
+
+### El reloj: manda la base de datos
+
+alwaysdata corre MySQL en **CEST (UTC+2)** y el contenedor de Render en **UTC**. Por eso
+el modulo **no** usa `datetime.now()`: usa `SELECT NOW()`. Con el reloj local las
+ventas mas recientes caian fuera del periodo y el panel mostraba cero pedidos con
+ventas registradas. Las columnas que el KPI lee las escribe MySQL
+(`CURRENT_TIMESTAMP`); `kpi_incidencias.fecha` y `carrito.created_at` tambien.
+
+### Lo que el sistema no registra solo
+
+Devoluciones, errores de picking, mermas, incidencias de transporte y motivos de
+abandono no se deducen de ninguna tabla: se registran en la **seccion 5 del panel**
+(Registro de Incidencias), que alimenta las secciones 2 y 4.
+
+### Configuracion (variables de entorno)
+
+```ini
+KPI_PRESET=30d                      # periodo por defecto (hoy | 7d | 30d | mes)
+KPI_CICLO_MANTENIMIENTO_DIAS=90      # ciclo de mantenimiento (frecuencia de compra)
+KPI_CATEGORIA_REPUESTOS=Repuestos   # admite varias separadas por coma
+KPI_CATEGORIA_ACCESORIOS=Accesorios
+KPI_UMBRAL_BLOQUEO_LOGIN=5          # fallos que se consideran bloqueo
+```
+
+> Si un indicador de inventario sale en "sin datos", el panel lo dice: avisa de que
+> no hay productos en la categoria configurada y lista las categorias que si existen
+> en el catalogo.
+
+### API (solo administradores)
+
+```
+GET    /api/kpi-biz              snapshot completo en JSON
+GET    /api/kpi-biz/panel        fragmento HTML del panel (lo reinyecta el JS)
+POST   /api/kpi-biz/incidencia   registrar incidencia
+DELETE /api/kpi-biz/incidencia/<id>
+GET    /api/kpi-biz/incidencias-recentes
+```
+
+---
+
+### Registro del recorrido del cliente (`kpi/registro.py`)
+
+El sistema no registraba ninguna interaccion del cliente salvo el carrito. Con este
+modulo queda el rastro de lo que hace, para poder medir despues:
+
+| Tabla | Una fila por | Se llena en |
+|---|---|---|
+| `kpi_sesiones_compra` | intencion de compra | `GET /agregar/<id>`, `GET /checkout`, `POST /procesar_compra` |
+| `kpi_busquedas` | busqueda escrita en la tienda | `GET /?buscar=...`, `GET /producto/<id>` |
+
+La sesion de compra avanza por los pasos `carrito -> checkout -> formulario -> venta`.
+Si el formulario falla, `motivo_fallo` guarda el motivo (`documento_invalido`,
+`stock_insuficiente`, `campos_obligatorios`, `carrito_vacio`, `telefono_invalido`,
+`csrf_invalido`, `error_sistema`): saber **donde** se queda la gente no sirve de nada
+sin saber **por que**.
+
+`kpi_busquedas` guarda el texto, cuantos resultados dio y si el cliente acabo
+comprando. Las busquedas **con 0 resultados** son la lista de lo que la gente pide y
+no tenemos: la entrada para decidir que variedad traer.
+
+> Ninguna de estas escrituras puede romper la tienda: todas van envueltas en
+> try/except y usan la conexion propia del modulo de KPIs.
+
 ## Notas
 
-- El monolito de la raíz sirve **estática + portada + tienda + admin** en un solo puerto y es lo que se ve en el enlace de Render.
-- Los microservicios comparten la misma BD pero cada uno corre en su propio puerto (5000/5001); la comunicacion entre ellos usa `X-Internal-Key`.
+- El monolito de la raíz sirve **estática + portada + tienda + admin** en un solo puerto y es lo que se ve en el enlace de Render.- Los microservicios comparten la misma BD pero cada uno corre en su propio puerto (5000/5001); la comunicacion entre ellos usa `X-Internal-Key`.

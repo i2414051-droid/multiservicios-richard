@@ -119,6 +119,16 @@
 {% endwith %}
 </div>
 
+<!-- AVISO: microservicio de Almacen no disponible -->
+{% if almacen_caido %}
+<div class="container mt-3">
+  <div class="alert alert-warning d-flex align-items-center" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <div>El servicio de <strong>almacén</strong> no está disponible temporalmente. Algunos productos o datos pueden no mostrarse; el resto del sistema sigue funcionando.</div>
+  </div>
+</div>
+{% endif %}
+
 <!-- CONTENIDO -->
 <div class="container mt-4">
 {% block content %}{% endblock %}

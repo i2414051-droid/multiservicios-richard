@@ -1,59 +1,38 @@
-{% extends 'base.html' %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multiservicios Richard — Almacén</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/estilos.css') }}">
+</head>
+<body class="fondo-principal">
 
-{% block content %}
+<div class="container d-flex justify-content-center align-items-center" style="min-height:90vh;">
+  <div class="card shadow p-4" style="width:360px;">
 
-<div class="container d-flex justify-content-center align-items-center" style="height:80vh;">
-
-    <div class="card shadow p-4" style="width:350px;">
-
-        <h3 class="text-center mb-3">🔐 Login Admin</h3>
-
-        <form method="POST">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-
-            <!-- CAMPO CORREO -->
-            <input type="email"
-                   name="correo"
-                   placeholder="Correo electrónico"
-                   class="form-control mb-3"
-                   required>
-
-            <!-- CAMPO PASSWORD -->
-            <input type="password"
-                   name="password"
-                   placeholder="Contraseña"
-                   class="form-control mb-3"
-                   required>
-
-            <!-- MENSAJES FLASH -->
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ category }} p-2 text-center">
-                            {{ message }}
-                        </div>
-                    {% endfor %}
-
-                {% endif %}
-            {% endwith %}
-
-            <button class="btn btn-primary w-100">
-                Ingresar
-            </button>
-
-        </form>
-
-        <!-- LINK REGISTRO -->
-        <div class="text-center mt-3">
-            <a href="/registro">Crear cuenta</a>
-        </div>
-        <div class="text-center mt-2">
-            <a href="/recuperar-password" style="color:#f39c12;font-size:13px">¿Olvidaste tu contraseña?</a>
-        </div>
-
+    <div class="text-center mb-3">
+      <h4 class="mb-1"><i class="bi bi-box-seam"></i> Almacén</h4>
+      <small class="text-muted">Microservicio de Gestión de Almacén</small>
     </div>
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} p-2 text-center">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="POST">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="text" name="usuario" placeholder="Usuario" class="form-control mb-3" required autofocus>
+      <input type="password" name="password" placeholder="Contraseña" class="form-control mb-3" required>
+      <button class="btn btn-warning w-100">Ingresar</button>
+    </form>
+
+  </div>
 </div>
 
-{% endblock %}
+</body>
+</html>

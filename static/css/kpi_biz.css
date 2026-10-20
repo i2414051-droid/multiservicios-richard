@@ -400,3 +400,60 @@
 [data-theme="light"] .kpi-biz-panel .kpi-biz-tabla th {
   color: var(--kpi-naranja-txt);
 }
+/* ── Registro de incidencias ── */
+.kpi-biz-nota {
+  color: var(--kpi-muted-txt);
+  font-size: .9rem;
+  margin-bottom: 1rem;
+}
+
+.kpi-biz-form {
+  background: rgba(127, 127, 127, .06);
+  border: 1px solid rgba(127, 127, 127, .22);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.kpi-biz-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .75rem;
+}
+
+.kpi-biz-form label {
+  display: block;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--kpi-muted-txt);
+  margin-bottom: .25rem;
+}
+
+.kpi-biz-form .form-control,
+.kpi-biz-form .form-select {
+  background: var(--bg-card);
+  border-color: rgba(127, 127, 127, .3);
+  color: var(--text-primary);
+}
+
+.kpi-biz-form-nota {
+  margin-top: .75rem;
+}
+
+.kpi-biz-form-acciones {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.kpi-biz-form-estado {
+  font-size: .85rem;
+  color: var(--kpi-muted-txt);
+}
+
+.kpi-biz-borrar {
+  padding: .1rem .4rem;
+  font-size: .75rem;
+}

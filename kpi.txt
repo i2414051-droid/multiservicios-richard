@@ -1,0 +1,32 @@
+KPI
+
+ Sección de Ventas y Facturación
+
+• Volumen de Ventas Totales
+• Ingresos Brutos
+• Tasa de Cancelación de Pedidos por Error del Cliente
+• Índice de Motivos de Cancelación
+• Tiempo de Respuesta en Canales de Soporte y Dudas
+• Frecuencia de Compra por Ciclo de Mantenimiento
+
+Sección de Gestión de Almacén e Inventario
+
+• Tasa de Quiebre de Stock en Repuestos de Alta Demanda
+• Días de Inventario de Accesorios vs. Repuestos Técnicos
+• Tasa de Devoluciones por Incompatibilidad
+
+ección de Seguridad y Control de Usuarios
+
+• Tasa de Bloqueo de Cuentas por Intentos de Fraude
+• Frecuencia de Intentos Fallidos de Inicio de Sesión
+
+Sección de Comercio Electrónico (E-commerce) y Carritos
+
+• Tasa de Abandono de Carritos por Incertidumbre
+• Punto de Abandono en el Proceso de Pago
+• Tasa de Conversión del Asistente de Compatibilidad / Buscador
+• Tasa de Recuperación de Carritos mediante Asesoría Técnica
+
+estos es los requerimientos de mi KPI se puede implementar?
+
+Perfecto: Grupo A + B (11 KPIs), con ciclo de 90 días. Esto implica reescribir el motor de KPIs para tus indicadores (mantengo las rutas, el panel y la degradación). Primero veo qué helpers ya existen para reutilizar y no romper el /panel del monolito.

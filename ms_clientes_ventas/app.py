@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (Flask, render_template, request, redirect,
-                   url_for, session, jsonify, flash, send_file)
+                   url_for, session, jsonify, flash, send_file, g)
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail, Message
@@ -294,8 +294,32 @@ def _seguridad_ms():
             return jsonify({'error': 'No autorizado'}), 401
     return None
 
+def _marcar_servicio_caido(nombre):
+    """Marca en la peticion actual que un microservicio dependiente no respondio."""
+    try:
+        setattr(g, nombre, True)
+    except RuntimeError:
+        # Sin contexto de peticion (p.ej. hilo en segundo plano): se ignora.
+        pass
+
+
+def _servicio_caido(nombre):
+    """True si el microservicio ya fallo en esta misma peticion."""
+    try:
+        return getattr(g, nombre, False)
+    except RuntimeError:
+        return False
+
+
 def almacen_api(endpoint, method='GET', data=None):
-    """Llama a la API del microservicio de Almacén (5001) con clave interna."""
+    """Llama a la API del microservicio de Almacén (5001) con clave interna.
+
+    Degradación elegante: si el micro ya falló en esta misma petición no se
+    vuelve a intentar (así una página con muchas llamadas no se queda colgada
+    esperando el timeout) y se devuelve None para que la vista siga funcionando.
+    """
+    if _servicio_caido('almacen_caido'):
+        return None
     try:
         headers = {'X-Internal-Key': INTERNAL_API_KEY}
         url = f"{MS_ALMACEN_URL}{endpoint}"
@@ -306,8 +330,10 @@ def almacen_api(endpoint, method='GET', data=None):
         if r.status_code == 200:
             return r.json()
         print(f"[almacen_api] {method} {endpoint} -> {r.status_code} {r.text[:200]}")
+        _marcar_servicio_caido('almacen_caido')
     except Exception as e:
         print(f"[almacen_api] Error {method} {endpoint}: {e}")
+        _marcar_servicio_caido('almacen_caido')
     return None
 
 def api_almacen(endpoint):
@@ -437,9 +463,10 @@ def cantidad_carrito():
         cur = mysql.connection.cursor()
         cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s", (usuario,))
         res = cur.fetchone()
-        return dict(cantidad_carrito=res['total'] if res['total'] else 0)
+        return dict(cantidad_carrito=res['total'] if res['total'] else 0,
+                    almacen_caido=_servicio_caido('almacen_caido'))
     except:
-        return dict(cantidad_carrito=0)
+        return dict(cantidad_carrito=0, almacen_caido=_servicio_caido('almacen_caido'))
 
 # ─────────────────────────────────────────────
 # TEST / INIT
@@ -790,9 +817,10 @@ def dashboard():
     
     cur = mysql.connection.cursor()
 
-    cur.execute("SELECT COUNT(*) AS total FROM ventas")
+    # Una venta cancelada no cuenta como venta: ni en el conteo ni en los ingresos.
+    cur.execute("SELECT COUNT(*) AS total FROM ventas WHERE COALESCE(estado,'') <> 'cancelado'")
     total_ventas = cur.fetchone()['total'] or 0
-    cur.execute("SELECT COALESCE(SUM(total), 0) AS total FROM ventas")
+    cur.execute("SELECT COALESCE(SUM(total), 0) AS total FROM ventas WHERE COALESCE(estado,'') <> 'cancelado'")
     ingresos_totales = float(cur.fetchone()['total'] or 0)
     cur.execute("SELECT COUNT(*) AS total FROM usuarios")
     total_usuarios = cur.fetchone()['total'] or 0
@@ -1248,7 +1276,7 @@ def historial_compras():
         return redirect('/')
     buscar = request.args.get('buscar','')
     cur = mysql.connection.cursor()
-    cur.execute("SELECT SUM(total) AS gran_total FROM ventas")
+    cur.execute("SELECT SUM(total) AS gran_total FROM ventas WHERE COALESCE(estado,'') <> 'cancelado'")
     res = cur.fetchone()
     gran_total = res['gran_total'] or 0
     cur.execute("""
@@ -2550,9 +2578,9 @@ def informe_diario():
     cur = mysql.connection.cursor()
     cur.execute("SELECT id, total, fecha, estado, nombre, documento FROM ventas WHERE DATE(fecha)=%s ORDER BY fecha", (fecha_str,))
     ventas_dia = cur.fetchall()
-    cur.execute("SELECT COALESCE(SUM(total),0) AS total FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
+    cur.execute("SELECT COALESCE(SUM(total),0) AS total FROM ventas WHERE DATE(fecha)=%s AND COALESCE(estado,'') <> 'cancelado'", (fecha_str,))
     ingresos_ventas = float(cur.fetchone()['total'])
-    cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s", (fecha_str,))
+    cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s AND COALESCE(estado,'') <> 'cancelado'", (fecha_str,))
     num_ventas = cur.fetchone()['n']
     cur.execute("""
         SELECT e.id, e.estado, e.fecha_entrega, v.nombre AS cliente_nombre, v.total

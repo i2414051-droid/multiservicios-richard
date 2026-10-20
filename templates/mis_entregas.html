@@ -1,8 +1,75 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="container mt-4" style="max-width:850px">
-  <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-truck"></i> Mis Entregas</h2>
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-truck"></i> Mis Entregas</h2>
+    <span class="badge" id="badgeMiEstado" style="background:{{ color_estado_cliente(mi_estado or 'activo') }};font-size:13px">
+      Mi cuenta: {{ (estados_cliente.get(mi_estado or 'activo', {}).get('nombre')) or mi_estado }}
+    </span>
+  </div>
   <p style="color:var(--text-muted)">Compras realizadas y su estado de entrega (se actualiza automáticamente)</p>
+
+  <!-- FILTRO POR MOTIVO DE CANCELACIÓN -->
+  <form method="GET" class="mb-3">
+    <div class="input-group input-group-sm" style="max-width:420px">
+      <span class="input-group-text bg-dark text-white border-secondary"><i class="bi bi-funnel"></i></span>
+      <select name="motivo" class="form-select bg-dark text-white border-secondary" onchange="this.form.submit()">
+        <option value="">Filtrar por motivo de cancelación: todos</option>
+        {% for codigo, texto in motivos_cancelacion.items() %}
+        <option value="{{ codigo }}" {% if motivo_filtro==codigo %}selected{% endif %}>{{ texto }}</option>
+        {% endfor %}
+      </select>
+      {% if motivo_filtro %}<a href="/mis-entregas" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+    </div>
+  </form>
+
+  <!-- RESUMEN DE MIS CANCELACIONES -->
+  {% if resumen_cancel and resumen_cancel.n %}
+  <div class="card mb-3" style="border:1px solid var(--border-card);background:var(--bg-card)">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div>
+          <div style="color:var(--text-muted);font-size:13px">
+            <i class="bi bi-x-circle me-1" style="color:#dc3545"></i> Mis pedidos cancelados
+          </div>
+          <div style="color:var(--text-primary);font-size:22px;font-weight:800">
+            {{ resumen_cancel.n }} <span style="font-size:14px;font-weight:400;color:var(--text-muted)">pedido(s)</span>
+            <span style="color:#dc3545;margin-left:12px">S/ {{ "%.2f"|format(resumen_cancel.monto) }}</span>
+          </div>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" type="button"
+                data-bs-toggle="collapse" data-bs-target="#misCancelaciones">
+          <i class="bi bi-chevron-down me-1"></i> Ver detalle
+        </button>
+      </div>
+      <div id="misCancelaciones" class="collapse mt-3">
+        <table style="width:100%;font-size:13px;color:var(--text-primary);border-collapse:collapse">
+          <thead>
+            <tr style="background:rgba(220,53,69,.18)">
+              <th style="padding:6px 8px;text-align:left">Pedido</th>
+              <th style="padding:6px 8px;text-align:left">Fecha</th>
+              <th style="padding:6px 8px;text-align:left">Motivo</th>
+              <th style="padding:6px 8px;text-align:right">Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in mis_cancelaciones %}
+            <tr style="border-top:1px solid var(--border-subtle)">
+              <td style="padding:5px 8px">#{{ c.id }}</td>
+              <td style="padding:5px 8px;color:var(--text-muted)">{{ c.fecha }}</td>
+              <td style="padding:5px 8px">
+                {{ c.motivo_etiqueta }}
+                {% if c.motivo_detalle %}<br><small style="color:var(--text-muted)">{{ c.motivo_detalle }}</small>{% endif %}
+              </td>
+              <td style="padding:5px 8px;text-align:right;color:#dc3545;font-weight:700">S/ {{ "%.2f"|format(c.total|float) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   {% if entregas %}
   {% for e in entregas %}
@@ -16,6 +83,11 @@
                 style="font-size:13px;margin-left:8px">
             {{ (e.estado or 'en espera')|capitalize }}
           </span>
+          {% if e.estado=='cancelado' and e.motivo_codigo %}
+          <span class="badge bg-dark" style="font-size:12px;margin-left:6px" title="{{ e.motivo_detalle or '' }}">
+            <i class="bi bi-x-circle me-1"></i>{{ motivos_cancelacion.get(e.motivo_codigo, e.motivo_codigo) }}
+          </span>
+          {% endif %}
           <div class="mt-2" style="color:var(--text-primary)">
             <i class="bi bi-receipt me-1" style="color:#f39c12"></i> Total: <strong>S/ {{ "%.2f"|format(e.total|float) }}</strong>
           </div>
@@ -56,6 +128,17 @@
       </div>
 
       <!-- PRODUCTOS DE LA COMPRA -->
+      <div class="mt-2 d-flex gap-2 flex-wrap">
+        <a href="/boleta_pdf/{{ e.venta_id }}" class="btn btn-outline-warning btn-sm"><i class="bi bi-receipt me-1"></i>Boleta PDF</a>
+        {% if e.cancelable %}
+        <button class="btn btn-outline-danger btn-sm" data-sin-carga data-sin-bloqueo
+                onclick="abrirCancelar({{ e.venta_id }})"><i class="bi bi-x-circle me-1"></i>Cancelar pedido</button>
+        {% elif e.estado=='cancelado' %}
+        <span class="btn btn-sm disabled" style="border:1px solid #dc3545;color:#dc3545;opacity:.7">Cancelado</span>
+        {% elif e.estado=='entregado' %}
+        <span class="btn btn-sm disabled" style="border:1px solid var(--border-subtle);color:var(--text-muted);opacity:.7" title="Ya entregado: contacta al administrador">No cancelable</span>
+        {% endif %}
+      </div>
       {% if e.productos %}
       <div style="margin-top:14px">
         <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:4px">
@@ -111,6 +194,54 @@
   {% endif %}
 </div>
 
+<!-- MODAL CANCELAR PEDIDO -->
+<div class="modal fade" id="modalCancelar" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-dark text-white">
+      <form method="POST" id="formCancelar" action="/mis-entregas/cancelar/0">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-x-circle me-2 text-danger"></i>Cancelar pedido <span id="cancelVentaId"></span></h5>
+          <button class="btn-close btn-close-white" data-bs-dismiss="modal" data-sin-carga data-sin-bloqueo></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <p class="text-muted" style="font-size:14px">El stock será devuelto y no podrás revertir esta acción.</p>
+          <label class="form-label">Motivo de cancelación</label>
+          <select name="motivo" id="cancelMotivo" class="form-select bg-dark text-white" required onchange="toggleDetalle(this.value)">
+            <option value="">— Elige un motivo —</option>
+            {% for codigo, texto in motivos_cancelacion.items() %}
+            <option value="{{ codigo }}">{{ texto }}</option>
+            {% endfor %}
+          </select>
+          <div id="cancelDetalleWrap" class="mt-2" style="display:none">
+            <label class="form-label">Describe el motivo</label>
+            <input type="text" name="detalle" id="cancelDetalle" class="form-control bg-dark text-white" maxlength="300" placeholder="Detalle (obligatorio si es Otro)">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal" data-sin-carga data-sin-bloqueo>Volver</button>
+          <button class="btn btn-danger fw-bold" type="submit"><i class="bi bi-x-circle me-1"></i>Confirmar cancelación</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function abrirCancelar(ventaId){
+  var f = document.getElementById('formCancelar');
+  f.action = '/mis-entregas/cancelar/' + ventaId;
+  document.getElementById('cancelVentaId').textContent = '#' + ventaId;
+  document.getElementById('cancelMotivo').value = '';
+  document.getElementById('cancelDetalle').value = '';
+  toggleDetalle('');
+  new bootstrap.Modal(document.getElementById('modalCancelar')).show();
+}
+function toggleDetalle(v){
+  document.getElementById('cancelDetalleWrap').style.display = (v === 'otro') ? 'block' : 'none';
+}
+</script>
+
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   function claseEstado(estado) {
@@ -136,6 +267,17 @@ document.addEventListener('DOMContentLoaded', function () {
       .catch(function () { /* sin conexión: no hacer nada */ });
   }
   setInterval(actualizarEstados, 10000);
+  // P2: badge de mi estado en tiempo real
+  setInterval(function(){
+    fetch('/api/mi-estado', {headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok) return;
+        var b = document.getElementById('badgeMiEstado');
+        if(b){ b.style.background = d.color; b.textContent = 'Mi cuenta: ' + d.nombre; }
+      })
+      .catch(function(){});
+  }, 15000);
 });
 </script>
 {% endblock %}

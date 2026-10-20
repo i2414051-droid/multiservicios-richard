@@ -1,0 +1,270 @@
+{# 
+  Bloque de KPIs de negocio, reutilizable.
+
+  Este archivo no extiende ninguna pagina: es un fragmento que se incrusta en
+  /panel con `{% include %}` y que el JavaScript vuelve a pedir a su endpoint
+  al cambiar de periodo. El servidor sigue siendo el unico que pinta los datos.
+
+  Contrato de datos: recibe `kpis_biz`, el snapshot ya calculado por
+  kpi.routes_biz.get_snapshot(). La estructura tiene 4 secciones (ventas,
+  almacen, seguridad, carritos); si una no llega, la seccion se pinta vacia en
+  vez de romper el panel.
+#}
+{% from 'kpi_biz/macros/kpi_card.html' import tarjeta, variacion, tabla_detalle, tabla_motivos, vacio, semaforo_badge %}
+
+{% if kpis_biz %}
+{% set k = kpis_biz %}
+{% set s1 = k.ventas|default({}, true) %}
+{% set s2 = k.almacen|default({}, true) %}
+{% set s3 = k.seguridad|default({}, true) %}
+{% set s4 = k.carritos|default({}, true) %}
+
+<div class="kpi-biz-panel" id="kpiBizPanel" data-kpi-url="{{ url_for('kpi_biz.api_panel') }}">
+
+  {# ── Aviso de error de la API ── #}
+  <div class="kpi-biz-error" id="kpiBizError"></div>
+
+  {# ── Cabecera y filtros ── #}
+  <div class="kpi-biz-toolbar">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <h2 class="kpi-biz-titulo mb-0">
+        <i class="bi bi-graph-up-arrow"></i> KPIs de Ventas y Almacen
+      </h2>
+    </div>
+
+    <form method="GET" id="kpiBizFiltros" class="kpi-biz-filtros">
+      {% set propios = ('preset', 'desde', 'hasta') %}
+      {% for clave in request.args.keys() if clave not in propios %}
+        <input type="hidden" name="{{ clave }}" value="{{ request.args[clave] }}">
+      {% endfor %}
+
+      <div>
+        <label for="kpiBizPreset">Periodo</label>
+        <select name="preset" id="kpiBizPreset" class="form-select form-select-sm">
+          {% for valor, texto in [('hoy', 'Hoy'), ('7d', 'Ultimos 7 dias'),
+                                  ('30d', 'Ultimos 30 dias'), ('mes', 'Mes actual'),
+                                  ('personalizado', 'Personalizado')] %}
+            <option value="{{ valor }}"
+              {% if k.periodo.preset == valor %}selected{% endif %}>{{ texto }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="kpiBizDesde">Desde</label>
+        <input type="text" name="desde" id="kpiBizDesde" class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa" autocomplete="off">
+      </div>
+      <div>
+        <label for="kpiBizHasta">Hasta</label>
+        <input type="text" name="hasta" id="kpiBizHasta" class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa" autocomplete="off">
+      </div>
+      <button type="submit" class="btn kpi-biz-btn">Aplicar</button>
+      <button type="button" class="btn kpi-biz-btn-ghost" id="kpiBizActualizar">
+        <i class="bi bi-arrow-clockwise"></i> Actualizar
+      </button>
+    </form>
+  </div>
+
+  {# ── Periodo comparado ── #}
+  {% if k.periodo %}
+  <p class="kpi-biz-periodo-nota">
+    Del <strong>{{ k.periodo.desde.strftime('%d/%m/%Y %H:%M') }}</strong>
+    al <strong>{{ k.periodo.hasta.strftime('%d/%m/%Y %H:%M') }}</strong>
+    <span class="d-none d-md-inline">· {{ k.periodo.dias }} dia(s)</span>
+    · comparado con el periodo equivalente anterior
+  </p>
+  {% endif %}
+
+  {# ── 1. VENTAS Y FACTURACION ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-cash-stack text-success"></i> 1. Ventas y Facturacion</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Volumen, ingresos y por que se caen los pedidos</span>
+    </div>
+    <div class="kpi-biz-sec-body">
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Volumen de Ventas Totales',
+            'icono': 'bi-receipt',
+            'valor': s1.volumen.valor,
+            'unidad': 'pedidos',
+            'pie': s1.volumen.pie,
+            'variacion': s1.volumen.variacion,
+            'mejor_si_sube': s1.volumen.mejor_si_sube,
+            'semaforo': s1.volumen.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Ingresos Brutos',
+            'icono': 'bi-currency-dollar',
+            'valor': s1.ingresos.valor,
+            'unidad': 'S/',
+            'pie': s1.ingresos.pie,
+            'variacion': s1.ingresos.variacion,
+            'mejor_si_sube': s1.ingresos.mejor_si_sube,
+            'semaforo': s1.ingresos.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Cancelacion por Error del Cliente',
+            'icono': 'bi-person-x',
+            'valor': s1.cancelacion_error_cliente.valor,
+            'unidad': '%',
+            'pie': s1.cancelacion_error_cliente.pie,
+            'variacion': s1.cancelacion_error_cliente.variacion,
+            'mejor_si_sube': s1.cancelacion_error_cliente.mejor_si_sube,
+            'semaforo': s1.cancelacion_error_cliente.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Frecuencia de Compra (ciclo 90d)',
+            'icono': 'bi-arrow-repeat',
+            'valor': s1.frecuencia_compra.valor,
+            'unidad': '%',
+            'pie': s1.frecuencia_compra.pie,
+            'variacion': s1.frecuencia_compra.variacion,
+            'mejor_si_sube': s1.frecuencia_compra.mejor_si_sube,
+            'semaforo': s1.frecuencia_compra.semaforo,
+        }) }}
+      </div>
+
+      {{ tabla_detalle('Detalle de ventas del periodo', s1.volumen.detalle) }}
+      {{ tabla_detalle('Detalle de frecuencia de compra', s1.frecuencia_compra.detalle) }}
+      {{ tabla_motivos('Indice de motivos de cancelacion', s1.motivos_cancelacion, con_pct=true) }}
+      {% if not s1.motivos_cancelacion %}
+        {{ vacio('bi-x-circle', 'Sin cancelaciones registradas en el periodo') }}
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── 2. GESTION DE ALMACEN E INVENTARIO ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-box-seam text-warning"></i> 2. Gestion de Almacen e Inventario</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Quiebres de stock, cobertura y devoluciones por incompatibilidad</span>
+    </div>
+    <div class="kpi-biz-sec-body">
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Quiebre de Stock (alta demanda)',
+            'icono': 'bi-exclamation-triangle',
+            'valor': s2.quiebre_repuestos.valor,
+            'unidad': '%',
+            'pie': s2.quiebre_repuestos.pie,
+            'variacion': s2.quiebre_repuestos.variacion,
+            'mejor_si_sube': s2.quiebre_repuestos.mejor_si_sube,
+            'semaforo': s2.quiebre_repuestos.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Dias de Inventario — Accesorios',
+            'icono': 'bi-calendar-event',
+            'valor': s2.doh_accesorios.valor,
+            'unidad': 'dias',
+            'pie': s2.doh_accesorios.pie,
+            'variacion': s2.doh_accesorios.variacion,
+            'mejor_si_sube': s2.doh_accesorios.mejor_si_sube,
+            'semaforo': s2.doh_accesorios.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Dias de Inventario — Repuestos',
+            'icono': 'bi-calendar-event',
+            'valor': s2.doh_repuestos.valor,
+            'unidad': 'dias',
+            'pie': s2.doh_repuestos.pie,
+            'variacion': s2.doh_repuestos.variacion,
+            'mejor_si_sube': s2.doh_repuestos.mejor_si_sube,
+            'semaforo': s2.doh_repuestos.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Devoluciones por Incompatibilidad',
+            'icono': 'bi-arrow-counterclockwise',
+            'valor': s2.devoluciones_incompat.valor,
+            'unidad': '%',
+            'pie': s2.devoluciones_incompat.pie,
+            'variacion': s2.devoluciones_incompat.variacion,
+            'mejor_si_sube': s2.devoluciones_incompat.mejor_si_sube,
+            'semaforo': s2.devoluciones_incompat.semaforo,
+        }) }}
+      </div>
+
+      {{ tabla_detalle('Detalle de quiebre de repuestos', s2.quiebre_repuestos.detalle) }}
+      {{ tabla_detalle('Detalle de dias de inventario', (s2.doh_accesorios.detalle or []) + (s2.doh_repuestos.detalle or [])) }}
+      {{ tabla_motivos('Motivos de devolucion registrados', s2.devoluciones_incompat.motivos) }}
+    </div>
+  </div>
+
+  {# ── 3. SEGURIDAD Y CONTROL DE USUARIOS ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-shield-lock text-danger"></i> 3. Seguridad y Control de Usuarios</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Bloqueos de cuenta e intentos fallidos de inicio de sesion</span>
+    </div>
+    <div class="kpi-biz-sec-body">
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Bloqueo de Cuentas',
+            'icono': 'bi-lock',
+            'valor': s3.bloqueo_cuentas.valor,
+            'unidad': '%',
+            'pie': s3.bloqueo_cuentas.pie,
+            'variacion': s3.bloqueo_cuentas.variacion,
+            'mejor_si_sube': s3.bloqueo_cuentas.mejor_si_sube,
+            'semaforo': s3.bloqueo_cuentas.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Intentos Fallidos de Login',
+            'icono': 'bi-key',
+            'valor': s3.intentos_fallidos.valor,
+            'unidad': '/dia',
+            'pie': s3.intentos_fallidos.pie,
+            'variacion': s3.intentos_fallidos.variacion,
+            'mejor_si_sube': s3.intentos_fallidos.mejor_si_sube,
+            'semaforo': s3.intentos_fallidos.semaforo,
+        }) }}
+      </div>
+
+      {{ tabla_detalle('Detalle de bloqueos', s3.bloqueo_cuentas.detalle) }}
+      {{ tabla_detalle('Detalle de intentos fallidos', s3.intentos_fallidos.detalle) }}
+    </div>
+  </div>
+
+  {# ── 4. COMERCIO ELECTRONICO Y CARRITOS ── #}
+  <div class="kpi-biz-section">
+    <div class="kpi-biz-sec-header">
+      <h5><i class="bi bi-cart-x text-warning"></i> 4. Comercio Electronico y Carritos</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Carritos armados que no llegan a pagarse</span>
+    </div>
+    <div class="kpi-biz-sec-body">
+      <div class="kpi-biz-grid">
+        {{ tarjeta({
+            'titulo': 'Abandono de Carritos',
+            'icono': 'bi-cart-x',
+            'valor': s4.abandono.valor,
+            'unidad': '%',
+            'pie': s4.abandono.pie,
+            'variacion': s4.abandono.variacion,
+            'mejor_si_sube': s4.abandono.mejor_si_sube,
+            'semaforo': s4.abandono.semaforo,
+        }) }}
+      </div>
+
+      {{ tabla_detalle('Detalle de carritos', s4.abandono.detalle) }}
+      {{ tabla_motivos('Motivos de abandono registrados', s4.motivos_abandono) }}
+    </div>
+  </div>
+
+</div>
+
+{% else %}
+{# Degradacion: el snapshot no llego. #}
+<div class="kpi-biz-panel" id="kpiBizPanel">
+  <div class="kpi-biz-toolbar">
+    <h2 class="kpi-biz-titulo mb-0">
+      <i class="bi bi-graph-up-arrow"></i> KPIs de Ventas y Almacen
+    </h2>
+  </div>
+  <div class="kpi-biz-error visible">
+    <i class="bi bi-database-exclamation"></i>
+    No se pudieron calcular los indicadores ahora mismo. El resto del panel
+    sigue funcionando con normalidad.
+  </div>
+</div>
+{% endif %}

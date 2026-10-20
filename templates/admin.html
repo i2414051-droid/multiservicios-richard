@@ -175,9 +175,7 @@
 </div>
 {% endblock %}
 
-{# Aqui ya no se carga nada de KPIs: Chart.js y kpi-dashboard.js eran del
-   panel tecnico (kpi/_bloque.html), que no se incluye en ninguna plantilla.
-   kpi-dashboard.js abortaba en su linea 22 al no encontrar #kpiPanel, asi que
-   la descarga de Chart.js era wasted en cada carga de esta pagina. Los KPIs
-   de negocio cargan su propio CSS y JS desde /panel. #}
+{# Esta pagina no carga nada de KPIs: el panel tecnico (kpi/_bloque.html,
+   Chart.js y kpi-dashboard.js) se elimino del proyecto por no tener ningun
+   consumidor. Los KPIs de negocio cargan su propio CSS y JS desde /panel. #}
 {% block scripts %}{% endblock %}

@@ -8,6 +8,7 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{url_for('static',filename='css/estilos.css')}}">
+{% block head %}{% endblock %}
 </head>
 
 <body class="fondo-principal">
@@ -38,32 +39,28 @@
       <a href="/" class="menu-item">
         <i class="bi bi-house-fill"></i> Inicio
       </a>
-
       {% if session.get('rol') in ['admin','administrador'] %}
-        <a href="/dashboard" class="menu-item">
-          <i class="bi bi-speedometer2"></i> Dashboard
-        </a>
         <a href="/admin" class="menu-item">
           <i class="bi bi-box-seam"></i> Productos
         </a>
-        <a href="/historial-compras" class="menu-item">
-          <i class="bi bi-clock-history"></i> Historial
+        <a href="/proveedores" class="menu-item">
+          <i class="bi bi-truck"></i> Proveedores
         </a>
-      {% else %}
-        <a href="/carrito" class="menu-item">
-          <i class="bi bi-cart3"></i> Carrito
+        <a href="/productos-para-pedir" class="menu-item">
+          <i class="bi bi-cart-plus"></i> Para pedir
         </a>
-        {% if session.get('correo') %}
-        <a href="/historial" class="menu-item">
-          <i class="bi bi-bag-check"></i> Mis compras
+        <a href="/ingresos" class="menu-item">
+          <i class="bi bi-box-arrow-in-down"></i> Ingresos
         </a>
-        <a href="/mis-entregas" class="menu-item">
-          <i class="bi bi-truck"></i> Entregas
+        <a href="/salidas" class="menu-item">
+          <i class="bi bi-box-arrow-up"></i> Salidas
         </a>
-        <a href="/direcciones" class="menu-item">
-          <i class="bi bi-geo-alt"></i> Direcciones
+        <a href="/informe-diario" class="menu-item">
+          <i class="bi bi-file-earmark-text"></i> Informe
         </a>
-        {% endif %}
+        <a href="/panel" class="menu-item">
+          <i class="bi bi-graph-up-arrow"></i> KPIs
+        </a>
       {% endif %}
     </div>
 
@@ -73,23 +70,14 @@
         <i class="bi bi-moon-fill icon-moon"></i>
         <i class="bi bi-sun-fill icon-sun"></i>
       </button>
-      <a href="/carrito" class="btn carrito-btn position-relative">
-        <i class="bi bi-cart3"></i>
-        {% if cantidad_carrito > 0 %}
-        <span class="contador-carrito">{{cantidad_carrito}}</span>
-        {% endif %}
-      </a>
-      {% if session.get('correo') %}
+      {% if session.get('rol') %}
       <div class="usuario-box">
         <i class="bi bi-person-circle"></i>
         <div>
-          {{session['correo']}}<br>
-          <small>{{session['rol']}}</small>
+          {{ session.get('almacen_user') or 'admin' }}<br>
+          <small>{{ session['rol'] }}</small>
         </div>
       </div>
-      <a href="/perfil" class="btn boton-personal" title="Mi perfil">
-        <i class="bi bi-gear"></i>
-      </a>
       <a href="/logout" class="btn boton-personal">Salir</a>
       {% else %}
       <a href="/login" class="btn boton-personal">Login</a>
@@ -115,12 +103,23 @@
 {% endwith %}
 </div>
 
+<!-- AVISO: microservicio de Ventas no disponible -->
+{% if ventas_caido %}
+<div class="container mt-3">
+  <div class="alert alert-warning d-flex align-items-center" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <div>El servicio de <strong>ventas</strong> no está disponible temporalmente. Algunos datos de ventas pueden no mostrarse; la gestión de almacén sigue funcionando.</div>
+  </div>
+</div>
+{% endif %}
+
 <!-- CONTENIDO -->
 <div class="container mt-4">
 {% block content %}{% endblock %}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
 <script>
 /* ── Theme Toggle ── */
 (function(){

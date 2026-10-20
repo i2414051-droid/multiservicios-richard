@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from flask import (Flask, render_template, request, redirect,
-                   url_for, session, jsonify, flash)
+                   url_for, session, jsonify, flash, g)
 from flask.json.provider import DefaultJSONProvider
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
@@ -20,11 +20,18 @@ import requests as http_requests
 import logging
 from werkzeug.exceptions import HTTPException
 
+# Modulo de KPIs de negocio (Arreglo 3): vive en este micro (el panel admin).
+from kpi import init_kpi_biz
+
 # ─────────────────────────────────────────────
 # APP SETUP
 # ─────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'cambiar-esta-clave-segura')
+# Cookie de sesión PROPIA del micro de almacén: es un microservicio
+# independiente, así que no debe compartir (ni pisar) la sesión del MS de
+# Ventas, que en local vive en el mismo host. (Arreglo 2)
+app.config['SESSION_COOKIE_NAME'] = 'almacen_session'
 bcrypt = Bcrypt(app)
 
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
@@ -75,6 +82,13 @@ app.config['MYSQL_DB']          = ALMACEN_DB_NAME
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
 mysql = MySQL(app)
 
+# ── Config del modulo KPI (Arreglo 3) ──
+# El KPI vive en este micro (el admin) y abre su PROPIA conexion: lee la BD de
+# VENTAS (principal) y cruza a la de almacen. NO usa la conexion de
+# flask_mysqldb, que aqui apunta a la BD de almacen.
+app.config['KPI_VENTAS_DB']  = os.environ.get('MYSQL_DB_VENTAS', 'proyecto_multiservicios_richard')
+app.config['KPI_ALMACEN_DB'] = ALMACEN_DB_NAME
+
 USE_OWN_DB = True
 
 # ─────────────────────────────────────────────
@@ -116,17 +130,6 @@ def paginate_query(cur, sql_count, sql_data, params, page, per_page=PER_PAGE):
     cur.execute(sql_data + " LIMIT %s OFFSET %s", params + (per_page, offset))
     items = cur.fetchall()
     return items, total, page, total_pages
-
-
-def render_paginated(template, cur, sql_count, sql_data, params, page, extra=None):
-    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, params, page)
-    ctx = {
-        'items': items, 'total': total, 'page': page,
-        'total_pages': total_pages, 'has_prev': page > 1, 'has_next': page < total_pages,
-    }
-    if extra:
-        ctx.update(extra)
-    return render_template(template, **ctx)
 
 
 # ─────────────────────────────────────────────
@@ -252,15 +255,41 @@ def init_db():
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
+def _marcar_ventas_caido():
+    """Marca en la peticion actual que el microservicio de Ventas no respondio."""
+    try:
+        g.ventas_caido = True
+    except RuntimeError:
+        # Sin contexto de peticion (p.ej. hilo en segundo plano): se ignora.
+        pass
+
+
+def _ventas_caido():
+    """True si el microservicio de Ventas ya fallo en esta misma peticion."""
+    try:
+        return getattr(g, 'ventas_caido', False)
+    except RuntimeError:
+        return False
+
+
 def api_ventas(endpoint):
-    """Llama GET a la API del microservicio de Ventas (BD principal)."""
+    """Llama GET a la API del microservicio de Ventas (BD principal).
+
+    Degradación elegante: si Ventas ya falló en esta misma petición no se
+    vuelve a intentar (evita cuelgues por timeout) y se devuelve None para que
+    la vista de almacén siga funcionando.
+    """
+    if _ventas_caido():
+        return None
     try:
         headers = {'X-Internal-Key': INTERNAL_API_KEY}
         r = http_requests.get(f"{MS_VENTAS_URL}{endpoint}", headers=headers, timeout=5)
         if r.status_code == 200:
             return r.json()
+        _marcar_ventas_caido()
     except Exception as e:
         print(f"[api_ventas] Error {endpoint}: {e}")
+        _marcar_ventas_caido()
     return None
 
 
@@ -396,7 +425,7 @@ def registrar_cambio_stock(cur, producto_id, stock_anterior, stock_nuevo, tipo,
 # ─────────────────────────────────────────────
 @app.context_processor
 def inject_categorias():
-    return dict(categorias=CATEGORIAS)
+    return dict(categorias=CATEGORIAS, ventas_caido=_ventas_caido())
 
 
 # ─────────────────────────────────────────────
@@ -1223,8 +1252,10 @@ def informe_diario():
             if completa:
                 v.setdefault('nombre', completa.get('nombre'))
                 v.setdefault('documento', completa.get('documento'))
-    ingresos_ventas = float(sum(float(v.get('total') or 0) for v in ventas_dia))
-    num_ventas = len(ventas_dia)
+    # Una venta cancelada no cuenta como venta: ni en el conteo ni en los ingresos.
+    ventas_validas = [v for v in ventas_dia if (v.get('estado') or '') != 'cancelado']
+    ingresos_ventas = float(sum(float(v.get('total') or 0) for v in ventas_validas))
+    num_ventas = len(ventas_validas)
 
     # Ingresos del día (BD Almacén local)
     cur.execute("""
@@ -2253,6 +2284,11 @@ _db_initialized = False
 # ─────────────────────────────────────────────
 INTERNAL_API_KEY = os.environ.get('INTERNAL_API_KEY', 'clave-interna-ms-almacen-2026')
 
+# Credenciales del admin PROPIO del micro de almacén (Arreglo 2).
+# El micro ya NO depende del login del MS de Ventas: tiene su propio usuario.
+ADMIN_USER = os.environ.get('ALMACEN_ADMIN_USER', 'admin')
+ADMIN_PASSWORD = os.environ.get('ALMACEN_ADMIN_PASSWORD', 'almacen123')
+
 PUBLIC_API_PATHS = ('/api/productos',)
 
 
@@ -2264,10 +2300,61 @@ def _tiene_clave_interna():
     return request.headers.get('X-Internal-Key') == INTERNAL_API_KEY
 
 
+def _credenciales_admin_ok(usuario, password):
+    """Compara usuario/contraseña del admin propio del almacén."""
+    if not usuario or not password:
+        return False
+    return (secrets.compare_digest(usuario, ADMIN_USER)
+            and secrets.compare_digest(password, ADMIN_PASSWORD))
+
+
+# ─────────────────────────────────────────────
+# LOGIN PROPIO (Arreglo 2)
+# ─────────────────────────────────────────────
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        if not validate_csrf():
+            flash('Token CSRF inválido. Vuelve a intentarlo.', 'danger')
+            return redirect('/login')
+        usuario = (request.form.get('usuario') or '').strip()
+        password = request.form.get('password') or ''
+        if _credenciales_admin_ok(usuario, password):
+            session['rol'] = 'administrador'
+            session['almacen_user'] = usuario
+            destino = request.args.get('next') or '/admin'
+            # Evitar redirección abierta: solo rutas internas.
+            if not destino.startswith('/') or destino.startswith('//'):
+                destino = '/admin'
+            return redirect(destino)
+        flash('Usuario o contraseña incorrectos.', 'danger')
+    if _es_admin():
+        return redirect('/admin')
+    return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Sesión cerrada.', 'success')
+    return redirect('/login')
+
+
+@app.route('/')
+def index():
+    return redirect('/admin')
+
+
 @app.before_request
 def _seguridad():
     """Protege la API (mutaciones y datos sensibles) y las páginas HTML admin."""
     path = request.path
+
+    # ── KPIs de negocio (Arreglo 3) ──
+    # El blueprint kpi_biz ya exige sesion de administrador en cada ruta; aquí
+    # no se les pide la clave interna porque las llama el navegador del admin.
+    if path == '/panel' or path.startswith('/api/kpi-biz'):
+        return None
 
     # ── API 5001 ──
     if path.startswith('/api/'):
@@ -2279,11 +2366,17 @@ def _seguridad():
             return jsonify({'error': 'No autorizado'}), 401
         return None
 
-    # ── HTML admin ──
-    if path in ('/', '/test_db', '/init-db'):
+    # ── Recursos estáticos y pantalla de login: siempre accesibles ──
+    if path.startswith('/static/') or path == '/favicon.ico':
         return None
+    if path in ('/login', '/logout', '/', '/test_db', '/init-db'):
+        return None
+
+    # ── HTML admin ──
     if not _es_admin() and not _tiene_clave_interna():
-        return redirect('http://localhost:5000/login')
+        # Redirige al login PROPIO. Antes apuntaba a http://localhost:5000/login,
+        # lo que ataba este micro al de Ventas (se caía si Ventas no estaba).
+        return redirect('/login?next=' + path)
 
 
 # ─────────────────────────────────────────────
@@ -2303,6 +2396,15 @@ def _ensure_db():
             init_db()
         except Exception as e:
             print(f"[before_request init_db] {e}")
+
+
+# ─────────────────────────────────────────────
+# KPIs DE NEGOCIO (Arreglo 3)
+# ─────────────────────────────────────────────
+try:
+    init_kpi_biz(app)
+except Exception as _e:
+    print(f"[init_kpi_biz] {_e}")
 
 
 # ─────────────────────────────────────────────

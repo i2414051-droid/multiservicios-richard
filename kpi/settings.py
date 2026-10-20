@@ -1,17 +1,14 @@
 """
-Configuracion del modulo de KPIs de Ventas y Gestion de Almacen.
+Configuracion del modulo de KPIs de negocio.
 
 Los umbrales de cada indicador viven aqui y no dentro de las formulas: son la
-unica parte del modulo que el negocio necesita tocar, y ajustarlos no debe
-obligar a releer el calculo.
+unica parte del modulo que el negocio necesita tocar para mover un objetivo.
 
-Regla del modulo: los indicadores se derivan de las tablas que la aplicacion
-ya tiene (ventas, detalle_venta, seguimiento_entregas, entrega_productos,
-carrito, productos, ingresos, salidas, productos_para_pedir). Solo hay una
-tabla propia, `kpi_incidencias`, para lo que el sistema todavia no registra:
-devoluciones, errores de picking, incidencias de transporte, mermas y
-cotizaciones perdidas. Sin esa tabla, la mitad de los KPIs serian siempre
-cero.
+Los indicadores se derivan de las tablas que la aplicacion ya tiene (ventas,
+detalle_venta, carrito, usuarios, intentos_usuario, bloqueos_ip, productos).
+Solo hay una tabla propia, `kpi_incidencias`, para lo que el sistema todavia
+no registra solo: devoluciones, errores de picking, incidencias de transporte,
+mermas, cotizaciones perdidas y el motivo del abandono de carrito.
 """
 import os
 
@@ -23,30 +20,33 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _categorias_env(name: str, defecto: str) -> tuple:
+    """
+    Categorias de producto que el KPI debe considerar, como tupla.
+
+    Acepta varias separadas por coma: los KPIs de inventario miran a una
+    categoria cada vez, pero el catalogo real de la tienda puede agrupar
+    "Repuestos tecnicos" en mas de una etiqueta. Con una sola categoria fija
+    el indicador se quedaba vacio para siempre sin explicar por que.
+    """
+    bruto = os.environ.get(name, defecto) or defecto
+    return tuple(c.strip() for c in bruto.split(',') if c.strip())
+
+
 # Periodo que se muestra si el administrador no pide otro.
 PRESET_POR_DEFECTO = os.environ.get('KPI_PRESET', '30d')
 
-# Dias que se conservan las metricas crudas.
-METRIC_RETENTION_DAYS = _int_env('KPI_METRIC_RETENTION_DAYS', 30)
+# Ciclo de mantenimiento: cada cuanto "deberia" volver un cliente a comprar.
+# Se usa para medir la frecuencia de compra (KPI de Ventas y Facturacion).
+CICLO_MANTENIMIENTO_DIAS = _int_env('KPI_CICLO_MANTENIMIENTO_DIAS', 90)
 
-# Dias que se conservan los chequeos de salud.
-HEALTH_RETENTION_DAYS = _int_env('KPI_HEALTH_RETENTION_DAYS', 7)
+# Categoria de productos considerada "repuestos tecnicos" y accesorios.
+# Se pueden indicar varias separadas por coma (KPI_CATEGORIA_REPUESTOS).
+CATEGORIA_REPUESTOS = _categorias_env('KPI_CATEGORIA_REPUESTOS', 'Repuestos')
+CATEGORIA_ACCESORIOS = _categorias_env('KPI_CATEGORIA_ACCESORIOS', 'Accesorios')
 
-# Dias que se conservan los avisos de error tecnico. Son trazas de
-# diagnostico del errorhandler global, no indicadores de negocio, asi que se
-# pueden descartar pronto sin perder nada util.
-ERROR_LOG_RETENTION_DAYS = _int_env('KPI_ERROR_LOG_RETENTION_DAYS', 30)
-
-# Ventana de atribucion de las devoluciones. Un producto se puede devolver
-# semanas despues de entregado, asi que el numerador se cuentan sobre todo el
-# historial mientras el denominador se recorta al periodo elegido.
-DIAS_ATRIBUCION_DEVOLUCION = _int_env('KPI_DIAS_DEVOLUCION', 30)
-
-# Intervalo en segundos entre volcados del buffer de metricas.
-FLUSH_INTERVAL_SECONDS = _int_env('KPI_FLUSH_INTERVAL_SECONDS', 30)
-
-# Cantidad de registros en el buffer antes de forzar un volcado.
-FLUSH_BATCH_SIZE = _int_env('KPI_FLUSH_BATCH_SIZE', 100)
+# Umbral de intentos que la app considera bloqueo (PRIMER_BLOQUEO_FALLO).
+UMBRAL_BLOQUEO_LOGIN = _int_env('KPI_UMBRAL_BLOQUEO_LOGIN', 5)
 
 # ─────────────────────────────────────────────
 # SEMAFORO DE LOS INDICADORES
@@ -56,28 +56,25 @@ FLUSH_BATCH_SIZE = _int_env('KPI_FLUSH_BATCH_SIZE', 100)
 #   'sube' = True   -> mejora cuando sube. ok/aviso son minimos.
 #   'sube' = False  -> mejora cuando baja.   ok/aviso son maximos.
 #   ok = None       -> no hay objetivo: basta con que haya cifra (>0).
-#
-# Los umbrales salen de los objetivos del negocio: pedidos perfectos por encima
-# del 95%, y por debajo de la mitad de cancelaciones o devoluciones para
-# considerar que el proceso esta sano.
 UMBRALES = {
-    # 1. Exito
-    'ventas_netas':        {'sube': True,  'ok': None, 'aviso': None},
-    'pedidos_perfectos':   {'sube': True,  'ok': 95.0, 'aviso': 90.0},
-    'otif':                {'sube': True,  'ok': 95.0, 'aviso': 90.0},
-    'sell_through':        {'sube': True,  'ok': 60.0, 'aviso': 40.0},
+    # 1. Ventas y Facturacion
+    'volumen_ventas':            {'sube': True,  'ok': None, 'aviso': None},
+    'ingresos_brutos':           {'sube': True,  'ok': None, 'aviso': None},
+    'cancelacion_error_cliente': {'sube': False, 'ok': 3.0,  'aviso': 6.0},
+    'frecuencia_compra':         {'sube': True,  'ok': 60.0, 'aviso': 40.0},
 
-    # 2. Cancelaciones
-    'tasa_cancelacion':    {'sube': False, 'ok': 5.0,  'aviso': 10.0},
-    'abandono_carrito':    {'sube': False, 'ok': 60.0, 'aviso': 80.0},
-    'cancelacion_proveedor': {'sube': False, 'ok': 10.0, 'aviso': 20.0},
+    # 2. Gestion de Almacen e Inventario
+    'quiebre_repuestos':         {'sube': False, 'ok': 5.0,  'aviso': 15.0},
+    'doh_accesorios':            {'sube': False, 'ok': 30.0, 'aviso': 60.0},
+    'doh_repuestos':             {'sube': False, 'ok': 30.0, 'aviso': 60.0},
+    'devoluciones_incompat':     {'sube': False, 'ok': 2.0,  'aviso': 5.0},
 
-    # 3. Problemas
-    'devoluciones':        {'sube': False, 'ok': 5.0,  'aviso': 10.0},
-    'backorder':           {'sube': False, 'ok': 5.0,  'aviso': 15.0},
-    'picking':             {'sube': False, 'ok': 2.0,  'aviso': 5.0},
-    'mermas':              {'sube': False, 'ok': 0.0,  'aviso': 1.0},
-    'transporte':          {'sube': False, 'ok': 2.0,  'aviso': 5.0},
+    # 3. Seguridad y Control de Usuarios
+    'bloqueo_cuentas':           {'sube': False, 'ok': 5.0,  'aviso': 10.0},
+    'intentos_fallidos':         {'sube': False, 'ok': 20.0, 'aviso': 50.0},
+
+    # 4. Comercio Electronico y Carritos
+    'abandono_carrito':          {'sube': False, 'ok': 60.0, 'aviso': 80.0},
 }
 
 
@@ -87,9 +84,7 @@ def semaforo(clave: str, valor):
     sin_datos.
 
     `valor` es None cuando el indicador no se puede calcular, por ejemplo
-    porque no hay pedidos en el periodo. Se distingue de un 0 real: un 0 de
-    devoluciones es una buena noticia, y un None significa que no hay nada que
-    medir.
+    porque no hay pedidos en el periodo. Se distingue de un 0 real.
     """
     config = UMBRALES.get(clave)
     if config is None or valor is None:
@@ -110,13 +105,30 @@ def semaforo(clave: str, valor):
 
 
 def mejor_si_sube(clave: str) -> bool:
-    """
-    Sentido "bueno" del indicador, para pintar la flecha de variacion.
-
-    Vive junto a los umbrales para que la tarjeta y la flecha nunca discrepen
-    sobre si una subida es una mejora.
-    """
+    """Sentido "bueno" del indicador, para pintar la flecha de variacion."""
     return bool(UMBRALES.get(clave, {}).get('sube', True))
+
+
+# ─────────────────────────────────────────────
+# MOTIVOS DE CANCELACION (KPI 3 y 4)
+# ─────────────────────────────────────────────
+# El catalogo real vive en la tabla `cancelaciones` de la base de VENTAS, que
+# llena el flujo de cancelacion (cliente o admin). Estas etiquetas son solo
+# para pintar el indice; si el codigo no esta aqui se muestra tal cual.
+MOTIVOS_CANCELACION = (
+    ('cambio_opinion', 'Cambio de opinion'),
+    ('mejor_precio', 'Encontro mejor precio'),
+    ('demora_entrega', 'Demora en la entrega'),
+    ('error_pedido', 'Error en el pedido'),
+    ('producto_equivocado', 'Producto equivocado'),
+    ('otro', 'Otro'),
+)
+
+ETIQUETAS_CANCELACION = {clave: texto for clave, texto in MOTIVOS_CANCELACION}
+
+# Motivo que alimenta "Tasa de Cancelacion por Error del Cliente": el pedido se
+# cayo por un error al armarlo, que es lo que el cliente puede haber cometido.
+MOTIVO_CANCELACION_CLIENTE = 'error_pedido'
 
 
 # ─────────────────────────────────────────────
@@ -124,22 +136,22 @@ def mejor_si_sube(clave: str) -> bool:
 # ─────────────────────────────────────────────
 # Lo que el sistema no tiene forma de deducir de las tablas: lo registra una
 # persona. Cada tipo lleva sus motivos, porque "el cliente devolvio algo" no
-# sirve para decidir nada y "devolvio una talla incorrecta" si.
+# sirve para decidir nada y "devolvio por incompatibilidad" si.
 TIPOS_INCIDENCIA = (
     ('devolucion', 'Devolucion de cliente', 'bi-arrow-counterclockwise',
-     ('producto_defectuoso', 'talla_incorrecta', 'envio_equivocado', 'otro')),
+     ('incompatibilidad', 'producto_defectuoso', 'envio_equivocado', 'otro')),
     ('picking', 'Error de picking / armado',
      'bi-box-seam',
-     ('producto_equivocado', 'color_equivocado', 'cantidad_equivocada', 'otro')),
+     ('producto_equivocado', 'cantidad_equivocada', 'otro')),
     ('transporte', 'Incidencia de transporte', 'bi-truck',
      ('producto_danado', 'direccion_incorrecta', 'paquete_perdido',
       'retraso_paquetera', 'otro')),
     ('merma', 'Merma o perdida de mercancia', 'bi-box-arrow-down',
-     ('robo', 'dao_interno', 'ruptura', 'perdida_administrativa',
-      'vencimiento', 'otro')),
+     ('robo', 'dano_interno', 'ruptura', 'vencimiento', 'otro')),
     ('contrato_perdido', 'Cotizacion o contrato perdido', 'bi-file-earmark-x',
-     ('precio', 'plazo_entrega', 'proveedor_elegido', 'sin_presupuesto',
-      'otro')),
+     ('precio', 'plazo_entrega', 'proveedor_elegido', 'otro')),
+    ('abandono_carrito', 'Motivo de abandono de carrito', 'bi-cart-x',
+     ('incertidumbre', 'precio', 'envio', 'proceso_largo', 'otro')),
 )
 
 # indice por tipo, para no recorrer la tupla en cada lectura
@@ -149,30 +161,28 @@ ETIQUETAS_TIPO = {clave: texto for clave, texto, _, _ in TIPOS_INCIDENCIA}
 
 ICONOS_TIPO = {clave: icono for clave, _, icono, _ in TIPOS_INCIDENCIA}
 
-# Motivos de devolucion con su lectura para el administrador. El resto de
-# tipos se muestra tal cual, en snake_case, que ya es legible.
+# Motivos con su lectura para el administrador. El resto se muestra tal cual,
+# en snake_case, que ya es legible.
 ETIQUETAS_MOTIVO = {
+    'incompatibilidad': 'Incompatibilidad con el equipo / repuesto',
     'producto_defectuoso': 'Producto defectuoso',
-    'talla_incorrecta': 'Talla / medida incorrecta',
     'envio_equivocado': 'Se envio otro producto',
+    'producto_equivocado': 'Producto equivocado',
+    'cantidad_equivocada': 'Cantidad equivocada',
     'producto_danado': 'Producto danado en el traslado',
     'direccion_incorrecta': 'Direccion incorrecta',
     'paquete_perdido': 'Paquete perdido',
     'retraso_paquetera': 'Retraso de la paqueteria',
-    'perdida_administrativa': 'Perdida administrativa',
-    'dao_interno': 'Dano interno',
+    'dano_interno': 'Dano interno',
+    'incertidumbre': 'Incertidumbre / dudas tecnicas',
+    'precio': 'Precio',
+    'envio': 'Costo o tiempo de envio',
+    'proceso_largo': 'Proceso de pago largo',
     'otro': 'Otro',
 }
 
-
-# Rutas excluidas del seguimiento de KPIs.
-EXCLUDED_PATHS = ('/static', '/test_db', '/init-db', '/login', '/registro')
-
-# Alias para compatibilidad con codigo existente
-RETENTION_DAYS = METRIC_RETENTION_DAYS
-HEALTH_RETENTION_DAYS = HEALTH_RETENTION_DAYS
-FLUSH_INTERVAL_SECONDS = FLUSH_INTERVAL_SECONDS
-FLUSH_BATCH_SIZE = FLUSH_BATCH_SIZE
+# Motivo de devolucion que alimenta su propio KPI.
+MOTIVO_DEVOLUCION_INCOMPATIBILIDAD = 'incompatibilidad'
 
 # Duracion maxima de la nota de una incidencia (evita filas gigantes).
 MAX_NOTA = 500

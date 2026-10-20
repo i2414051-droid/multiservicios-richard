@@ -1,5 +1,5 @@
 """
-Capa de acceso a datos de los KPIs de ventas y almacen.
+Capa de acceso a datos de los KPIs de negocio.
 
 Aqui vive TODO el SQL del modulo. Dos reglas que se cumplen en todas las
 funciones:
@@ -9,13 +9,12 @@ funciones:
    que todo el SQL convierte a float/int en la frontera con `_f` e `_i`.
 2. Las marcas de tiempo las escribe SIEMPRE Python, nunca CURRENT_TIMESTAMP.
    El calculo de periodos compara contra datetime.now(); con dos relojes las
-   filas mas recientes se cairian fuera de la ventana 'hasta' y el panel
-   mostraria cero con datos reales.
+   filas mas recientes se cairian fuera de la ventana 'hasta'.
 
-Ninguna funcion devuelve filas crudas al front: devuelve estructuras ya
-agregadas, con las claves que la vista espera aunque no haya datos.
+La regla de negocio transversal: una venta cancelada NO es una venta. Todo
+lo que cuenta dinero o pedidos usa `COALESCE(estado,'') <> 'cancelado'`.
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 import threading
 
 # Driver MySQL: mysqlclient (MySQLdb) en produccion; PyMySQL como respaldo
@@ -58,7 +57,10 @@ def _abrir_conexion(config):
         'host': config.get('MYSQL_HOST') or 'localhost',
         'user': config.get('MYSQL_USER'),
         'passwd': config.get('MYSQL_PASSWORD'),
-        'db': config.get('MYSQL_DB'),
+        # BD por defecto del modulo: la de VENTAS (principal). Se puede forzar
+        # con KPI_VENTAS_DB para que el modulo viva en un micro cuya conexion
+        # de flask_mysqldb apunte a otra base (p.ej. el micro de almacen).
+        'db': config.get('KPI_VENTAS_DB') or config.get('MYSQL_DB'),
         'charset': config.get('MYSQL_CHARSET') or 'utf8mb4',
         'use_unicode': config.get('MYSQL_USE_UNICODE', True),
         'connect_timeout': int(config.get('MYSQL_CONNECT_TIMEOUT') or 10),
@@ -176,139 +178,214 @@ def almacen_db():
     Nombre de la base de datos de gestion de almacen.
 
     Lo lee de la configuracion de la app en vez de de una constante del
-    modulo: app.py es quien la decide, con su regla de no caer nunca en la
-    base principal, y duplicar esa regla aqui seria una fuente de errores.
+    modulo: app.py es quien la decide, y duplicar esa regla aqui seria una
+    fuente de errores.
     """
-    return current_app.config.get('ALMACEN_DB') or current_app.config.get('MYSQL_DB')
+    return (current_app.config.get('KPI_ALMACEN_DB')
+            or current_app.config.get('ALMACEN_DB')
+            or current_app.config.get('MYSQL_DB'))
 
 
 # ─────────────────────────────────────────────
-# LECTURAS — VENTAS
+# RELOJ Y ESQUEMA
 # ─────────────────────────────────────────────
-def fetch_ventas_por_estado(desde, hasta):
+# El modulo KPI mide periodos, asi que la hora con la que compara tiene que ser
+# LA MISMA con la que se escribieron los datos. En alwaysdata el servidor
+# MySQL corre en CEST (UTC+2) mientras el contenedor de la app corre en UTC:
+# comparar con datetime.now() dejaba fuera las ventas mas recientes, porque
+# para Python todavia no habian ocurrido.
+#
+# La regla del modulo es una sola: manda el reloj de la base de datos. Las
+# columnas que el KPI lee las escribe MySQL (CURRENT_TIMESTAMP) o las escribe
+# este modulo con NOW(), nunca con el reloj local de Python.
+def ahora_bd():
     """
-    Numero de ventas e importe por estado dentro del periodo.
+    Hora de la base de datos, con el reloj con el que se escribieron los datos.
 
-    Los estados que usa la aplicacion son 'en espera', 'entregado' y
-    'cancelado'. Se devuelve el desglose completo en vez del total para que el
-    servicio pueda repartir entre ventas netas, canceladas y en espera sin
-    repetir la consulta.
+    Si la consulta falla (BD caida, sin permiso) devuelve la hora local de
+    Python: es peor, pero es mejor que dejar el panel entero sin calcular.
+    """
+    try:
+        cur = get_cursor()
+        try:
+            cur.execute("SELECT NOW() AS ahora")
+            fila = cur.fetchone() or {}
+            valor = fila.get('ahora')
+            if valor:
+                return valor
+        finally:
+            cur.close()
+    except Exception:
+        pass
+    return datetime.datetime.now()
+
+
+# Columnas que existen de verdad, cacheadas por proceso. Se usa para que una
+# tabla a la que le falte una columna degrade a "sin datos" en vez de tumbar
+# la seccion entera con un error 1054.
+_columnas_cache = {}
+
+
+def columnas_de(tabla):
+    """Conjunto de nombres de columna de `tabla` en la base de la conexion."""
+    if tabla not in _columnas_cache:
+        try:
+            cur = get_cursor()
+            try:
+                cur.execute(
+                    """SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s""",
+                    (tabla,),
+                )
+                _columnas_cache[tabla] = {r['COLUMN_NAME'] for r in cur.fetchall()}
+            finally:
+                cur.close()
+        except Exception:
+            _columnas_cache[tabla] = set()
+    return _columnas_cache[tabla]
+
+
+def limpiar_cache_columnas():
+    """Olvida el cache de columnas (lo usa init_db tras crear el esquema)."""
+    _columnas_cache.clear()
+
+
+# ─────────────────────────────────────────────
+# 1. VENTAS Y FACTURACION
+# ─────────────────────────────────────────────
+def fetch_ventas_periodo(desde, hasta):
+    """
+    Pedidos e importe del periodo, separando validas de canceladas.
+
+    Devuelve el desglose por estado para que el servicio reparta pedidos,
+    ingresos y cancelaciones sin repetir la consulta.
     """
     cur = get_cursor()
     try:
         cur.execute(
-            """SELECT estado,
-                      COUNT(*) AS pedidos,
-                      COALESCE(SUM(total), 0) AS monto
+            """SELECT COALESCE(estado,'sin estado') AS estado,
+                      COUNT(*) AS n,
+                      COALESCE(SUM(total),0) AS monto
                FROM ventas
                WHERE fecha >= %s AND fecha < %s
                GROUP BY estado""",
             (desde, hasta),
         )
+        validas = {'n': 0, 'monto': 0.0}
+        canceladas = {'n': 0, 'monto': 0.0}
+        for row in cur.fetchall():
+            estado = (row['estado'] or '').lower()
+            n, monto = _i(row['n']), round(_f(row['monto']), 2)
+            if estado == 'cancelado':
+                canceladas['n'] += n
+                canceladas['monto'] += monto
+            else:
+                validas['n'] += n
+                validas['monto'] += monto
         return {
-            (row['estado'] or 'sin estado'): {
-                'pedidos': _i(row['pedidos']),
-                'monto': round(_f(row['monto']), 2),
-            }
-            for row in cur.fetchall()
+            'validas': validas,
+            'canceladas': canceladas,
+            'total_n': validas['n'] + canceladas['n'],
         }
     finally:
         cur.close()
 
 
-def fetch_unidades_vendidas(desde, hasta, solo_entregadas=False):
+def fetch_cancelaciones_por_motivo(desde, hasta):
     """
-    Unidades que salieron por venta en el periodo.
+    Motivos de las ventas canceladas en el periodo (KPI 3 y 4).
 
-    `solo_entregadas` recorta a las ventas ya marcadas como entregadas, que es
-    el denominador correcto de la tasa de devoluciones: no se puede devolver
-    algo que no llego.
+    El motivo no vive en `ventas`: lo escribe el flujo de cancelacion en la
+    tabla `cancelaciones` (una fila por venta, UNIQUE por venta_id). Se lee con
+    LEFT JOIN para que una venta cancelada sin motivo registrado no desaparezca
+    del indice: sale como 'sin_motivo'.
     """
-    sql = """SELECT COALESCE(SUM(d.cantidad), 0) AS unidades
-             FROM detalle_venta d JOIN ventas v ON v.id = d.venta_id
-             WHERE v.fecha >= %s AND v.fecha < %s"""
-    if solo_entregadas:
-        sql += " AND v.estado = 'entregado'"
-
-    cur = get_cursor()
-    try:
-        cur.execute(sql, (desde, hasta))
-        return _i((cur.fetchone() or {}).get('unidades'))
-    finally:
-        cur.close()
-
-
-def fetch_unidades_recibidas(desde, hasta):
-    """Unidades que entraron al almacen en el periodo, desde los ingresos."""
-    almacen = almacen_db()
     cur = get_cursor()
     try:
         cur.execute(
-            f"""SELECT COALESCE(SUM(d.cantidad), 0) AS unidades
-                FROM {almacen}.detalle_ingreso d
-                JOIN {almacen}.ingresos i ON i.id = d.ingreso_id
-                WHERE i.fecha >= %s AND i.fecha < %s""",
+            """SELECT COALESCE(c.motivo_codigo,'sin_motivo') AS motivo,
+                      COUNT(*) AS n
+               FROM ventas v
+               LEFT JOIN cancelaciones c ON c.venta_id = v.id
+               WHERE v.fecha >= %s AND v.fecha < %s
+                 AND COALESCE(v.estado,'') = 'cancelado'
+               GROUP BY motivo
+               ORDER BY n DESC""",
             (desde, hasta),
         )
-        return _i((cur.fetchone() or {}).get('unidades'))
+        return [{'motivo': row['motivo'], 'n': _i(row['n'])}
+                for row in cur.fetchall()]
     finally:
         cur.close()
 
 
-def fetch_ventas_por_dia(desde, hasta):
-    """Serie diaria de ventas: pedidos, importe, entregadas y canceladas."""
+def fetch_compras_por_cliente(desde, hasta):
+    """
+    Fechas de compra (validas) de cada cliente en el periodo.
+
+    Se devuelven las filas crudas ordenadas para que el servicio calcule los
+    intervalos entre compras: esa aritmetica no se puede hacer en SQL sin
+    variables de sesion fragiles segun la version de MySQL.
+    """
     cur = get_cursor()
     try:
         cur.execute(
-            """SELECT DATE(fecha) AS dia,
-                      COUNT(*) AS pedidos,
-                      COALESCE(SUM(total), 0) AS monto,
-                      COALESCE(SUM(estado = 'entregado'), 0) AS entregadas,
-                      COALESCE(SUM(estado = 'cancelado'), 0) AS canceladas
+            """SELECT cliente_id, fecha
                FROM ventas
                WHERE fecha >= %s AND fecha < %s
-               GROUP BY dia ORDER BY dia ASC""",
+                 AND COALESCE(estado,'') <> 'cancelado'
+               ORDER BY cliente_id, fecha""",
             (desde, hasta),
         )
-        return [
-            {
-                'dia': _iso(row['dia']),
-                'pedidos': _i(row['pedidos']),
-                'monto': round(_f(row['monto']), 2),
-                'entregadas': _i(row['entregadas']),
-                'canceladas': _i(row['canceladas']),
-            }
-            for row in cur.fetchall()
-        ]
+        return [{'cliente_id': row['cliente_id'], 'fecha': row['fecha']}
+                for row in cur.fetchall()]
     finally:
         cur.close()
 
 
-def fetch_top_productos(desde, hasta, limite=8):
-    """Productos con mas unidades vendidas en el periodo."""
+# ─────────────────────────────────────────────
+# 2. GESTION DE ALMACEN E INVENTARIO
+# ─────────────────────────────────────────────
+_UNIDADES_VENDIDAS_SUB = """
+    SELECT dv.producto_id AS pid, SUM(dv.cantidad) AS unidades
+    FROM detalle_venta dv
+    JOIN ventas v ON v.id = dv.venta_id
+    WHERE v.fecha >= %s AND v.fecha < %s
+      AND COALESCE(v.estado,'') <> 'cancelado'
+    GROUP BY dv.producto_id
+"""
+
+
+def fetch_repuestos_demanda(desde, hasta, categorias=None):
+    """
+    Repuestos activos con su stock actual y sus unidades vendidas del periodo.
+
+    El cruce de unidades se hace en una subconsulta y no con un LEFT JOIN
+    directo: asi un repuesto sin ventas aparece con 0 y no multiplica filas.
+    """
     almacen = almacen_db()
+    categorias = tuple(categorias or settings.CATEGORIA_REPUESTOS)
+    if not categorias:
+        return []
+    marcadores = ','.join(['%s'] * len(categorias))
     cur = get_cursor()
     try:
         cur.execute(
-            f"""SELECT p.id, p.nombre, p.categoria,
-                       SUM(d.cantidad) AS unidades,
-                       SUM(d.cantidad * d.precio) AS monto
-                FROM detalle_venta d
-                JOIN ventas v ON v.id = d.venta_id
-                JOIN {almacen}.productos p ON p.id = d.producto_id
-                WHERE v.fecha >= %s AND v.fecha < %s
-                GROUP BY p.id, p.nombre, p.categoria
-                ORDER BY unidades DESC
-                LIMIT %s""",
-            (desde, hasta, int(limite)),
+            f"""SELECT p.id AS id, p.nombre AS nombre,
+                       COALESCE(p.stock,0) AS stock,
+                       COALESCE(s.unidades,0) AS unidades
+                FROM {almacen}.productos p
+                LEFT JOIN ({_UNIDADES_VENDIDAS_SUB}) s ON s.pid = p.id
+                WHERE p.categoria IN ({marcadores})
+                  AND COALESCE(p.estado,'activo') = 'activo'""",
+            (desde, hasta) + categorias,
         )
         return [
             {
                 'id': _i(row['id']),
                 'nombre': row['nombre'],
-                'categoria': row['categoria'],
+                'stock': _i(row['stock']),
                 'unidades': _i(row['unidades']),
-                'monto': round(_f(row['monto']), 2),
             }
             for row in cur.fetchall()
         ]
@@ -316,112 +393,135 @@ def fetch_top_productos(desde, hasta, limite=8):
         cur.close()
 
 
-def _iso(valor):
+def fetch_doh_categorias(desde, hasta, categorias=None):
     """
-    DATE() devuelve un date, que no existe en Python: se pasa a texto ISO para
-    que el HTML y el JSON lo traten igual sin conversiones.
+    Stock y unidades vendidas del periodo por categoria.
+
+    Con eso el servicio calcula los dias de inventario (stock / demanda diaria).
+
+    Devuelve un dict {categoria: {stock, unidades}} con TODAS las categorias
+    pedidas: las que no existen en el catalogo vienen con stock 0 y unidades 0
+    y con `existe = False`. Asi el servicio puede avisar de que la categoria
+    esta mal configurada en vez de mostrar un "sin datos" sin explicacion.
     """
-    return valor.isoformat() if hasattr(valor, 'isoformat') else str(valor)
+    almacen = almacen_db()
+    categorias = tuple(categorias or (settings.CATEGORIA_ACCESORIOS
+                                       + settings.CATEGORIA_REPUESTOS))
+    resultado = {
+        c: {'stock': 0, 'unidades': 0, 'existe': False}
+        for c in categorias
+    }
+    if not categorias:
+        return resultado
 
-
-# ─────────────────────────────────────────────
-# LECTURAS — ENTREGAS, OTIF Y PEDIDOS PERFECTOS
-# ─────────────────────────────────────────────
-def fetch_entregas_cerradas(desde, hasta):
-    """
-    Entregas completadas en el periodo, con lo que se pidio y lo que salio.
-
-    Devuelve una fila por entrega con tres cantidades ya resueltas en SQL
-    (entregadas y pedidas) porque son subconsultas correlacionadas y meterlas
-    en un JOIN multiplicaria las filas. El juicio de "a tiempo" y "completo" lo
-    hace el servicio en Python: depende de la fecha estimada de cada entrega y
-    meter un CASE por fila en el SQL lo haria ilegible.
-
-    `COALESCE(fecha_entrega, created_at)` cubre las entregas marcadas como
-    entregadas sin fecha: antes de existir la columna, esas filas tienen
-    created_at y son entregas validas de todos modos.
-    """
+    marcadores = ','.join(['%s'] * len(categorias))
     cur = get_cursor()
     try:
         cur.execute(
-            """SELECT e.id AS entrega_id,
-                      e.venta_id,
-                      e.fecha_estimada,
-                      e.created_at,
-                      COALESCE(e.fecha_entrega, e.created_at) AS fecha_entrega,
-                      (SELECT COALESCE(SUM(ep.cantidad), 0)
-                         FROM entrega_productos ep
-                        WHERE ep.entrega_id = e.id) AS entregadas,
-                      (SELECT COALESCE(SUM(d.cantidad), 0)
-                         FROM detalle_venta d
-                        WHERE d.venta_id = e.venta_id) AS pedidas
-               FROM seguimiento_entregas e
-               WHERE e.estado = 'entregado'
-                 AND COALESCE(e.fecha_entrega, e.created_at) >= %s
-                 AND COALESCE(e.fecha_entrega, e.created_at) < %s
-               ORDER BY fecha_entrega ASC""",
-            (desde, hasta),
+            f"""SELECT p.categoria AS categoria,
+                       COALESCE(SUM(p.stock),0) AS stock,
+                       COALESCE(SUM(COALESCE(s.unidades,0)),0) AS unidades
+                FROM {almacen}.productos p
+                LEFT JOIN ({_UNIDADES_VENDIDAS_SUB}) s ON s.pid = p.id
+                WHERE COALESCE(p.estado,'activo') = 'activo'
+                  AND p.categoria IN ({marcadores})
+                GROUP BY p.categoria""",
+            (desde, hasta) + categorias,
         )
-        return [
-            {
-                'entrega_id': _i(row['entrega_id']),
-                'venta_id': _i(row['venta_id']),
-                'fecha_entrega': row['fecha_entrega'],
-                'fecha_estimada': row['fecha_estimada'],
-                'entregadas': _i(row['entregadas']),
-                'pedidas': _i(row['pedidas']),
-            }
-            for row in cur.fetchall()
-        ]
+        for row in cur.fetchall():
+            categoria = (row['categoria'] or '').strip()
+            if categoria in resultado:
+                resultado[categoria] = {
+                    'stock': _i(row['stock']),
+                    'unidades': _i(row['unidades']),
+                    'existe': True,
+                }
     finally:
         cur.close()
+    return resultado
 
 
-def fetch_entregas_en_periodo(desde, hasta):
-    """Entregas cerradas en el periodo, solo el conteo. Denominador de ratios."""
-    cur = get_cursor()
-    try:
-        cur.execute(
-            """SELECT COUNT(*) AS entregas
-               FROM seguimiento_entregas
-               WHERE estado = 'entregado'
-                 AND COALESCE(fecha_entrega, created_at) >= %s
-                 AND COALESCE(fecha_entrega, created_at) < %s""",
-            (desde, hasta),
-        )
-        return _i((cur.fetchone() or {}).get('entregas'))
-    finally:
-        cur.close()
-
-
-# ─────────────────────────────────────────────
-# LECTURAS — CANCELACIONES Y CARRITO
-# ─────────────────────────────────────────────
-def fetch_pedidos_proveedor(desde, hasta):
-    """
-    Pedidos de reabastecimiento a proveedores por estado.
-
-    Es lo mas cercano que tiene el sistema a "propuestas comerciales
-    aceptadas": un pedido a proveedor que se cancela es un pedido perdido.
-    """
+def categorias_existentes():
+    """Categorias que hay de verdad en el catalogo de productos."""
     almacen = almacen_db()
     cur = get_cursor()
     try:
-        cur.execute(
-            f"""SELECT estado, COUNT(*) AS n
-                FROM {almacen}.productos_para_pedir
-                WHERE fecha >= %s AND fecha < %s
-                GROUP BY estado""",
-            (desde, hasta),
-        )
-        return {
-            (row['estado'] or 'pendiente'): _i(row['n'])
-            for row in cur.fetchall()
-        }
+        cur.execute(f"SELECT DISTINCT categoria FROM {almacen}.productos")
+        return sorted({(r['categoria'] or '').strip() for r in cur.fetchall()})
+    except Exception as exc:
+        current_app.logger.warning('KPI categorias_existentes fallo: %s', exc)
+        return []
     finally:
         cur.close()
 
 
+# ─────────────────────────────────────────────
+# 3. SEGURIDAD Y CONTROL DE USUARIOS
+# ─────────────────────────────────────────────
+def fetch_seguridad(desde, hasta):
+    """
+    Intentos fallidos de login y bloqueos del periodo.
+
+    `intentos_usuario` guarda una fila por correo con los fallos acumulados de
+    la rafaga ('intentos') y el pico historico ('max_intentos'). Se cuentan las
+    cuentas con actividad en el periodo, las que llegaron al umbral de bloqueo
+    y los intentos registrados. `bloqueos_ip` cuenta los bloqueos por IP.
+
+    Las dos consultas van aisladas: `bloqueos_ip` no tiene columna de fecha en
+    instalaciones viejas y, cuando falta, el error 1054 tumbo toda la seccion
+    de seguridad (los dos indicadores) en lugar de solo el dato de IPs. Ahora
+    cada consulta cae por separado y la que falla deja su indicador en 0.
+    """
+    resultado = {
+        'cuentas_intentos': 0,
+        'cuentas_bloqueadas': 0,
+        'intentos_total': 0,
+        'ips_bloqueadas': 0,
+    }
+
+    cur = get_cursor()
+    try:
+        cur.execute(
+            """SELECT COUNT(*) AS cuentas_intentos,
+                      COALESCE(SUM(CASE WHEN COALESCE(max_intentos,0) >= %s
+                                        THEN 1 ELSE 0 END),0) AS cuentas_bloqueadas,
+                      COALESCE(SUM(intentos),0) AS intentos_total
+               FROM intentos_usuario
+               WHERE ultimo_fallo >= %s AND ultimo_fallo < %s""",
+            (settings.UMBRAL_BLOQUEO_LOGIN, desde, hasta),
+        )
+        row = cur.fetchone() or {}
+        resultado['cuentas_intentos'] = _i(row.get('cuentas_intentos'))
+        resultado['cuentas_bloqueadas'] = _i(row.get('cuentas_bloqueadas'))
+        resultado['intentos_total'] = _i(row.get('intentos_total'))
+    except Exception as exc:
+        current_app.logger.warning('KPI seguridad (intentos) fallo: %s', exc)
+    finally:
+        cur.close()
+
+    # La tabla tiene `created_at` solo si el modulo la ha anadido. Sin ella no
+    # hay forma de saber cuando se bloqueo la IP: se informa 0, no un fallo.
+    if 'created_at' in columnas_de('bloqueos_ip'):
+        cur = get_cursor()
+        try:
+            cur.execute(
+                """SELECT COUNT(*) AS ips
+                   FROM bloqueos_ip
+                   WHERE created_at >= %s AND created_at < %s""",
+                (desde, hasta),
+            )
+            resultado['ips_bloqueadas'] = _i((cur.fetchone() or {}).get('ips'))
+        except Exception as exc:
+            current_app.logger.warning('KPI seguridad (IPs) fallo: %s', exc)
+        finally:
+            cur.close()
+
+    return resultado
+
+
+# ─────────────────────────────────────────────
+# 4. E-COMMERCE Y CARRITOS
+# ─────────────────────────────────────────────
 def fetch_carritos_abandonados(desde, hasta):
     """
     Carritos que se armaron en el periodo y nunca se convirtieron en venta.
@@ -430,10 +530,19 @@ def fetch_carritos_abandonados(desde, hasta):
     tabla es, por definicion, un carrito abandonado. Se cuenta por usuario y no
     por linea para que un carrito con 5 productos no pese 5 veces.
 
-    Es una aproximacion, no la tasa real de un embudo: aqui no se registra la
-    sesion de tienda ni los pasos intermedios. Mide "quien armo un pedido y no
-    lo termino", que es lo que el negocio puede corregir.
+    Es una aproximacion honesta: el sistema no registra la sesion de tienda ni
+    los pasos intermedios, mide "quien armo un pedido y no lo termino".
+
+    `created_at` lo anade el modulo a la tabla `carrito`: sin esa columna no
+    hay forma de saber cuando se armo el carrito, asi que el indicador se
+    queda sin datos en vez de dar una cifra inventada.
     """
+    if 'created_at' not in columnas_de('carrito'):
+        current_app.logger.warning(
+            'KPI carritos: la tabla `carrito` no tiene `created_at`; '
+            'el indicador de abandono se queda sin datos')
+        return None
+
     cur = get_cursor()
     try:
         cur.execute(
@@ -443,239 +552,15 @@ def fetch_carritos_abandonados(desde, hasta):
             (desde, hasta),
         )
         return _i((cur.fetchone() or {}).get('carritos'))
+    except Exception as exc:
+        current_app.logger.warning('KPI carritos fallo: %s', exc)
+        return None
     finally:
         cur.close()
 
 
 # ─────────────────────────────────────────────
-# LECTURAS — BACKORDER E INVENTARIO
-# ─────────────────────────────────────────────
-def fetch_backorder():
-    """
-    Pedidos abiertos que el almacen no puede cumplir por falta de stock.
-
-    No lleva periodo: un pedido sigue pendiente porque le falta mercancia hoy,
-    sea cual sea el periodo que se este mirando. Por eso este indicador se
-    rotula "abiertos ahora" y no lleva comparacion con el periodo anterior.
-
-    Un pedido cuenta como backorder cuando al menos una de sus lineas apunta a
-    un producto con stock fisico 0. Con stock 1 no se cuenta: se puede
-    completar con el stock que hay, y el propio sistema bloquea la compra si
-    no alcanza.
-    """
-    almacen = almacen_db()
-    cur = get_cursor()
-    try:
-        cur.execute(
-            f"""SELECT COUNT(*) AS pedidos
-                FROM ventas v
-                WHERE v.estado = 'en espera'
-                  AND EXISTS (
-                      SELECT 1 FROM detalle_venta d
-                        JOIN {almacen}.productos p ON p.id = d.producto_id
-                       WHERE d.venta_id = v.id AND p.stock <= 0
-                  )""",
-        )
-        con_falta = _i((cur.fetchone() or {}).get('pedidos'))
-
-        cur.execute("SELECT COUNT(*) AS pedidos FROM ventas WHERE estado = 'en espera'")
-        abiertos = _i((cur.fetchone() or {}).get('pedidos'))
-
-        return {'abiertos': abiertos, 'sin_stock': con_falta}
-    finally:
-        cur.close()
-
-
-def fetch_pedidos_reposicion_pendientes():
-    """Lineas de reabastecimiento encoladas y pendientes de enviar."""
-    almacen = almacen_db()
-    cur = get_cursor()
-    try:
-        cur.execute(
-            f"SELECT COUNT(*) AS n FROM {almacen}.productos_para_pedir "
-            "WHERE estado = 'pendiente'"
-        )
-        return _i((cur.fetchone() or {}).get('n'))
-    finally:
-        cur.close()
-
-
-def fetch_inventario():
-    """
-    Foto del almacen ahora mismo: unidades, valor y salud del stock.
-
-    El valor se calcula como stock * precio de venta porque es el unico precio
-    que el sistema tiene guardado de forma consistente. Sirve para dimensionar
-    la mercancia, no como resultado contable.
-    """
-    almacen = almacen_db()
-    cur = get_cursor()
-    try:
-        cur.execute(
-            f"""SELECT COUNT(*) AS productos,
-                       COALESCE(SUM(stock), 0) AS unidades,
-                       COALESCE(SUM(stock * precio), 0) AS valor,
-                       COALESCE(SUM(stock = 0), 0) AS agotados,
-                       COALESCE(SUM(stock BETWEEN 1 AND 5), 0) AS criticos
-                FROM {almacen}.productos
-                WHERE estado = 'activo'"""
-        )
-        row = cur.fetchone() or {}
-        return {
-            'productos': _i(row.get('productos')),
-            'unidades': _i(row.get('unidades')),
-            'valor': round(_f(row.get('valor')), 2),
-            'agotados': _i(row.get('agotados')),
-            'criticos': _i(row.get('criticos')),
-        }
-    finally:
-        cur.close()
-
-
-def fetch_reposiciones_sugeridas(limite=8):
-    """Productos con reposicion pendiente: la cola de trabajo del almacen."""
-    almacen = almacen_db()
-    cur = get_cursor()
-    try:
-        cur.execute(
-            f"""SELECT p.id, p.nombre, p.stock, p.categoria,
-                       pp.cantidad_pedido, pp.fecha, pr.nombre AS proveedor
-                FROM {almacen}.productos_para_pedir pp
-                JOIN {almacen}.productos p ON p.id = pp.producto_id
-                LEFT JOIN {almacen}.proveedores pr ON pr.id = pp.proveedor_id
-                WHERE pp.estado = 'pendiente'
-                ORDER BY p.stock ASC, pp.fecha ASC
-                LIMIT %s""",
-            (int(limite),),
-        )
-        return [
-            {
-                'id': _i(row['id']),
-                'nombre': row['nombre'],
-                'stock': _i(row['stock']),
-                'categoria': row['categoria'],
-                'cantidad_pedido': _i(row['cantidad_pedido']),
-                'fecha': row['fecha'],
-                'proveedor': row['proveedor'],
-            }
-            for row in cur.fetchall()
-        ]
-    finally:
-        cur.close()
-
-
-def fetch_inventario_valor():
-    """Valor total del inventario: suma de stock * precio de todos los productos activos."""
-    almacen = almacen_db()
-    cur = get_cursor()
-    try:
-        cur.execute(
-            f"SELECT COALESCE(SUM(stock * precio), 0) AS valor_total FROM {almacen}.productos WHERE estado='activo'"
-        )
-        return round(_f((cur.fetchone() or {}).get('valor_total')), 2)
-    finally:
-        cur.close()
-
-
-def fetch_stock_promedio():
-    """Promedio de stock de todos los productos activos."""
-    almacen = almacen_db()
-    cur = get_cursor()
-    try:
-        cur.execute(
-            f"SELECT COALESCE(AVG(stock), 0) AS stock_promedio FROM {almacen}.productos WHERE estado='activo'"
-        )
-        return _f((cur.fetchone() or {}).get('stock_promedio'))
-    finally:
-        cur.close()
-
-
-def fetch_total_ventas_periodo(desde, hasta):
-    """Numero de ventas y total de unidades vendidas en el periodo."""
-    cur = get_cursor()
-    try:
-        cur.execute(
-            """SELECT COUNT(*) AS total_ventas, COALESCE(SUM(d.cantidad), 0) AS total_unidades
-               FROM ventas v JOIN detalle_venta d ON d.venta_id = v.id
-               WHERE v.fecha >= %s AND v.fecha < %s""",
-            (desde, hasta),
-        )
-        row = cur.fetchone() or {}
-        return {'total_ventas': _i(row.get('total_ventas')), 'total_unidades': _i(row.get('total_unidades'))}
-    finally:
-        cur.close()
-
-
-def fetch_clientes_recurrentes(desde, hasta):
-    """Clientes que hicieron mas de una compra en el periodo."""
-    cur = get_cursor()
-    try:
-        cur.execute(
-            """SELECT COUNT(DISTINCT usuario_id) AS recurrentes
-               FROM (
-                   SELECT cliente_id AS usuario_id, COUNT(*) AS n
-                   FROM ventas
-                   WHERE fecha >= %s AND fecha < %s
-                   GROUP BY cliente_id
-                   HAVING COUNT(*) > 1
-               ) sub""",
-            (desde, hasta),
-        )
-        return _i((cur.fetchone() or {}).get('recurrentes', 0))
-    finally:
-        cur.close()
-
-
-def fetch_total_clientes_unicos(desde, hasta):
-    """Total de clientes unicos que compraron en el periodo."""
-    cur = get_cursor()
-    try:
-        cur.execute(
-            """SELECT COUNT(DISTINCT cliente_id) AS clientes
-               FROM ventas
-               WHERE fecha >= %s AND fecha < %s""",
-            (desde, hasta),
-        )
-        return _i((cur.fetchone() or {}).get('clientes', 0))
-    finally:
-        cur.close()
-
-
-def fetch_carritos_creados(desde, hasta):
-    """Numero de carritos creados en el periodo."""
-    cur = get_cursor()
-    try:
-        cur.execute(
-            """SELECT COUNT(DISTINCT usuario_id) AS carritos
-               FROM carrito
-               WHERE created_at >= %s AND created_at < %s""",
-            (desde, hasta),
-        )
-        return _i((cur.fetchone() or {}).get('carritos', 0))
-    finally:
-        cur.close()
-
-
-def fetch_margen_bruto(desde, hasta):
-    """Margen bruto: suma de (precio_venta - precio_compra) * cantidad en el periodo."""
-    almacen = almacen_db()
-    cur = get_cursor()
-    try:
-        cur.execute(
-            f"""SELECT COALESCE(SUM((dv.precio - COALESCE(di.precio_compra, 0)) * dv.cantidad), 0) AS margen
-                FROM detalle_venta dv
-                JOIN ventas v ON v.id = dv.venta_id
-                LEFT JOIN {almacen}.detalle_ingreso di ON di.producto_id = dv.producto_id
-                WHERE v.fecha >= %s AND v.fecha < %s""",
-            (desde, hasta),
-        )
-        return round(_f((cur.fetchone() or {}).get('margen')), 2)
-    finally:
-        cur.close()
-
-
-# ─────────────────────────────────────────────
-# LECTURAS Y ESCRITURAS — INCIDENCIAS
+# INCIDENCIAS (registro manual de motivos)
 # ─────────────────────────────────────────────
 def fetch_incidencias(desde, hasta):
     """Incidencias del periodo, agrupadas por tipo y motivo."""
@@ -700,52 +585,6 @@ def fetch_incidencias(desde, hasta):
             }
             for row in cur.fetchall()
         ]
-    finally:
-        cur.close()
-
-
-def fetch_incidencias_por_tipo(desde, hasta):
-    """
-    Conteo simple por tipo, que es lo que necesitan los indicadores.
-
-    Se separa de fetch_incidencias porque la vista quiere el desglose por
-    motivo (para explicar el "por que" de las devoluciones) y los KPIs solo
-    el total por tipo.
-    """
-    cur = get_cursor()
-    try:
-        cur.execute(
-            """SELECT tipo, COUNT(*) AS n,
-                      COALESCE(SUM(cantidad), 0) AS unidades
-               FROM kpi_incidencias
-               WHERE fecha >= %s AND fecha < %s
-               GROUP BY tipo""",
-            (desde, hasta),
-        )
-        return {
-            row['tipo']: {'n': _i(row['n']), 'unidades': _i(row['unidades'])}
-            for row in cur.fetchall()
-        }
-    finally:
-        cur.close()
-
-
-def fetch_ventas_con_incidencia(desde, hasta):
-    """
-    Ventas del periodo con al menos una incidencia registrada.
-
-    Sirve para el pedido perfecto: un pedido con una devolucion o con un error
-    de picking no es un pedido perfecto, aunque llegara a tiempo y completo.
-    """
-    cur = get_cursor()
-    try:
-        cur.execute(
-            """SELECT DISTINCT venta_id
-               FROM kpi_incidencias
-               WHERE fecha >= %s AND fecha < %s AND venta_id IS NOT NULL""",
-            (desde, hasta),
-        )
-        return {_i(row['venta_id']) for row in cur.fetchall()}
     finally:
         cur.close()
 
@@ -788,14 +627,16 @@ def insert_incidencia(tipo, motivo, cantidad=1, venta_id=None, producto_id=None,
                       referencia=None, nota=None):
     """Registra una incidencia de operacion. Devuelve el id creado."""
     def _insertar(cur):
+        # La fecha la pone MySQL (NOW()), no Python: el modulo compara los
+        # periodos contra el reloj de la base de datos y las dos horas de
+        # desfase con alwaysdata dejaban las incidencias mas recientes fuera.
         cur.execute(
             """INSERT INTO kpi_incidencias
                (tipo, motivo, cantidad, venta_id, producto_id, referencia,
                 nota, fecha)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())""",
             (tipo, motivo, int(cantidad), venta_id, producto_id,
-             (referencia or None), (nota or '')[:settings.MAX_NOTA] or None,
-             datetime.now()),
+             (referencia or None), (nota or '')[:settings.MAX_NOTA] or None),
         )
         return cur.lastrowid
 
@@ -820,17 +661,15 @@ def insert_error_event(ruta, tipo_error, mensaje, origen='servidor'):
     Guarda una excepcion no controlada.
 
     No es un KPI: es la traza que el errorhandler global necesita para poder
-    diagnosticar. Se escribe de forma sincrona porque los errores son eventos
-    raros y perderlos por un corte del contenedor seria justo lo que no
-    puede permitirse.
+    diagnosticar.
     """
     def _insertar(cur):
         cur.execute(
             """INSERT INTO kpi_error_events
                (route, error_type, mensaje, origen, created_at)
-               VALUES (%s, %s, %s, %s, %s)""",
+               VALUES (%s, %s, %s, %s, NOW())""",
             (ruta, tipo_error, (mensaje or '')[:settings.MAX_NOTA] or None,
-             origen, datetime.now()),
+             origen),
         )
         return True
 
@@ -838,14 +677,3 @@ def insert_error_event(ruta, tipo_error, mensaje, origen='servidor'):
         return ejecutar_escritura(_insertar)
     except Exception:
         return False
-
-
-def purgar_errores(dias):
-    """Borra la traza de errores mas antigua de `dias`."""
-    corte = datetime.now() - timedelta(days=int(dias))
-
-    def _purgar(cur):
-        cur.execute("DELETE FROM kpi_error_events WHERE created_at < %s", (corte,))
-        return cur.rowcount
-
-    return ejecutar_escritura(_purgar)

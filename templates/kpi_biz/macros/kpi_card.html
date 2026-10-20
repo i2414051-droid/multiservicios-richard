@@ -87,3 +87,62 @@
 {% macro semaforo_badge(estado) %}
   <span class="kpi-biz-badge {{ estado }}">{{ estado }}</span>
 {% endmacro %}
+
+
+{#
+  Tabla de detalle simple (etiqueta / valor).
+
+  Se usa debajo de cada seccion para mostrar el desglose que no cabe en una
+  tarjeta (pedidos validos y cancelados, cuentas bloqueadas, etc.).
+#}
+{% macro tabla_detalle(titulo, filas) %}
+  {% if filas %}
+  <div class="mt-4">
+    <h6 class="text-muted">{{ titulo }}</h6>
+    <div class="table-responsive">
+      <table class="kpi-biz-tabla">
+        <thead><tr><th>Detalle</th><th class="num">Valor</th></tr></thead>
+        <tbody>
+          {% for etiqueta, valor in filas %}
+            {% if valor %}
+            <tr><td>{{ etiqueta }}</td><td class="num">{{ valor }}</td></tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+{% endmacro %}
+
+
+{#
+  Tabla de motivos (motivo / casos / %). Se usa para el indice de motivos de
+  cancelacion, devoluciones y abandono.
+#}
+{% macro tabla_motivos(titulo, motivos, con_pct=false) %}
+  {% if motivos %}
+  <div class="mt-4">
+    <h6 class="text-muted">{{ titulo }}</h6>
+    <div class="table-responsive">
+      <table class="kpi-biz-tabla">
+        <thead>
+          <tr>
+            <th>Motivo</th><th class="num">Casos</th>
+            {% if con_pct %}<th class="num">%</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in motivos %}
+          <tr>
+            <td>{{ m.etiqueta }}</td>
+            <td class="num">{{ m.n }}</td>
+            {% if con_pct %}<td class="num">{{ m.pct }}%</td>{% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+{% endmacro %}

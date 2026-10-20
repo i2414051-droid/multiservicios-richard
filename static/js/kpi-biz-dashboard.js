@@ -24,7 +24,10 @@
 
   var cargando = false;
   var temporizador = null;
-  var REFRESH_MS = 60000;
+  // Refresco automatico: el panel tiene que mostrar el estado del negocio en
+  // vivo, no de cada 5 minutos. 30 s es lo que aguanta alwaysdata sin que
+  // dos administradores dejen el panel abierto al mismo tiempo.
+  var REFRESH_MS = 30000;
 
   function mostrarAviso(texto) {
     if (!aviso) return;
@@ -71,13 +74,13 @@
   }
 
   function cargar() {
-    if (cargando) return;
+    if (cargando) return Promise.resolve();
     marcarCarga(true);
     ocultarAviso();
 
     var p = parametros();
 
-    fetch(urlFragmento + '?' + p.toString(), {
+    return fetch(urlFragmento + '?' + p.toString(), {
       headers: { 'X-Requested-With': 'fetch' },
       credentials: 'same-origin'
     })
@@ -161,9 +164,157 @@
         }
       });
     }
+
+    enlazarIncidencias();
+  }
+
+  /* ───────────────────────────────────────────
+     REGISTRO DE INCIDENCIAS
+
+     La API existed (/api/kpi-biz/incidencia) pero no habia ninguna pantalla
+     que la llamara, asi que la tabla kpi_incidencias se quedaba vacia para
+     siempre y los indicadores de devoluciones, mermas y motivos de abandono
+     nunca tenian nada que medir.
+     ─────────────────────────────────────────── */
+  var ETIQUETAS_MOTIVO = {
+    'incompatibilidad': 'Incompatibilidad con el equipo / repuesto',
+    'producto_defectuoso': 'Producto defectuoso',
+    'envio_equivocado': 'Se envio otro producto',
+    'producto_equivocado': 'Producto equivocado',
+    'cantidad_equivocada': 'Cantidad equivocada',
+    'producto_danado': 'Producto danado en el traslado',
+    'direccion_incorrecta': 'Direccion incorrecta',
+    'paquete_perdido': 'Paquete perdido',
+    'retraso_paqueteria': 'Retraso de la paqueteria',
+    'dano_interno': 'Dano interno',
+    'ruptura': 'Ruptura',
+    'vencimiento': 'Vencimiento',
+    'robo': 'Robo',
+    'incertidumbre': 'Incertidumbre / dudas tecnicas',
+    'precio': 'Precio',
+    'envio': 'Costo o tiempo de envio',
+    'proceso_largo': 'Proceso de pago largo',
+    'plazo_entrega': 'Plazo de entrega',
+    'proveedor_elegido': 'Proveedor elegido',
+    'cambio_opinion': 'Cambio de opinion',
+    'mejor_precio': 'Encontro mejor precio',
+    'demora_entrega': 'Demora en la entrega',
+    'error_pedido': 'Error en el pedido',
+    'otro': 'Otro'
+  };
+
+  function enlazarIncidencias() {
+    var formInc = document.getElementById('kpiBizIncidenciaForm');
+    if (formInc) {
+      var selTipo = document.getElementById('kpiIncTipo');
+      var selMotivo = document.getElementById('kpiIncMotivo');
+      var estado = document.getElementById('kpiIncEstado');
+      var boton = document.getElementById('kpiIncGuardar');
+
+      if (selTipo && selMotivo) {
+        selTipo.addEventListener('change', function () {
+          var opcion = selTipo.options[selTipo.selectedIndex];
+          var motivos = [];
+          if (opcion && opcion.dataset.motivos) {
+            try { motivos = JSON.parse(opcion.dataset.motivos); } catch (e) { motivos = []; }
+          }
+          selMotivo.innerHTML = '';
+          if (!motivos.length) {
+            var vacia = document.createElement('option');
+            vacia.value = 'otro';
+            vacia.textContent = 'Otro';
+            selMotivo.appendChild(vacia);
+          } else {
+            motivos.forEach(function (m) {
+              var o = document.createElement('option');
+              o.value = m;
+              o.textContent = ETIQUETAS_MOTIVO[m] || m;
+              selMotivo.appendChild(o);
+            });
+          }
+          selMotivo.disabled = false;
+        });
+      }
+
+      formInc.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        if (!selTipo || !selTipo.value) return;
+
+        var cuerpo = {
+          tipo: selTipo.value,
+          motivo: (document.getElementById('kpiIncMotivo') || {}).value || 'otro',
+          cantidad: parseInt((document.getElementById('kpiIncCantidad') || {}).value || '1', 10),
+          venta_id: parseInt((document.getElementById('kpiIncVenta') || {}).value || '0', 10) || null,
+          producto_id: parseInt((document.getElementById('kpiIncProducto') || {}).value || '0', 10) || null,
+          referencia: (document.getElementById('kpiIncReferencia') || {}).value || '',
+          nota: (document.getElementById('kpiIncNota') || {}).value || ''
+        };
+
+        if (boton) boton.disabled = true;
+        if (estado) estado.textContent = 'Guardando...';
+
+        fetch('/api/kpi-biz/incidencia', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+          credentials: 'same-origin',
+          body: JSON.stringify(cuerpo)
+        })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok || !res.d.ok) throw new Error(res.d.error || 'error desconocido');
+            formInc.reset();
+            var selM = document.getElementById('kpiIncMotivo');
+            if (selM) { selM.disabled = true; selM.innerHTML = '<option value="">Primero elige el tipo</option>'; }
+            // El panel se recarga entero, asi que el mensaje de confirmacion
+            // se pone DESPUES: si se pone antes, el refresco lo borra.
+            return cargar();
+          })
+          .then(function () {
+            var avisoInc = document.getElementById('kpiIncEstado');
+            if (avisoInc) avisoInc.textContent = 'Incidencia registrada';
+          })
+          .catch(function (err) {
+            var avisoErr = document.getElementById('kpiIncEstado');
+            if (avisoErr) avisoErr.textContent = 'No se pudo registrar: ' + err.message;
+          })
+          .then(function () {
+            var b = document.getElementById('kpiIncGuardar');
+            if (b) b.disabled = false;
+          });
+      });
+    }
+
+    var botones = document.querySelectorAll('.kpi-biz-borrar');
+    Array.prototype.forEach.call(botones, function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-incidencia');
+        if (!id) return;
+        if (!window.confirm('Eliminar la incidencia #' + id + '?')) return;
+        btn.disabled = true;
+        fetch('/api/kpi-biz/incidencia/' + id, {
+          method: 'DELETE',
+          headers: { 'X-Requested-With': 'fetch' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            if (!res.ok) throw new Error(res.error || 'no se pudo eliminar');
+            cargar();
+          })
+          .catch(function (err) {
+            mostrarAviso('No se pudo eliminar la incidencia: ' + err.message);
+            btn.disabled = false;
+          });
+      });
+    });
   }
 
   volverAEnlazar();
+
+  // El refresco automatico se arranca al cargar. Antes solo arrancaba con un
+  // doble clic en "Actualizar", asi que el panel se quedaba congelado con los
+  // datos del momento en que se abrio: los indicadores no se veian en vivo.
+  alternarRefresco(true);
 
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) cargar();

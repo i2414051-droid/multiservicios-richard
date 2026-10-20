@@ -25,8 +25,20 @@
           <span class="text-success fw-bold fs-6">
             <i class="bi bi-cash-coin me-1"></i>S/ {{ "%.2f"|format(venta.total) }}
           </span>
+          <span class="badge {% if venta.estado=='entregado' %}bg-success{% elif venta.estado=='cancelado' %}bg-danger{% else %}bg-warning text-dark{% endif %}">
+            {{ (venta.estado or 'en espera')|capitalize }}
+          </span>
+          {% if venta.estado=='cancelado' and venta.motivo_codigo %}
+          <span class="badge bg-dark" title="{{ venta.motivo_detalle or '' }}">
+            {{ motivos_cancelacion.get(venta.motivo_codigo, venta.motivo_codigo) }}
+          </span>
+          {% endif %}
           <i class="bi bi-chevron-down text-white"></i>
         </div>
+      </div>
+      <div class="px-3 pt-2 d-flex gap-2 flex-wrap">
+        <a href="/mis-entregas" class="btn btn-outline-info btn-sm" data-sin-carga><i class="bi bi-truck me-1"></i>Ver seguimiento</a>
+        <a href="/boleta/{{ venta.id }}" class="btn btn-outline-warning btn-sm"><i class="bi bi-receipt me-1"></i>Boleta</a>
       </div>
 
       <!-- DETALLE -->

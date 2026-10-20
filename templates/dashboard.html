@@ -64,6 +64,10 @@
             <div class="info"><h3>S/ {{ "%.2f"|format(ingresos_totales) }}</h3><p>Ingresos Totales</p></div>
         </div>
         <div class="dash-card">
+            <div class="icon-box icon-pendientes"><i class="bi bi-clock-history"></i></div>
+            <div class="info"><h3>S/ {{ "%.2f"|format(monto_en_espera) }}</h3><p>Monto en espera</p></div>
+        </div>
+        <div class="dash-card">
             <div class="icon-box icon-productos"><i class="bi bi-box-seam"></i></div>
             <div class="info"><h3>{{ productos_activos }}</h3><p>Productos Activos</p></div>
         </div>
@@ -129,6 +133,9 @@
         </a>
         <a href="/permisos" class="quick-link">
             <i class="bi bi-shield-lock"></i><span>Permisos</span>
+        </a>
+        <a href="/clientes" class="quick-link">
+            <i class="bi bi-people"></i><span>Clientes</span>
         </a>
     </div>
 
