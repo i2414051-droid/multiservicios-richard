@@ -1,0 +1,514 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container mt-4">
+
+    <h2 class="mb-4">
+        <i class="bi bi-cart3"></i> Tu Carrito
+    </h2>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-dark text-white">
+            Productos agregados
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-bordered table-striped text-center align-middle mb-0" id="tabla-carrito">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Producto</th>
+                        <th>Precio</th>
+                        <th>Cantidad</th>
+                        <th>Total</th>
+                        <th>Acción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for p in productos %}
+                    {% set maximo = [p.stock|int, 500]|min %}
+                    <tr id="fila-{{ p.producto_id }}">
+                        <td>{{ p.nombre }}</td>
+                        <td>S/. {{ "%.2f"|format(p.precio|float) }}</td>
+                        <td>
+                            <div class="d-flex align-items-center justify-content-center gap-2">
+                                <button class="btn btn-sm btn-danger btn-cantidad"
+                                        data-id="{{ p.producto_id }}"
+                                        data-accion="reducir">-</button>
+                                <input type="text" class="form-control form-control-sm cantidad-input"
+                                       id="cant-{{ p.producto_id }}"
+                                       value="{{ p.cantidad|int }}"
+                                       min="0" max="{{ maximo }}"
+                                       inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+                                       oninput="this.value=this.value.replace(/[^0-9]/g,'')"
+                                       onkeypress="return /[0-9]/.test(event.key)"
+                                       data-id="{{ p.producto_id }}"
+                                       data-stock="{{ p.stock|int }}"
+                                       data-precio="{{ '%.2f'|format(p.precio|float) }}"
+                                       aria-label="Cantidad de {{ p.nombre }}">
+                                <button class="btn btn-sm btn-success btn-cantidad"
+                                        data-id="{{ p.producto_id }}"
+                                        data-accion="aumentar"
+                                        {% if p.cantidad|int >= maximo %}disabled title="No hay mas stock disponible"{% endif %}>+</button>
+                            </div>
+                            <small class="text-muted d-block mt-1 stock-producto">
+                                {% if p.stock|int >= 500 %}M&Aacute;XIMO {{ maximo }} POR PRODUCTO{% else %}STOCK: {{ p.stock|int }} DISPONIBLES{% endif %}
+                            </small>
+                        </td>
+                        <td id="sub-{{ p.producto_id }}">
+                            S/. {{ "%.2f"|format((p.precio|float) * (p.cantidad|int)) }}
+                        </td>
+                        <td>
+                            <a href="/eliminar_carrito/{{ p.id }}"
+                               class="btn btn-danger btn-sm"
+                               onclick="return confirm('¿Eliminar producto del carrito?')">
+                                <i class="bi bi-trash"></i> Eliminar
+                            </a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TOTAL -->
+    <div class="card shadow-sm mt-4">
+        <div class="card-body d-flex justify-content-between align-items-center">
+            <h4 class="mb-0">Total a pagar</h4>
+            <h3 class="mb-0" id="total-carrito" style="color:#F09204;font-weight:bold;">
+                S/. {{ "%.2f"|format(total|float) }}
+            </h3>
+        </div>
+    </div>
+
+    <!-- Avisos de limites de stock / cantidad -->
+    <div id="aviso-carrito" class="alert alert-warning mt-3 mb-0"
+         style="display:none;" role="status" aria-live="polite"></div>
+
+    <div class="text-end mt-4">
+        <a href="/checkout" class="btn btn-lg shadow-sm text-white fw-bold custom-btn-buy"
+           data-sin-carga data-sin-bloqueo>
+            <i class="bi bi-bag-check me-1"></i> Comprar ahora
+        </a>
+    </div>
+
+    <!-- PRODUCTOS DISPONIBLES -->
+    <div class="card shadow-sm mt-4">
+        <div class="card-header bg-dark text-white">
+            <h5 class="mb-0"><i class="bi bi-bag-heart me-2"></i>Otros productos disponibles</h5>
+        </div>
+        <div class="card-body">
+            {% if sugeridos %}
+            <div class="row" id="sugeridos-grid">
+                {% for p in sugeridos %}
+                <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
+                    <div class="card producto-card h-100">
+                        <div class="stock-box d-flex justify-content-between align-items-center px-2 pt-2">
+                            {% if p.stock is not none and p.stock > 0 %}
+                                {% if p.stock <= 1 %}
+                                    <span class="badge bg-danger">{{ p.stock }} en stock 🔔</span>
+                                {% elif p.stock < 5 %}
+                                    <span class="badge bg-danger">{{ p.stock }} en stock</span>
+                                {% elif p.stock < 15 %}
+                                    <span class="badge bg-warning text-dark">{{ p.stock }} en stock</span>
+                                {% else %}
+                                    <span class="badge bg-success">{{ p.stock }} en stock</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="badge bg-secondary">Sin stock</span>
+                            {% endif %}
+                        </div>
+                        {% if p.imagen %}
+                        <img src="{{ url_for('static', filename=p.imagen) }}" class="producto-img">
+                        {% endif %}
+                        <div class="card-body">
+                            <h5>{{ p.nombre }}</h5>
+                            <p class="descripcion">{{ p.descripcion }}</p>
+                            <div class="precio">S/. {{ "%.2f"|format(p.precio|float) }}</div>
+                            {% if p.stock > 0 %}
+                            <button type="button" class="btn btn-agregar w-100"
+                                    onclick="agregarProductoAjax({{ p.id }}, this)"
+                                    data-producto-id="{{ p.id }}"
+                                    data-sin-carga data-sin-bloqueo>
+                                <i class="bi bi-cart"></i> Agregar al carrito
+                            </button>
+                            {% else %}
+                            <button class="btn btn-secondary w-100" disabled>No disponible</button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-center text-muted my-4">
+                <i class="bi bi-check-circle me-1"></i>
+                Ya tienes todos los productos disponibles en tu carrito.
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+<style>
+    .custom-btn-buy { background-color:#F09204; border-color:#F09204; transition:all .2s; }
+    .custom-btn-buy:hover { background-color:#D67F03; border-color:#D67F03; color:white; }
+    .btn-cantidad { min-width: 34px; }
+    .btn-cantidad:disabled { opacity: .5; cursor: not-allowed; }
+    .cantidad-input {
+        width: 72px;
+        text-align: center;
+        font-weight: 700;
+        /* Quitar las flechitas arriba/abajo del input number:
+           para eso estan los botones - y + */
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+    .cantidad-input::-webkit-outer-spin-button,
+    .cantidad-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        appearance: none;
+        margin: 0;
+    }
+    .cantidad-input:disabled { opacity: .55; }
+    .stock-producto {
+        text-transform: uppercase;
+        letter-spacing: .3px;
+        font-weight: 600;
+    }
+
+    @keyframes parpadeo {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .alert-parpadeo {
+      animation: parpadeo 0.9s infinite;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var flash = document.querySelector('.mensaje-flash');
+  if (flash && flash.textContent.trim().includes('carrito está vacío')) {
+    flash.dataset.persistent = 'true';
+    flash.classList.add('alert-parpadeo');
+    setTimeout(function () {
+      flash.style.opacity = '0';
+      flash.style.transform = 'translateY(-30px)';
+      setTimeout(function () { flash.remove(); }, 500);
+    }, 5000);
+  }
+});
+
+/* Cantidad del carrito:
+   - los botones + y - funcionan como un contador (instantaneo, sin esperar
+     al servidor y sin bloquear el carrito).
+   - Enter (o salir del campo) confirma el numero escrito y lo ajusta al
+     tope real: si escribes 10000 y solo hay 5, queda en 5.
+   - El minimo es 1 (no 0) y el '+' se apaga al llegar al tope.
+   - Al volver con "Atras" a esta pagina, nada queda bloqueado. */
+(function(){
+  var sincronizando = false;
+
+  function entero(v){
+    var n = parseInt(v, 10);
+    return isNaN(n) ? 0 : n;
+  }
+
+  function inputDe(id){
+    return document.getElementById('cant-' + id);
+  }
+
+  function stockDe(id){
+    var el = inputDe(id);
+    return el ? parseInt(el.dataset.stock || '0', 10) : 0;
+  }
+
+  function precioDe(id){
+    var el = inputDe(id);
+    return parseFloat(el ? el.dataset.precio : '0');
+  }
+
+  // Tope real por producto: el menor entre su stock y 500.
+  // Minimo 1 (en vez de 0), salvo que no haya stock disponible.
+  function limites(id){
+    var st  = stockDe(id);
+    var max = Math.max(0, Math.min(st, 500));
+    var min = max >= 1 ? 1 : 0;
+    return { min: min, max: max };
+  }
+
+  function avisar(mensaje){
+    var box = document.getElementById('aviso-carrito');
+    if (!box) return;
+    box.textContent = mensaje;
+    box.style.display = 'block';
+    clearTimeout(avisar._t);
+    avisar._t = setTimeout(function(){ box.style.display = 'none'; }, 3500);
+  }
+
+  function mostrarTotales(){
+    var total = 0;
+    document.querySelectorAll('.cantidad-input').forEach(function(input){
+      var id  = input.dataset.id;
+      var q   = entero(input.value);
+      var sub = q * precioDe(id);
+      total += sub;
+      var celda = document.getElementById('sub-' + id);
+      if (celda) celda.textContent = 'S/. ' + sub.toFixed(2);
+    });
+    document.getElementById('total-carrito').textContent = 'S/. ' + total.toFixed(2);
+  }
+
+  // El boton '+' se apaga cuando la cantidad llego al tope del producto
+  function actualizarBotones(){
+    document.querySelectorAll('.btn-cantidad').forEach(function(btn){
+      if (btn.dataset.accion !== 'aumentar') return;
+      var el = inputDe(btn.dataset.id);
+      var llegoAlTope = el && entero(el.value) >= limites(btn.dataset.id).max;
+      btn.disabled = llegoAlTope;
+    });
+    mostrarTotales();
+  }
+
+  /* Agregar producto via AJAX (sin recargar) desde "Otros productos disponibles" */
+  function agregarProductoAjax(id, btn){
+    if (btn) btn.disabled = true;
+    fetch('/agregar/' + id, {
+      method: 'GET',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin'
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { avisar(d.mensaje || 'No se pudo agregar'); return; }
+
+      // 1) Si ya existe en el carrito, actualiza cantidad y subtotal
+      var inputExist = document.getElementById('cant-' + d.producto_id);
+      if (inputExist) {
+        inputExist.value = d.cantidad;
+        var subCell = document.getElementById('sub-' + d.producto_id);
+        if (subCell) subCell.textContent = 'S/. ' + d.subtotal.toFixed(2);
+        actualizarBotones();
+      } else {
+        // 2) Nueva fila en la tabla del carrito
+        var tbody = document.querySelector('#tabla-carrito tbody');
+        var maximo = d.maximo;
+        var tr = document.createElement('tr');
+        tr.id = 'fila-' + d.producto_id;
+        tr.innerHTML =
+          '<td>' + d.nombre + '</td>' +
+          '<td>S/. ' + d.precio.toFixed(2) + '</td>' +
+          '<td>' +
+            '<div class="d-flex align-items-center justify-content-center gap-2">' +
+              '<button class="btn btn-sm btn-danger btn-cantidad" data-id="' + d.producto_id + '" data-accion="reducir">-</button>' +
+              '<input type="text" class="form-control form-control-sm cantidad-input" id="cant-' + d.producto_id + '"' +
+                ' value="' + d.cantidad + '" min="1" max="' + maximo + '"' +
+                ' inputmode="numeric" pattern="[0-9]*" autocomplete="off"' +
+                ' oninput="this.value=this.value.replace(/[^0-9]/g,\'\')" onkeypress="return /[0-9]/.test(event.key)"' +
+                ' data-id="' + d.producto_id + '" data-stock="' + d.stock + '" data-precio="' + d.precio.toFixed(2) + '"' +
+                ' aria-label="Cantidad de ' + d.nombre + '">' +
+              '<button class="btn btn-sm btn-success btn-cantidad" data-id="' + d.producto_id + '" data-accion="aumentar"' +
+                (d.cantidad >= maximo ? ' disabled title="No hay mas stock disponible"' : '') + '>+</button>' +
+            '</div>' +
+            '<small class="text-muted d-block mt-1 stock-producto">' +
+              (d.stock >= 500 ? 'M&Aacute;XIMO ' + maximo + ' POR PRODUCTO' : 'STOCK: ' + d.stock + ' DISPONIBLES') +
+            '</small>' +
+          '</td>' +
+          '<td id="sub-' + d.producto_id + '">S/. ' + d.subtotal.toFixed(2) + '</td>' +
+          '<td>' +
+            '<a href="/eliminar_carrito/' + d.producto_id + '" class="btn btn-danger btn-sm"' +
+              ' onclick="return confirm(\'¿Eliminar producto del carrito?\')">' +
+              '<i class="bi bi-trash"></i> Eliminar</a>' +
+          '</td>';
+        tbody.appendChild(tr);
+
+        // Enlazar handlers para los nuevos botones/input
+        var newInput = document.getElementById('cant-' + d.producto_id);
+        var newBtns = tr.querySelectorAll('.btn-cantidad');
+        newBtns.forEach(function(btn){
+          btn.addEventListener('click', function(){
+            if (sincronizando) return;
+            var id2 = this.dataset.id;
+            var el2 = inputDe(id2);
+            if (!el2) return;
+            var lim2 = limites(id2);
+            var q2 = entero(el2.value);
+            q2 = this.dataset.accion === 'aumentar' ? q2 + 1 : q2 - 1;
+            if (q2 > lim2.max) q2 = lim2.max;
+            if (q2 < lim2.min) q2 = lim2.min;
+            el2.value = q2;
+            actualizarBotones();
+          });
+        });
+        newInput.addEventListener('keydown', function(e){
+          if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
+        });
+        newInput.addEventListener('change', function(){
+          if (sincronizando) return;
+          var id2 = this.dataset.id;
+          var lim2 = limites(id2);
+          var q2 = entero(this.value);
+          if (q2 > lim2.max) { avisar('Stock insuficiente: solo hay ' + stockDe(id2) + ' unidades disponibles.'); q2 = lim2.max; }
+          if (q2 < lim2.min) q2 = lim2.min;
+          this.value = q2;
+          actualizarBotones();
+        });
+      }
+
+      // 3) Actualizar total global
+      document.getElementById('total-carrito').textContent = 'S/. ' + d.total.toFixed(2);
+
+      // 4) Quitar de "Otros productos disponibles"
+      if (btn) {
+        var col = btn.closest('.col-lg-3, .col-md-4, .col-sm-6');
+        if (col) col.remove();
+      }
+
+      // 5) Si no quedan sugeridos, ocultar sección
+      var grid = document.getElementById('sugeridos-grid');
+      if (grid && grid.children.length === 0) {
+        var section = grid.closest('.card');
+        if (section) section.style.display = 'none';
+      }
+
+      actualizarBotones();
+    })
+    .catch(function(){ avisar('Error de conexion'); })
+    .finally(function(){ if (btn) btn.disabled = false; });
+  }
+
+  // El boton "Agregar al carrito" de "Otros productos disponibles" lo invoca
+  // desde un onclick inline, que corre en el ambito global. Sin esta linea la
+  // funcion vive solo dentro de este IIFE y el onclick lanza ReferenceError
+  // (por eso se quedaba "cargando" y no agregaba el producto).
+  window.agregarProductoAjax = agregarProductoAjax;
+
+  /* Botones + y - : contador local, con tope (no pasa del stock/500)
+     y minimo 1. No bloquea ni espera al servidor. */
+  document.querySelectorAll('.btn-cantidad').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if (sincronizando) return;
+      var id   = this.dataset.id;
+      var el   = inputDe(id);
+      if (!el) return;
+      var lim  = limites(id);
+      var q    = entero(el.value);
+      q = this.dataset.accion === 'aumentar' ? q + 1 : q - 1;
+      if (q > lim.max) q = lim.max;   // no sigue subiendo pasando el tope
+      if (q < lim.min) q = lim.min;   // minimo 1
+      el.value = q;
+      actualizarBotones();
+    });
+  });
+
+  /* El input solo acepta digitos (ya lo filtra oninput). Enter confirma y
+     ajusta al tope: si pones 10000 y solo hay 5, queda en 5. */
+  document.querySelectorAll('.cantidad-input').forEach(function(input){
+    input.addEventListener('keydown', function(e){
+      if (e.key === 'Enter') {
+        e.preventDefault();   // no envie formularios ni navegue
+        input.blur();         // confirma el numero (fire change)
+      }
+    });
+    input.addEventListener('change', function(){
+      if (sincronizando) return;
+      var id  = input.dataset.id;
+      var lim = limites(id);
+      var q   = entero(input.value);
+      if (q > lim.max) {
+        avisar('Stock insuficiente: solo hay ' + stockDe(id) + ' unidades disponibles.');
+        q = lim.max;
+      }
+      if (q < lim.min) q = lim.min;
+      input.value = q;
+      actualizarBotones();
+    });
+  });
+
+  /* Al volver con "Atras" (o desde el cache del navegador), los botones
+     vuelven a quedar habilitados: no quedan bloqueados. */
+  window.addEventListener('pageshow', function(){
+    sincronizando = false;
+    document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+      .forEach(function(c){ c.disabled = false; });
+    actualizarBotones();
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', actualizarBotones);
+  } else {
+    actualizarBotones();
+  }
+
+  /* Comprar ahora: recien aqui se guarda en la BD y se pasa al checkout */
+  document.querySelector('.custom-btn-buy').addEventListener('click', function(ev){
+    if (sincronizando) return;
+    ev.preventDefault();   // la navegacion la controlamos nosotros
+
+    var filas  = [];
+    var vacio  = true;
+    var error  = null;
+
+    document.querySelectorAll('.cantidad-input').forEach(function(input){
+      if (error) return;
+      var id  = input.dataset.id;
+      var q   = entero(input.value);
+      var lim = limites(id);
+      if (q > 0) vacio = false;
+
+      if (q > lim.max) {
+        error = 'Stock insuficiente: solo hay ' + stockDe(id) + ' unidades disponibles.';
+      } else if (q < lim.min) {
+        error = 'La cantidad minima es ' + lim.min + '.';
+      } else {
+        filas.push({ id: id, q: q });
+      }
+    });
+
+    if (error) { avisar(error); return; }
+    if (vacio)  { avisar('Tu carrito esta vacio.'); return; }
+
+    // Sincronizar todo de una vez (paralelo), sin esperas por producto
+    sincronizando = true;
+    document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+      .forEach(function(c){ c.disabled = true; });
+
+    Promise.all(filas.map(function(f){
+      return fetch('/actualizar-cantidad/' + f.id, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accion: 'fijar', cantidad: f.q })
+      });
+    }))
+    .then(function(resp){
+      return Promise.all(resp.map(function(r){
+        return r.json().then(function(d){ return { ok: r.ok, datos: d }; });
+      }));
+    })
+    .then(function(resultados){
+      for (var i = 0; i < resultados.length; i++) {
+        if (!resultados[i].ok) {
+          // El stock pudo bajar mientras tanto: avisamos y quedamos en el carrito
+          avisar(resultados[i].datos.mensaje || 'No se pudo actualizar el carrito.');
+          document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+            .forEach(function(c){ c.disabled = false; });
+          sincronizando = false;
+          actualizarBotones();
+          return;
+        }
+      }
+      window.location.href = '/checkout';
+    })
+    .catch(function(){
+      avisar('Error de conexion. Intenta de nuevo.');
+      document.querySelectorAll('.btn-cantidad, .cantidad-input, .custom-btn-buy')
+        .forEach(function(c){ c.disabled = false; });
+      sincronizando = false;
+      actualizarBotones();
+    });
+  });
+})();
+</script>
+
+{% endblock %}

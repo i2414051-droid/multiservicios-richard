@@ -1,0 +1,402 @@
+/*
+  Estilos del panel de KPIs de Ventas y Almacen.
+
+  Se apoya en los tokens de estilos.css (--bg-card, --text-primary, ...)
+  para que el panel herede el tema claro/oscuro sin reglas duplicadas.
+  Todo esta acotado bajo .kpi-biz-panel para no pisar el resto de las paginas.
+*/
+
+.kpi-biz-panel {
+  --kpi-naranja: #f39c12;
+  --kpi-verde: #22c55e;
+  --kpi-amarillo: #eab308;
+  --kpi-rojo: #ef4444;
+  --kpi-azul: #3b82f6;
+
+  /* Colores para texto sobre fondos reales del panel */
+  --kpi-naranja-txt: #f39c12;
+  --kpi-verde-txt: #22c55e;
+  --kpi-amarillo-txt: #eab308;
+  --kpi-rojo-txt: #f87171;
+  --kpi-muted-txt: var(--text-muted);
+
+  margin-bottom: 1.5rem;
+}
+
+/* Tema claro: oscurecer tokens para contraste */
+[data-theme="light"] .kpi-biz-panel {
+  --kpi-naranja-txt: #9a5b06;
+  --kpi-amarillo-txt: #854d0e;
+  --kpi-verde-txt: #166534;
+  --kpi-rojo-txt: #b91c1c;
+  --kpi-muted-txt: #5a5a5a;
+}
+
+/* ── Cabecera y selector de periodo ── */
+.kpi-biz-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.kpi-biz-titulo {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-weight: 800;
+  font-size: 1.15rem;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.kpi-biz-titulo .bi {
+  color: var(--kpi-naranja-txt);
+  font-size: 1.35rem;
+}
+
+.kpi-biz-filtros {
+  display: flex;
+  align-items: flex-end;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.kpi-biz-filtros label {
+  display: block;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--kpi-muted-txt);
+  margin-bottom: .2rem;
+}
+
+.kpi-biz-filtros .form-control,
+.kpi-biz-filtros .form-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-usuario);
+  color: var(--text-primary);
+  font-size: .85rem;
+  border-radius: 8px;
+}
+
+.kpi-biz-btn {
+  background: var(--kpi-naranja);
+  color: #000;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  font-size: .85rem;
+  padding: .4rem .9rem;
+}
+
+.kpi-biz-btn-ghost {
+  background: transparent;
+  color: var(--kpi-muted-txt);
+  border: 1px solid var(--border-usuario);
+  border-radius: 8px;
+  font-size: .85rem;
+  padding: .4rem .9rem;
+}
+
+.kpi-biz-btn-ghost:hover {
+  color: var(--kpi-naranja-txt);
+  border-color: var(--kpi-naranja-txt);
+}
+
+.kpi-biz-actualizando .bi {
+  display: inline-block;
+  animation: kpi-biz-giro .9s linear infinite;
+}
+
+@keyframes kpi-biz-giro {
+  to { transform: rotate(360deg); }
+}
+
+.kpi-biz-periodo-nota {
+  font-size: .78rem;
+  color: var(--kpi-muted-txt);
+  margin: 0 0 1rem;
+}
+
+.kpi-biz-periodo-nota strong {
+  color: var(--text-secondary);
+}
+
+/* ── Secciones ── */
+.kpi-biz-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 18px;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+
+.kpi-biz-section > .kpi-biz-sec-header {
+  padding: .9rem 1.25rem;
+  border-bottom: 1px solid var(--border-main);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.kpi-biz-section > .kpi-biz-sec-header h5 {
+  margin: 0;
+  font-weight: 700;
+  font-size: .95rem;
+  color: var(--kpi-naranja-txt);
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+
+.kpi-biz-section > .kpi-biz-sec-body {
+  padding: 1.25rem;
+}
+
+/* ── Rejilla de tarjetas KPI ── */
+.kpi-biz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.kpi-biz-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 16px;
+  padding: 1.1rem 1.2rem;
+  position: relative;
+  overflow: hidden;
+  transition: transform .3s, box-shadow .3s;
+}
+
+.kpi-biz-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Franja lateral de color segun el semaforo */
+.kpi-biz-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--kpi-estado, var(--kpi-naranja));
+}
+
+.kpi-biz-card.is-ok { --kpi-estado: var(--kpi-verde); }
+.kpi-biz-card.is-aviso { --kpi-estado: var(--kpi-amarillo); }
+.kpi-biz-card.is-critico { --kpi-estado: var(--kpi-rojo); }
+.kpi-biz-card.is-sin-datos { --kpi-estado: var(--text-muted); }
+
+.kpi-biz-card .kpi-biz-cab {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--kpi-muted-txt);
+  margin-bottom: .55rem;
+}
+
+.kpi-biz-card .kpi-biz-cab .bi {
+  font-size: .95rem;
+  color: var(--kpi-estado, var(--kpi-naranja));
+}
+
+.kpi-biz-valor {
+  font-size: 1.85rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-biz-valor small {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--kpi-muted-txt);
+}
+
+.kpi-biz-pie {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .76rem;
+  color: var(--kpi-muted-txt);
+  margin-top: .4rem;
+}
+
+/* Flecha de variacion */
+.kpi-biz-var {
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-biz-var.sube { color: var(--kpi-verde-txt); }
+.kpi-biz-var.baja { color: var(--kpi-rojo-txt); }
+.kpi-biz-var.igual { color: var(--kpi-muted-txt); }
+.kpi-biz-var.nuevo { color: var(--kpi-naranja-txt); }
+
+/* ── Tablas ── */
+.kpi-biz-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .84rem;
+}
+
+.kpi-biz-tabla th {
+  background: rgba(243, 156, 18, .1);
+  color: var(--kpi-naranja-txt);
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  padding: .55rem .7rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.kpi-biz-tabla td {
+  padding: .55rem .7rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-biz-tabla tbody tr:hover td {
+  background: rgba(243, 156, 18, .05);
+}
+
+.kpi-biz-tabla td.num {
+  text-align: right;
+}
+
+/* ── Badges ── */
+.kpi-biz-badge {
+  flex-shrink: 0;
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: .2rem .5rem;
+  border-radius: 99px;
+}
+
+.kpi-biz-badge.ok { background: rgba(34, 197, 94, .15); color: var(--kpi-verde-txt); }
+.kpi-biz-badge.aviso { background: rgba(234, 179, 8, .15); color: var(--kpi-amarillo-txt); }
+.kpi-biz-badge.critico { background: rgba(239, 68, 68, .15); color: var(--kpi-rojo-txt); }
+.kpi-biz-badge.sin-datos { background: rgba(128, 128, 128, .15); color: var(--kpi-muted-txt); }
+
+/* ── Estado vacio ── */
+.kpi-biz-vacio {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--kpi-muted-txt);
+  font-size: .85rem;
+}
+
+.kpi-biz-vacio .bi {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: .5rem;
+  opacity: .5;
+}
+
+/* ── Aviso de error ── */
+.kpi-biz-error {
+  display: none;
+  background: rgba(239, 68, 68, .12);
+  border: 1px solid var(--kpi-rojo);
+  color: var(--kpi-rojo-txt);
+  border-radius: 10px;
+  padding: .6rem .9rem;
+  font-size: .8rem;
+  margin-bottom: .9rem;
+}
+
+.kpi-biz-error.visible {
+  display: block;
+}
+
+/* Cargando: atenuar en vez de vaciar */
+.kpi-biz-panel.cargando {
+  opacity: .55;
+  pointer-events: none;
+  transition: opacity .2s;
+}
+
+/* ── Boton flotante para abrir panel completo ── */
+.kpi-biz-float-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1050;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--kpi-naranja);
+  color: #000;
+  border: none;
+  box-shadow: 0 4px 20px rgba(243, 156, 18, .4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  cursor: pointer;
+  transition: transform .2s, box-shadow .2s;
+}
+
+.kpi-biz-float-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 28px rgba(243, 156, 18, .6);
+}
+
+.kpi-biz-float-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(243, 156, 18, .5);
+}
+
+@media (max-width: 576px) {
+  .kpi-biz-grid {
+    grid-template-columns: 1fr;
+  }
+  .kpi-biz-filtros {
+    width: 100%;
+  }
+  .kpi-biz-filtros > div {
+    flex: 1 1 120px;
+  }
+  .kpi-biz-float-btn {
+    bottom: 16px;
+    right: 16px;
+    width: 48px;
+    height: 48px;
+    font-size: 1.2rem;
+  }
+}
+
+/* ── Ajustes tema claro ── */
+[data-theme="light"] .kpi-biz-panel .kpi-biz-sec-header h5 {
+  color: var(--kpi-naranja-txt) !important;
+}
+
+[data-theme="light"] .kpi-biz-panel .kpi-biz-periodo-nota,
+[data-theme="light"] .kpi-biz-panel .kpi-biz-pie,
+[data-theme="light"] .kpi-biz-panel .kpi-biz-cab {
+  color: var(--kpi-muted-txt);
+}
+
+[data-theme="light"] .kpi-biz-panel .kpi-biz-cab .bi,
+[data-theme="light"] .kpi-biz-panel .kpi-biz-tabla th {
+  color: var(--kpi-naranja-txt);
+}

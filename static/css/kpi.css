@@ -1,0 +1,538 @@
+/*
+  Estilos del panel de KPIs.
+
+  Se apoya en los tokens de estilos.css (--bg-card, --text-primary, ...) para
+  que el panel herede el tema claro/oscuro sin reglas duplicadas. Aqui solo
+  vive lo que el panel necesita y el resto del proyecto no.
+
+  El bloque vive en /admin, incrustado con {% include %}, y /kpis redirige
+  alla. Todo lo de aqui esta acotado bajo .kpi-panel para no pisar el resto de
+  las paginas, y el tema claro/oscuro se hereda de los tokens de estilos.css.
+*/
+
+.kpi-panel {
+  --kpi-naranja: #f39c12;
+  --kpi-verde: #22c55e;
+  --kpi-amarillo: #eab308;
+  --kpi-rojo: #ef4444;
+
+  /* Variantes para TEXTO, deliberadamente separadas de las de arriba.
+
+     Los cuatro de arriba estan pensados para superficies grandes: la franja
+     lateral de la tarjeta, el relleno de las barras, el arco del medidor, las
+     lineas del grafico. Alli basta 3:1 y conviene que sigan vivos. Puestos
+     como color de texto sobre fondo claro no llegaban a 4.5:1, asi que aqui
+     se usan las variantes de esta linea y las de abajo.
+
+     Medido sobre los fondos reales del panel (tarjeta, pista de la barra y
+     los tintes al 15% de cada badge), no sobre blanco puro. */
+  --kpi-naranja-txt: #f39c12;
+  --kpi-verde-txt: #22c55e;
+  --kpi-amarillo-txt: #eab308;
+  /* El rojo de texto es mas claro que el de relleno: sobre el tinte rojo de
+     un badge en fondo oscuro, #ef4444 se queda en 4.28:1. */
+  --kpi-rojo-txt: #f87171;
+  --kpi-muted-txt: var(--text-muted);
+
+  margin-bottom: 1.5rem;
+}
+
+/* En tema claro los cuatro se oscurecen dentro de la misma familia. El gris
+   de apoyo tambien: el --text-muted del proyecto (#777777) queda en 4.48:1
+   sobre blanco, dos centesimas por debajo del minimo, y el panel lo usa en
+   notas, pies y cabeceras de tabla. Se corrige aqui y no en estilos.css
+   porque ese token es de todo el proyecto y cambiarlo moveria el resto de las
+   paginas. */
+[data-theme="light"] .kpi-panel {
+  --kpi-naranja-txt: #9a5b06;
+  --kpi-amarillo-txt: #854d0e;
+  --kpi-verde-txt: #166534;
+  --kpi-rojo-txt: #b91c1c;
+  --kpi-muted-txt: #5a5a5a;
+}
+
+/* ── Cabecera y selector de periodo ── */
+.kpi-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.kpi-titulo {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-weight: 800;
+  font-size: 1.15rem;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.kpi-titulo .bi {
+  color: var(--kpi-naranja-txt);
+  font-size: 1.35rem;
+}
+
+.kpi-filtros {
+  display: flex;
+  align-items: flex-end;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.kpi-filtros label {
+  display: block;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--kpi-muted-txt);
+  margin-bottom: .2rem;
+}
+
+.kpi-filtros .form-control,
+.kpi-filtros .form-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-usuario);
+  color: var(--text-primary);
+  font-size: .85rem;
+  border-radius: 8px;
+}
+
+/* El boton de enviar no se oculta: sin JavaScript es el unico modo de
+   aplicar el filtro, asi que debe seguir siendo visible y funcional. El
+   script lo intercepta cuando esta activo. */
+.kpi-btn {
+  background: var(--kpi-naranja);
+  color: #000;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  font-size: .85rem;
+  padding: .4rem .9rem;
+}
+
+.kpi-btn-ghost {
+  background: transparent;
+  color: var(--kpi-muted-txt);
+  border: 1px solid var(--border-usuario);
+  border-radius: 8px;
+  font-size: .85rem;
+  padding: .4rem .9rem;
+}
+
+.kpi-btn-ghost:hover {
+  color: var(--kpi-naranja-txt);
+  border-color: var(--kpi-naranja-txt);
+}
+
+/* Gira el icono mientras el panel se esta actualizando. */
+.kpi-refrescando .bi {
+  display: inline-block;
+  animation: kpi-giro .9s linear infinite;
+}
+
+@keyframes kpi-giro {
+  to { transform: rotate(360deg); }
+}
+
+.kpi-periodo-nota {
+  font-size: .78rem;
+  color: var(--kpi-muted-txt);
+  margin: 0 0 1rem;
+}
+
+.kpi-periodo-nota strong {
+  color: var(--text-secondary);
+}
+
+/* ── Rejilla de tarjetas KPI ── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.kpi-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 18px;
+  padding: 1.1rem 1.2rem;
+  position: relative;
+  overflow: hidden;
+  transition: transform .3s, box-shadow .3s;
+}
+
+.kpi-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Franja lateral de color segun el semaforo del indicador. */
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--kpi-estado, var(--kpi-naranja));
+}
+
+.kpi-card.is-ok { --kpi-estado: var(--kpi-verde); }
+.kpi-card.is-aviso { --kpi-estado: var(--kpi-amarillo); }
+.kpi-card.is-critico { --kpi-estado: var(--kpi-rojo); }
+.kpi-card.is-sin-datos { --kpi-estado: var(--text-muted); }
+
+.kpi-card .kpi-cab {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--kpi-muted-txt);
+  margin-bottom: .55rem;
+}
+
+.kpi-card .kpi-cab .bi {
+  font-size: .95rem;
+  color: var(--kpi-estado, var(--kpi-naranja));
+}
+
+.kpi-valor {
+  font-size: 1.85rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-valor small {
+  font-size: .95rem;
+  font-weight: 600;
+  color: var(--kpi-muted-txt);
+}
+
+.kpi-pie {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .76rem;
+  color: var(--kpi-muted-txt);
+  margin-top: .4rem;
+}
+
+/* Flecha de variacion contra el periodo anterior equivalente. */
+.kpi-var {
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-var.sube { color: var(--kpi-verde-txt); }
+.kpi-var.baja { color: var(--kpi-rojo-txt); }
+.kpi-var.igual { color: var(--kpi-muted-txt); }
+.kpi-var.nuevo { color: var(--kpi-naranja-txt); }
+
+/* ── Secciones ── */
+.kpi-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 18px;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+
+.kpi-section > .kpi-sec-header {
+  padding: .9rem 1.25rem;
+  border-bottom: 1px solid var(--border-main);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.kpi-section > .kpi-sec-header h5 {
+  margin: 0;
+  font-weight: 700;
+  font-size: .95rem;
+  color: var(--kpi-naranja-txt);
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+}
+
+.kpi-section > .kpi-sec-body {
+  padding: 1.25rem;
+}
+
+/* ── Barras comparativas de percentiles ── */
+.kpi-barras {
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+}
+
+.kpi-barra-cab {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: .8rem;
+  color: var(--kpi-muted-txt);
+  margin-bottom: .3rem;
+}
+
+.kpi-barra-cab strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-size: .95rem;
+}
+
+.kpi-barra-pista {
+  height: 9px;
+  background: var(--bg-input);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.kpi-barra-relleno {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .6s ease;
+}
+
+.kpi-barra-relleno.ok { background: var(--kpi-verde); }
+.kpi-barra-relleno.aviso { background: var(--kpi-amarillo); }
+.kpi-barra-relleno.critico { background: var(--kpi-rojo); }
+.kpi-barra-relleno.sin-datos { background: var(--text-muted); }
+
+/* Marca de la media como referencia sobre la pista. */
+.kpi-barra-ref {
+  position: relative;
+  height: 0;
+}
+
+.kpi-barra-ref span {
+  position: absolute;
+  top: -13px;
+  width: 2px;
+  height: 9px;
+  background: var(--text-muted);
+  opacity: .8;
+}
+
+/* ── Tablas ── */
+.kpi-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .84rem;
+}
+
+.kpi-tabla th {
+  background: rgba(243, 156, 18, .1);
+  color: var(--kpi-naranja-txt);
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  padding: .55rem .7rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.kpi-tabla td {
+  padding: .55rem .7rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-tabla tbody tr:hover td {
+  background: rgba(243, 156, 18, .05);
+}
+
+.kpi-tabla td.num {
+  text-align: right;
+}
+
+.kpi-code {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  padding: .1rem .35rem;
+  font-size: .78rem;
+}
+
+/* ── Lista de postura de seguridad ── */
+.kpi-postura {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.kpi-postura-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .75rem;
+  padding: .6rem .8rem;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 10px;
+}
+
+.kpi-postura-item.ok { border-left-color: var(--kpi-verde-txt); }
+.kpi-postura-item.aviso { border-left-color: var(--kpi-amarillo-txt); }
+.kpi-postura-item.critico { border-left-color: var(--kpi-rojo-txt); }
+
+.kpi-postura-item .nombre {
+  font-size: .85rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.kpi-postura-item .detalle {
+  font-size: .75rem;
+  color: var(--kpi-muted-txt);
+  margin-top: .15rem;
+}
+
+.kpi-badge {
+  flex-shrink: 0;
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: .2rem .5rem;
+  border-radius: 99px;
+}
+
+.kpi-badge.ok { background: rgba(34, 197, 94, .15); color: var(--kpi-verde-txt); }
+.kpi-badge.aviso { background: rgba(234, 179, 8, .15); color: var(--kpi-amarillo-txt); }
+.kpi-badge.critico { background: rgba(239, 68, 68, .15); color: var(--kpi-rojo-txt); }
+
+/* ── Medidor circular de la puntuacion de seguridad ── */
+.kpi-score {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.kpi-score-anillo {
+  --pct: 0;
+  --cor: var(--kpi-verde);
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  /* Doble fondo: el cono pinta el arco de progreso, el disco lo recorta. */
+  background:
+    radial-gradient(closest-side, var(--bg-card) 78%, transparent 80% 100%),
+    conic-gradient(var(--cor) calc(var(--pct) * 1%), var(--bg-input) 0);
+}
+
+.kpi-score-texto .titulo {
+  font-size: .9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.kpi-score-texto .sub {
+  font-size: .76rem;
+  color: var(--kpi-muted-txt);
+}
+
+/* ── Estado vacio ── */
+.kpi-vacio {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--kpi-muted-txt);
+  font-size: .85rem;
+}
+
+.kpi-vacio .bi {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: .5rem;
+  opacity: .5;
+}
+
+/* ── Grafico ── */
+.kpi-chart-wrap {
+  position: relative;
+  height: 260px;
+}
+
+/* ── Aviso de error al pedir datos por la API ── */
+.kpi-error {
+  display: none;
+  background: rgba(239, 68, 68, .12);
+  border: 1px solid var(--kpi-rojo);
+  color: var(--kpi-rojo-txt);
+  border-radius: 10px;
+  padding: .6rem .9rem;
+  font-size: .8rem;
+  margin-bottom: .9rem;
+}
+
+.kpi-error.visible {
+  display: block;
+}
+
+/* Mientras se piden datos se atenua el panel en vez de vaciarlo: evita el
+   parpadeo y deja ver la cifra anterior como referencia. */
+.kpi-panel.cargando {
+  opacity: .55;
+  pointer-events: none;
+  transition: opacity .2s;
+}
+
+@media (max-width: 576px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  .kpi-filtros {
+    width: 100%;
+  }
+  .kpi-filtros > div {
+    flex: 1 1 120px;
+  }
+}
+
+/*
+  ── Ajustes para el tema claro ──
+
+  estilos.css obliga con !important a que los titulos h2-h5 lleven el color
+  de texto principal en tema claro, y pone span, p, td y th a color:inherit.
+  Sin estas reglas el panel pierde el naranja de los titulos y las notas
+  secundarias se heredan en negro.
+
+  Se corrige aqui y no en estilos.css a proposito: esos ajustes son globales
+  por decision del proyecto y tocarlos alteraria el resto de las paginas.
+*/
+[data-theme="light"] .kpi-panel .kpi-sec-header h5 {
+  color: var(--kpi-naranja-txt) !important;
+}
+
+[data-theme="light"] .kpi-panel .kpi-periodo-nota,
+[data-theme="light"] .kpi-panel .kpi-pie,
+[data-theme="light"] .kpi-panel .kpi-cab {
+  color: var(--kpi-muted-txt);
+}
+
+[data-theme="light"] .kpi-panel .kpi-cab .bi,
+[data-theme="light"] .kpi-panel .kpi-tabla th {
+  color: var(--kpi-naranja-txt);
+}

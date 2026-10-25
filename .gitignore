@@ -1,0 +1,26 @@
+venv/
+# Los scripts arrancar/ buscan .venv\Scripts\python.exe, no venv/
+.venv/
+# Copia de respaldo del entorno virtual: no se versiona
+.venv.bak-py312/
+__pycache__/
+*.pyc
+*.pyo
+.env
+static/uploads/*.jpg
+static/uploads/*.png
+static/uploads/*.webp
+# Comprobantes de pago de los clientes: son datos personales (nombre, monto,
+# metodo de pago) y el repositorio es publico. No se versionan.
+static/uploads/*.pdf
+static/boleta_*.pdf
+# Logs locales de prueba
+arrancar/*.log
+local.out
+local.err
+run.out
+run.err
+
+_fijar_ojo.py
+_ojofix.py
+app_test*.log

@@ -1,0 +1,367 @@
+{#
+  Bloque de KPIs, reutilizable.
+
+  Este archivo no extiende ninguna pagina: es un fragmento que se incrusta en
+  el panel de administracion (/admin) con `{% include %}`. El servidor sigue
+  siendo el unico que pinta los datos, y la pagina es util incluso sin
+  JavaScript porque el render es completo desde el HTML.
+
+  Contrato de datos: recibe `kpis`, el snapshot ya calculado por
+  kpi.routes.get_snapshot(). Si no llega, la variable no viene definida y se
+  muestra un aviso en vez de nada. Es lo que permite que /admin se siga
+  mostrando entero si la base de datos falla al calcular los indicadores: un
+  panel de metricas no puede tumbar la gestion de productos.
+
+  Para el cambio de periodo el script vuelve a pedir el fragmento al endpoint
+  que lo produce y sustituye este bloque. No se reconstruye nada en el
+  navegador, asi que no hay dos implementaciones del mismo render que se
+  puedan desincronizar.
+#}
+{% from 'kpi/macros/kpi_card.html' import tarjeta, variacion, barra_percentil, vacio, postura_item %}
+
+{% if kpis %}
+{% set k = kpis %}
+
+<div class="kpi-panel" id="kpiPanel" data-kpi-url="{{ url_for('kpi.api_kpis_panel') }}">
+
+  {# ── Aviso de error de la API ── #}
+  <div class="kpi-error" id="kpiError"></div>
+
+  {# ── Cabecera y filtros ── #}
+  <div class="kpi-toolbar">
+    <h2 class="kpi-titulo">
+      <i class="bi bi-speedometer2"></i> KPIs del sistema
+    </h2>
+    <form method="GET" id="kpiFiltros" class="kpi-filtros">
+      {#
+        Un formulario GET sustituye la query entera por la suya, asi que sin
+        estos campos "Aplicar" se llevaria por delante los parametros de la
+        pagina que aloja el panel (en /admin, la busqueda de productos y la
+        pagina de la tabla). El script, que usa fetch, ya los conserva.
+      #}
+      {% set propios = ('preset', 'desde', 'hasta') %}
+      {% for clave in request.args.keys() if clave not in propios %}
+        <input type="hidden" name="{{ clave }}" value="{{ request.args[clave] }}">
+      {% endfor %}
+
+      <div>
+        <label for="kpiPreset">Periodo</label>
+        <select name="preset" id="kpiPreset" class="form-select form-select-sm">
+          {% for valor, texto in [('hoy', 'Hoy'), ('7d', 'Últimos 7 días'),
+                                  ('30d', 'Últimos 30 días'), ('mes', 'Mes actual'),
+                                  ('personalizado', 'Personalizado')] %}
+            <option value="{{ valor }}"
+              {% if k.periodo.preset == valor %}selected{% endif %}>{{ texto }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="kpiDesde">Desde</label>
+        <input type="text" name="desde" id="kpiDesde" class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa" autocomplete="off">
+      </div>
+      <div>
+        <label for="kpiHasta">Hasta</label>
+        <input type="text" name="hasta" id="kpiHasta" class="form-control form-control-sm"
+               placeholder="dd/mm/aaaa" autocomplete="off">
+      </div>
+      <button type="submit" class="btn kpi-btn">Aplicar</button>
+      <button type="button" class="btn kpi-btn-ghost" id="kpiActualizar">
+        <i class="bi bi-arrow-clockwise"></i> Actualizar
+      </button>
+    </form>
+  </div>
+
+  {# ── Periodo comparado ── #}
+  {% if k.periodo %}
+  <p class="kpi-periodo-nota">
+    Del <strong>{{ k.periodo.desde.strftime('%d/%m/%Y %H:%M') }}</strong>
+    al <strong>{{ k.periodo.hasta.strftime('%d/%m/%Y %H:%M') }}</strong>
+    <span class="d-none d-md-inline">· {{ k.periodo.dias }} día(s)</span>
+    · comparado con el periodo equivalente anterior
+  </p>
+  {% endif %}
+
+  {# ── Las cuatro tarjetas ── #}
+  <div class="kpi-grid">
+
+    {{ tarjeta(
+        'Disponibilidad servida', 'bi-activity',
+        k.disponibilidad.valor, '%',
+        pie='de ' ~ k.disponibilidad.peticiones ~ ' peticiones',
+        variacion_html=variacion(k.disponibilidad.variacion, true),
+        estado='is-' ~ k.disponibilidad.semaforo) }}
+
+    {{ tarjeta(
+        'Latencia p95', 'bi-speedometer',
+        k.rendimiento.p95_ms, 'ms',
+        pie='p50 ' ~ k.rendimiento.p50_ms ~ ' ms',
+        variacion_html=variacion(k.rendimiento.variacion_p95, false),
+        estado='is-' ~ k.rendimiento.semaforo) }}
+
+    {{ tarjeta(
+        'Excepciones', 'bi-bug',
+        k.estabilidad.errores, '',
+        pie=k.estabilidad.tasa_error ~ '% del trafico',
+        variacion_html=variacion(k.estabilidad.variacion, false),
+        estado='is-' ~ k.estabilidad.semaforo) }}
+
+    {{ tarjeta(
+        'Postura de seguridad', 'bi-shield-lock',
+        k.seguridad.puntuacion, '/100',
+        pie='orientativa, no es un estandar',
+        variacion_html=variacion(k.seguridad.variacion, true),
+        estado='is-' ~ k.seguridad.semaforo) }}
+
+  </div>
+
+  {# ── Tendencia diaria ── #}
+  <div class="kpi-section">
+    <div class="kpi-sec-header">
+      <h5><i class="bi bi-graph-up"></i> Tráfico por día</h5>
+      <span class="kpi-periodo-nota mb-0">peticiones servidas y errores 5xx</span>
+    </div>
+    <div class="kpi-sec-body">
+      {% if k.tendencia %}
+        <div class="kpi-chart-wrap">
+          <canvas id="kpiGrafico" aria-label="Peticiones y errores por dia"></canvas>
+        </div>
+      {% else %}
+        {{ vacio('bi-graph-up', 'Aun no hay trafico suficiente para dibujar la serie') }}
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Rendimiento ── #}
+  <div class="kpi-section">
+    <div class="kpi-sec-header">
+      <h5><i class="bi bi-stopwatch"></i> Rendimiento</h5>
+      <span class="kpi-periodo-nota mb-0">{{ k.rendimiento.muestras }} muestras medidas</span>
+    </div>
+    <div class="kpi-sec-body">
+      <div class="kpi-barras">
+        {{ barra_percentil('p50 (mediana)', k.rendimiento.p50_ms,
+                           media_ms=k.rendimiento.media_ms,
+                           semaforo=k.rendimiento.semaforo) }}
+        {{ barra_percentil('p95', k.rendimiento.p95_ms,
+                           media_ms=k.rendimiento.media_ms,
+                           semaforo=k.rendimiento.semaforo) }}
+        {{ barra_percentil('p99', k.rendimiento.p99_ms,
+                           media_ms=k.rendimiento.media_ms,
+                           semaforo=k.rendimiento.semaforo) }}
+        {{ barra_percentil('máxima', k.rendimiento.max_ms,
+                           media_ms=k.rendimiento.media_ms,
+                           semaforo=k.rendimiento.semaforo) }}
+      </div>
+
+      {% if k.rendimiento.rutas_lentas %}
+        <h6 class="mt-4 mb-2" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">
+          Rutas más lentas
+        </h6>
+        <div class="table-responsive">
+          <table class="kpi-tabla">
+            <thead>
+              <tr><th>Endpoint</th><th class="num">Peticiones</th>
+                  <th class="num">Media</th><th class="num">Máx</th></tr>
+            </thead>
+            <tbody>
+              {% for r in k.rendimiento.rutas_lentas %}
+                <tr>
+                  <td><span class="kpi-code">{{ r.route }}</span></td>
+                  <td class="num">{{ r.peticiones }}</td>
+                  <td class="num">{{ r.avg_ms }} ms</td>
+                  <td class="num">{{ r.max_ms }} ms</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="kpi-periodo-nota mt-3 mb-0">
+          Sin rutas lentas: se necesitan al menos 3 peticiones por endpoint.
+        </p>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Estabilidad ── #}
+  <div class="kpi-section">
+    <div class="kpi-sec-header">
+      <h5><i class="bi bi-bug"></i> Estabilidad</h5>
+      <span class="kpi-periodo-nota mb-0">
+        {{ k.estabilidad.errores }} en este periodo ·
+        {{ k.estabilidad.errores_anteriores }} en el anterior
+      </span>
+    </div>
+    <div class="kpi-sec-body">
+      {% if k.estabilidad.por_tipo %}
+        <div class="table-responsive">
+          <table class="kpi-tabla">
+            <thead><tr><th>Tipo</th><th>Origen</th><th class="num">Veces</th></tr></thead>
+            <tbody>
+              {% for e in k.estabilidad.por_tipo %}
+                <tr>
+                  <td><span class="kpi-code">{{ e.error_type }}</span></td>
+                  <td>{{ e.origen }}</td>
+                  <td class="num">{{ e.n }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        {{ vacio('bi-check-circle', 'Ninguna excepcion registrada en el periodo') }}
+      {% endif %}
+
+      {% if k.estabilidad.recientes %}
+        <h6 class="mt-4 mb-2" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">
+          Últimas excepciones
+        </h6>
+        <div class="table-responsive">
+          <table class="kpi-tabla">
+            <thead><tr><th>Cuándo</th><th>Tipo</th><th>Dónde</th><th>Detalle</th></tr></thead>
+            <tbody>
+              {% for e in k.estabilidad.recientes %}
+                <tr>
+                  <td style="white-space:nowrap">{{ e.created_at }}</td>
+                  <td><span class="kpi-code">{{ e.error_type }}</span></td>
+                  <td><span class="kpi-code">{{ e.route }}</span></td>
+                  <td style="white-space:normal">{{ e.mensaje }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Seguridad ── #}
+  <div class="kpi-section">
+    <div class="kpi-sec-header">
+      <h5><i class="bi bi-shield-lock"></i> Seguridad</h5>
+      {% if k.seguridad.sospechoso %}
+        <span class="kpi-badge critico">patrón sospechoso</span>
+      {% endif %}
+    </div>
+    <div class="kpi-sec-body">
+
+      <div class="kpi-score mb-4">
+        <div class="kpi-score-anillo"
+             style="--pct: {{ k.seguridad.puntuacion }}; --cor: var(--kpi-{{ k.seguridad.semaforo }}, var(--kpi-verde))">
+          {{ k.seguridad.puntuacion }}
+        </div>
+        <div class="kpi-score-texto">
+          <div class="titulo">Puntuación orientativa</div>
+          <div class="sub">
+            100 sin incidencias. Resta por ataques distribuidos, IPs y
+            cuentas bloqueadas, y contrasenas reutilizadas.
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        {{ tarjeta('Cuentas bloqueadas', 'bi-person-lock',
+                   k.seguridad.incidentes.cuentas_bloqueadas | default(0, true), '',
+                   pie='por intentos fallidos') }}
+        {{ tarjeta('IPs bloqueadas', 'bi-hdd-network',
+                   k.seguridad.incidentes.ips_bloqueadas | default(0, true), '',
+                   pie='por fuerza bruta') }}
+        {{ tarjeta('Intentos fallidos', 'bi-key',
+                   k.seguridad.incidentes.intentos_fallidos | default(0, true), '',
+                   pie='acumulados') }}
+        {{ tarjeta('Ataques distribuidos', 'bi-broadcast',
+                   k.seguridad.incidentes.ataques_distribuidos | default(0, true), '',
+                   pie='varias cuentas desde una IP') }}
+      </div>
+
+      <h6 class="mt-3 mb-2" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)">
+        Postura de configuración
+      </h6>
+      <div class="kpi-postura">
+        {% for c in k.seguridad.postura %}
+          {{ postura_item(c) }}
+        {% endfor %}
+      </div>
+
+      {% if k.seguridad.detalle_reutilizadas %}
+        <div class="alert alert-warning mt-3 mb-0" style="font-size:.82rem">
+          <strong>{{ k.seguridad.passwords_reutilizadas }} grupo(s) de cuentas
+          comparten la misma contraseña.</strong>
+          <ul class="mb-0 mt-1">
+            {% for r in k.seguridad.detalle_reutilizadas %}
+              <li>{{ r.cuentas }} cuentas con el mismo hash</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Salud y operaciones ── #}
+  <div class="kpi-section">
+    <div class="kpi-sec-header">
+      <h5><i class="bi bi-heart-pulse"></i> Salud y operaciones</h5>
+    </div>
+    <div class="kpi-sec-body">
+      <div class="kpi-grid">
+        {{ tarjeta('Chequeos', 'bi-clipboard-pulse', k.salud.chequeos, '',
+                   pie='en el periodo') }}
+        {{ tarjeta('Chequeos fallidos', 'bi-x-octagon', k.salud.fallos, '',
+                   pie='latencia BD o memoria') }}
+        {{ tarjeta('Latencia de BD', 'bi-database', k.salud.db_ms, 'ms',
+                   pie='media de los chequeos') }}
+        {{ tarjeta('Memoria del proceso', 'bi-cpu',
+                   k.salud.rss_mb if k.salud.rss_mb else '—',
+                   'MB' if k.salud.rss_mb else '',
+                   pie='RSS del contenedor') }}
+      </div>
+
+      {% if k.retention %}
+        <p class="kpi-periodo-nota mb-0">{{ k.retention }}</p>
+      {% endif %}
+
+      {% if k.operaciones %}
+        <div class="table-responsive mt-3">
+          <table class="kpi-tabla">
+            <thead><tr><th>Tabla</th><th class="num">Filas (aprox.)</th>
+                       <th class="num">Tamaño</th></tr></thead>
+            <tbody>
+              {% for t in k.operaciones %}
+                <tr>
+                  <td><span class="kpi-code">{{ t.tabla }}</span></td>
+                  <td class="num">{{ t.filas }}</td>
+                  <td class="num">{{ t.mb }} MB</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# El grafico lee su serie de aqui. tojson escapa el contenido, de modo que
+     un nombre de endpoint con comillas no puede romper el script. #}
+  <script type="application/json" id="kpiTendencia">{{ k.tendencia | tojson }}</script>
+</div>
+
+{% else %}
+{#
+  Degradacion: el snapshot no llego porque la base de datos no permitio
+  calcularlo. Se avisa en el hueco exacto donde estaria el panel y el resto
+  de /admin sigue siendo completamente utilizable.
+#}
+<div class="kpi-panel" id="kpiPanel">
+  <div class="kpi-toolbar">
+    <h2 class="kpi-titulo">
+      <i class="bi bi-speedometer2"></i> KPIs del sistema
+    </h2>
+  </div>
+  <div class="kpi-error visible">
+    <i class="bi bi-database-exclamation"></i>
+    No se pudieron calcular los indicadores ahora mismo. El resto del panel
+    sigue funcionando con normalidad.
+  </div>
+</div>
+{% endif %}

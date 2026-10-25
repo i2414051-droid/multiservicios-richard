@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb" style="background:transparent;color:var(--text-muted)">
+      <li class="breadcrumb-item"><a href="/" style="color:#f39c12">Inicio</a></li>
+      <li class="breadcrumb-item active" style="color:var(--text-secondary)">{{ producto.nombre }}</li>
+    </ol>
+  </nav>
+
+  <div class="row g-4">
+    <!-- IMAGEN CON CARRUSEL -->
+    <div class="col-md-5">
+      <div id="productCarousel" class="carousel slide" data-bs-ride="false">
+        <div class="carousel-inner rounded-3" style="border:2px solid rgba(243,156,18,.3);overflow:hidden">
+          {% set imagenes = producto.imagenes if producto.imagenes else (producto.imagen | default('') ) %}
+          {% if imagenes %}
+            {% if imagenes is iterable and imagenes is not string %}
+              {% for img in imagenes %}
+              <div class="carousel-item {% if loop.first %}active{% endif %}">
+                <img src="/static/{{ img }}" class="d-block w-100" alt="{{ producto.nombre }}" 
+                     style="aspect-ratio: 1/1; object-fit: cover;">
+              </div>
+              {% endfor %}
+            {% else %}
+              <div class="carousel-item active">
+                <img src="/static/{{ imagenes }}" class="d-block w-100" alt="{{ producto.nombre }}" 
+                     style="aspect-ratio: 1/1; object-fit: cover;">
+              </div>
+            {% endif %}
+          {% else %}
+            <div class="carousel-item active">
+              <div style="background:var(--bg-input); aspect-ratio: 1/1; display:flex; align-items:center; justify-content:center">
+                <i class="bi bi-image" style="font-size:80px;color:var(--text-muted)"></i>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+        
+        {% if (producto.imagenes and producto.imagenes|length > 1) or (producto.imagen and false) %}
+        <button class="carousel-control-prev" type="button" data-bs-target="#productCarousel" data-bs-slide="prev">
+          <span class="carousel-control-prev-icon" style="filter: invert(1) sepia(1) hue-rotate(30deg);"></span>
+          <span class="visually-hidden">Anterior</span>
+        </button>
+        <button class="carousel-control-next" type="button" data-bs-target="#productCarousel" data-bs-slide="next">
+          <span class="carousel-control-next-icon" style="filter: invert(1) sepia(1) hue-rotate(30deg);"></span>
+          <span class="visually-hidden">Siguiente</span>
+        </button>
+        
+        <div class="carousel-indicators">
+          {% if producto.imagenes and producto.imagenes is iterable and producto.imagenes is not string %}
+            {% for img in producto.imagenes %}
+            <button type="button" data-bs-target="#productCarousel" data-bs-slide-to="{{ loop.index0 }}" 
+                    class="{% if loop.first %}active{% endif %}" aria-current="{% if loop.first %}true{% else %}false{% endif %}"
+                    aria-label="Imagen {{ loop.index }}"></button>
+            {% endfor %}
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      
+      <!-- Miniaturas si hay múltiples imágenes -->
+      {% if producto.imagenes and producto.imagenes is iterable and producto.imagenes is not string and producto.imagenes|length > 1 %}
+      <div class="d-flex gap-2 mt-2 justify-center" id="thumbnails">
+        {% for img in producto.imagenes %}
+        <img src="/static/{{ img }}" alt="" class="thumb-img {% if loop.first %}active{% endif %}" 
+             style="width:70px;height:70px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid transparent;transition:all .3s"
+             onclick="goToSlide({{ loop.index0 }})"
+             onmouseover="this.style.borderColor='#f39c12'" onmouseout="this.style.borderColor='transparent'">
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- DETALLES -->
+    <div class="col-md-7">
+      <div class="card" style="background:var(--bg-card);border:1px solid var(--border-card)">
+        <div class="card-body p-4">
+          <h2 style="color:#f39c12;font-weight:800">{{ producto.nombre }}</h2>
+
+          <div class="d-flex align-items-center gap-3 mt-3 mb-3">
+            <h3 style="color:#27ae60;font-weight:800;margin:0">S/ {{ "%.2f"|format(producto.precio|float) }}</h3>
+            {% if producto.stock > 0 %}
+              <span class="badge bg-success" style="font-size:14px">Disponible ({{ producto.stock }})</span>
+            {% else %}
+              <span class="badge bg-danger" style="font-size:14px">Sin stock</span>
+            {% endif %}
+          </div>
+
+          {% if producto.categoria %}
+          <p style="color:var(--text-muted)"><i class="bi bi-tag me-1" style="color:#f39c12"></i> {{ producto.categoria }}</p>
+          {% endif %}
+
+          <hr style="border-color:rgba(243,156,18,.2)">
+
+          <h6 style="color:#f39c12;font-weight:700">Descripción</h6>
+          <p style="color:var(--text-secondary);line-height:1.7">
+            {{ producto.descripcion or 'Sin descripción disponible.' }}
+          </p>
+
+          {% if producto.stock > 0 %}
+          <a href="/agregar/{{ producto.id }}" class="btn btn-warning btn-lg fw-bold mt-3 w-100" style="border-radius:15px">
+            <i class="bi bi-cart-plus me-1"></i> Agregar al carrito
+          </a>
+          {% else %}
+          <button class="btn btn-secondary btn-lg mt-3 w-100" disabled style="border-radius:15px">
+            <i class="bi bi-x-circle me-1"></i> Sin stock
+          </button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function goToSlide(index) {
+    const carousel = document.getElementById('productCarousel');
+    if (carousel) {
+        const bsCarousel = bootstrap.Carousel.getOrCreateInstance(carousel);
+        bsCarousel.to(index);
+    }
+    
+    // Actualizar miniaturas activas
+    document.querySelectorAll('.thumb-img').forEach((img, i) => {
+        img.classList.toggle('active', i === index);
+    });
+}
+
+// Sincronizar miniaturas con carrusel automático
+document.addEventListener('DOMContentLoaded', function() {
+    const carousel = document.getElementById('productCarousel');
+    if (carousel) {
+        carousel.addEventListener('slide.bs.carousel', function(e) {
+            document.querySelectorAll('.thumb-img').forEach((img, i) => {
+                img.classList.toggle('active', i === e.to);
+            });
+        });
+    }
+});
+</script>
+
+<style>
+.thumb-img.active {
+    border-color: #f39c12 !important;
+    transform: scale(1.05);
+}
+</style>
+{% endblock %}

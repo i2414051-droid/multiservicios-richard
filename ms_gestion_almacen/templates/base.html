@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multiservicios Richard100</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{url_for('static',filename='css/estilos.css')}}">
+{% block head %}{% endblock %}
+</head>
+
+<body class="fondo-principal">
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-expand-lg navbar-custom">
+<div class="container-fluid px-3 px-lg-4">
+
+  <!-- LOGO -->
+  <a class="navbar-brand d-flex align-items-center" href="/">
+    <img src="{{url_for('static',filename='img/logo.png')}}" class="logo-navbar">
+    <span class="nombre-logo">
+      MULTISERVICIOS<br>
+      <span style="font-size:30px">RICHARD</span>
+    </span>
+  </a>
+
+  <!-- HAMBURGER (solo mobile) -->
+  <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu" aria-controls="navMenu" aria-expanded="false" aria-label="Menú">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+
+  <!-- MENU COLAPSABLE -->
+  <div class="collapse navbar-collapse" id="navMenu">
+
+    <!-- MENÚ (centrado) -->
+    <div class="menu mx-lg-auto">
+      <a href="/" class="menu-item">
+        <i class="bi bi-house-fill"></i> Inicio
+      </a>
+      {% if session.get('rol') in ['admin','administrador'] %}
+        <a href="/admin" class="menu-item">
+          <i class="bi bi-box-seam"></i> Productos
+        </a>
+        <a href="/proveedores" class="menu-item">
+          <i class="bi bi-truck"></i> Proveedores
+        </a>
+        <a href="/productos-para-pedir" class="menu-item">
+          <i class="bi bi-cart-plus"></i> Para pedir
+        </a>
+        <a href="/ingresos" class="menu-item">
+          <i class="bi bi-box-arrow-in-down"></i> Ingresos
+        </a>
+        <a href="/salidas" class="menu-item">
+          <i class="bi bi-box-arrow-up"></i> Salidas
+        </a>
+        <a href="/informe-diario" class="menu-item">
+          <i class="bi bi-file-earmark-text"></i> Informe
+        </a>
+        <a href="/panel" class="menu-item">
+          <i class="bi bi-graph-up-arrow"></i> KPIs
+        </a>
+      {% endif %}
+    </div>
+
+    <!-- DERECHA: Theme + Carrito + Perfil -->
+    <div class="d-flex align-items-center gap-2 ms-lg-auto">
+      <button class="theme-toggle" id="themeToggle" title="Cambiar tema">
+        <i class="bi bi-moon-fill icon-moon"></i>
+        <i class="bi bi-sun-fill icon-sun"></i>
+      </button>
+      {% if session.get('rol') %}
+      <div class="usuario-box">
+        <i class="bi bi-person-circle"></i>
+        <div>
+          {{ session.get('almacen_user') or 'admin' }}<br>
+          <small>{{ session['rol'] }}</small>
+        </div>
+      </div>
+      <a href="/logout" class="btn boton-personal">Salir</a>
+      {% else %}
+      <a href="/login" class="btn boton-personal">Login</a>
+      {% endif %}
+    </div>
+
+  </div>
+
+</div>
+</nav>
+
+<!-- FLASH MESSAGES -->
+<div class="container mt-3">
+{% with messages=get_flashed_messages(with_categories=true) %}
+{% if messages %}
+{% for category, message in messages %}
+<div class="alert alert-{{category}} alert-dismissible fade show mensaje-flash" role="alert">
+  {{message}}
+  <button class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endfor %}
+{% endif %}
+{% endwith %}
+</div>
+
+<!-- AVISO: microservicio de Ventas no disponible -->
+{% if ventas_caido %}
+<div class="container mt-3">
+  <div class="alert alert-warning d-flex align-items-center" role="alert">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <div>El servicio de <strong>ventas</strong> no está disponible temporalmente. Algunos datos de ventas pueden no mostrarse; la gestión de almacén sigue funcionando.</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- CONTENIDO -->
+<div class="container mt-4">
+{% block content %}{% endblock %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
+<script>
+/* ── Theme Toggle ── */
+(function(){
+  var saved = localStorage.getItem('theme');
+  if (saved) {
+    document.documentElement.setAttribute('data-theme', saved);
+  }
+  document.getElementById('themeToggle').addEventListener('click', function(){
+    var current = document.documentElement.getAttribute('data-theme');
+    var next = (current === 'light') ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+  });
+})();
+
+setTimeout(()=>{
+  document.querySelectorAll(".mensaje-flash").forEach(e=>{
+    if (e.dataset.persistent) return;
+    e.style.transition=".5s";
+    e.style.opacity="0";
+    e.style.transform="translateY(-30px)";
+    setTimeout(()=>e.remove(),500);
+  });
+},3000);
+</script>
+</body>
+</html>

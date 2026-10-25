@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container d-flex justify-content-center align-items-center" style="height:100vh;">
+    <div class="card shadow p-4" style="width:400px;">
+        <h3 class="text-center mb-3">📝 Crear cuenta</h3>
+
+        <form method="POST" class="needs-validation" novalidate>
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+            <!-- Tipo de documento -->
+            <div class="mb-3">
+                <label class="form-label">Tipo de documento</label>
+                <select name="documento_tipo" id="documento_tipo" class="form-select" required>
+                    <option value="">Seleccione...</option>
+                    <option value="dni">DNI (8 dígitos)</option>
+                    <option value="ruc">RUC (11 dígitos)</option>
+                </select>
+            </div>
+
+            <!-- Número de documento -->
+            <div class="mb-3">
+                <label class="form-label">N° Documento</label>
+                <input type="text" name="documento_numero" id="documento_numero" 
+                       placeholder="Ingrese DNI/RUC" class="form-control" required
+                       oninput="aplicarMascaraDocumento(this)">
+            </div>
+
+            <!-- Nombres -->
+            <div class="mb-3">
+                <label class="form-label">Nombres</label>
+                <input type="text" name="nombres" placeholder="Nombres" class="form-control" required>
+            </div>
+
+            <!-- Apellidos -->
+            <div class="mb-3">
+                <label class="form-label">Apellidos</label>
+                <input type="text" name="apellidos" placeholder="Apellidos" class="form-control" required>
+            </div>
+
+            <!-- Teléfono con máscara -->
+            <div class="mb-3">
+                <label class="form-label">Teléfono</label>
+                <input type="tel" name="telefono" id="telefono" placeholder="999 999 999" 
+                       class="form-control" required oninput="aplicarMascaraTelefono(this)">
+            </div>
+
+            <!-- Correo -->
+            <div class="mb-3">
+                <label class="form-label">Correo electrónico</label>
+                <input type="email" name="correo" placeholder="correo@ejemplo.com" class="form-control" required>
+            </div>
+
+            <!-- Contraseña con visor -->
+            <div class="mb-3 position-relative">
+                <label class="form-label">Contraseña</label>
+                <input type="password" name="password" id="password" placeholder="Contraseña" class="form-control" required>
+                <button type="button" class="position-absolute top-0 end-0 m-2 btn-link text-secondary py-0" 
+                        onclick="togglePassword()" style="border:none; background:none; cursor:pointer;">
+                    <i id="eye-icon" class="bi bi-eye"></i>
+                </button>
+            </div>
+
+            <!-- Confirmar contraseña con visor -->
+            <div class="mb-3 position-relative">
+                <label class="form-label">Confirmar contraseña</label>
+                <input type="password" name="confirmar" id="confirmar" placeholder="Confirmar contraseña" class="form-control" required>
+                <button type="button" class="position-absolute top-0 end-0 m-2 btn-link text-secondary py-0" 
+                        onclick="toggleConfirmPassword()" style="border:none; background:none; cursor:pointer;">
+                    <i id="eye-icon-confirm" class="bi bi-eye"></i>
+                </button>
+            </div>
+
+            <button class="btn btn-success w-100" type="submit" id="btn-registrar">
+                Registrarse
+            </button>
+        </form>
+
+        <div class="text-center mt-3">
+            <a href="/login">¿Ya tienes cuenta? Iniciar sesión</a>
+        </div>
+    </div>
+</div>
+
+<script>
+// Máscara para DNI (8 dígitos) / RUC (11 dígitos)
+function aplicarMascaraDocumento(input) {
+    const tipo = document.getElementById('documento_tipo').value;
+    let value = input.value.replace(/\D/g, ''); // Solo números
+    
+    if (tipo === 'dni') {
+        value = value.substring(0, 8);
+    } else if (tipo === 'ruc') {
+        value = value.substring(0, 11);
+    }
+    input.value = value;
+}
+
+// Cambiar máscara al cambiar tipo
+document.getElementById('documento_tipo').addEventListener('change', function() {
+    const input = document.getElementById('documento_numero');
+    input.value = '';
+    aplicarMascaraDocumento(input);
+});
+
+// Máscara para teléfono (9 dígitos formato 999 999 999)
+function aplicarMascaraTelefono(input) {
+    let value = input.value.replace(/\D/g, '');
+    value = value.substring(0, 9);
+    
+    // Formato: 999 999 999
+    if (value.length > 6) {
+        value = value.substring(0, 3) + ' ' + value.substring(3, 6) + ' ' + value.substring(6);
+    } else if (value.length > 3) {
+        value = value.substring(0, 3) + ' ' + value.substring(3);
+    }
+    input.value = value;
+}
+
+// Toggle password
+function togglePassword() {
+    const input = document.getElementById('password');
+    const eyeIcon = document.getElementById('eye-icon');
+    if (input.type === 'password') {
+        input.type = 'text';
+        eyeIcon.classList.remove('bi-eye');
+        eyeIcon.classList.add('bi-eye-slash');
+    } else {
+        input.type = 'password';
+        eyeIcon.classList.remove('bi-eye-slash');
+        eyeIcon.classList.add('bi-eye');
+    }
+}
+
+function toggleConfirmPassword() {
+    const input = document.getElementById('confirmar');
+    const eyeIcon = document.getElementById('eye-icon-confirm');
+    if (input.type === 'password') {
+        input.type = 'text';
+        eyeIcon.classList.remove('bi-eye');
+        eyeIcon.classList.add('bi-eye-slash');
+    } else {
+        input.type = 'password';
+        eyeIcon.classList.remove('bi-eye-slash');
+        eyeIcon.classList.add('bi-eye');
+    }
+}
+
+// Desactivar botón durante submit
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.querySelector('form.needs-validation');
+    if (form) {
+        form.addEventListener('submit', function(event) {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+            } else {
+                const btn = form.querySelector('button[type="submit"]');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Registrando...';
+                }
+            }
+            form.classList.add('was-validated');
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
+{% block content %}
+<div class="container mt-4">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <h2 class="mb-0"><i class="bi bi-people me-2" style="color:#f39c12"></i>Control de Clientes</h2>
+    <a href="/permisos" class="btn btn-outline-secondary btn-sm"><i class="bi bi-shield-lock me-1"></i>Permisos</a>
+  </div>
+
+  <div class="d-flex gap-2 flex-wrap mb-3">
+    <a href="/clientes" class="btn btn-sm {{ 'btn-warning fw-bold' if filtro=='todos' else 'btn-outline-secondary' }}">Todos</a>
+    {% for codigo, info in estados_cliente.items() %}
+    <a href="/clientes?filtro={{ codigo }}&buscar={{ buscar }}"
+       class="btn btn-sm {{ 'btn-warning fw-bold' if filtro==codigo else 'btn-outline-secondary' }}">
+      <span class="badge me-1" style="background:{{ info.color }}">&nbsp;</span>{{ info.nombre }}
+      <span class="badge bg-dark ms-1">{{ conteos.get(codigo, 0) }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  <form method="GET" class="mb-3">
+    <div class="input-group">
+      <input type="hidden" name="filtro" value="{{ filtro }}">
+      <input type="text" name="buscar" class="form-control bg-dark text-white border-secondary"
+             placeholder="Buscar por correo, nombre o apellido..." value="{{ buscar }}">
+      <button class="btn btn-warning fw-bold" type="submit">Buscar</button>
+      {% if buscar %}<a href="/clientes?filtro={{ filtro }}" class="btn btn-outline-secondary">Limpiar</a>{% endif %}
+    </div>
+  </form>
+
+  <div class="card border-0 shadow tc-admin">
+    <div class="card-header tc-admin-header">
+      <span class="text-white fw-bold"><i class="bi bi-people me-2"></i>Clientes
+      <span class="badge bg-secondary ms-2">{{ total }}</span></span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-dark table-hover mb-0 text-center align-middle">
+          <thead class="tc-admin-thead">
+            <tr><th>ID</th><th class="text-start">Cliente</th><th>Estado</th><th>Compras</th><th>Total</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            {% for c in clientes %}
+            <tr>
+              <td><span class="badge bg-secondary">{{ c.id }}</span></td>
+              <td class="text-start">
+                <strong>{{ (c.nombre or '') ~ ' ' ~ (c.apellido or '') }}</strong><br>
+                <small class="text-muted">{{ c.correo }}</small>
+                {% if c.telefono %}<br><small class="text-muted">{{ c.telefono }}</small>{% endif %}
+              </td>
+              <td><span class="badge" style="background:{{ estados_cliente.get(c.estado, {}).get('color', '#6c757d') }}">{{ estados_cliente.get(c.estado, {}).get('nombre', c.estado) }}</span></td>
+              <td><span class="badge bg-info text-dark">{{ c.num_compras }}</span></td>
+              <td class="text-success fw-bold">S/ {{ "%.2f"|format(c.total_compras|float) }}</td>
+              <td>
+                <div class="d-flex gap-1 justify-content-center flex-wrap">
+                  {% if c.estado in ('bloqueado', 'inactivo') %}
+                  <form method="POST" action="/clientes/{{ c.id }}/estado" class="d-inline">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="estado" value="activo">
+                    <button class="btn btn-success btn-sm" title="Reactivar"><i class="bi bi-check-circle"></i> Activar</button>
+                  </form>
+                  {% else %}
+                  <form method="POST" action="/clientes/{{ c.id }}/estado" class="d-inline"
+                        onsubmit="return confirm('¿Bloquear a {{ c.correo }}?')">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="estado" value="bloqueado">
+                    <button class="btn btn-outline-danger btn-sm" title="Bloqueo rápido"><i class="bi bi-slash-circle"></i> Bloquear</button>
+                  </form>
+                  {% endif %}
+                  <a href="/historial-compras?buscar={{ c.correo }}" class="btn btn-outline-info btn-sm" title="Ver compras">
+                    <i class="bi bi-bag-check"></i>
+                  </a>
+                  <button class="btn btn-outline-warning btn-sm" data-sin-carga data-sin-bloqueo
+                          onclick="verHistorial({{ c.id }}, '{{ c.correo }}')" title="Ver historial de estados">
+                    <i class="bi bi-clock-history"></i>
+                  </button>
+                  <div class="dropdown d-inline">
+                    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" data-sin-carga data-sin-bloqueo>Cambiar</button>
+                    <ul class="dropdown-menu dropdown-menu-dark p-2" style="min-width:240px">
+                      {% for codigo, info in estados_cliente.items() %}
+                      <li>
+                        <form method="POST" action="/clientes/{{ c.id }}/estado">
+                          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                          <input type="hidden" name="estado" value="{{ codigo }}">
+                          <input type="text" name="motivo" class="form-control form-control-sm bg-dark text-white mb-1" placeholder="Motivo (opcional)">
+                          <button class="dropdown-item rounded" type="submit">
+                            <span class="badge me-1" style="background:{{ info.color }}">&nbsp;</span>{{ info.nombre }}
+                          </button>
+                        </form>
+                      </li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+            {% if clientes|length == 0 %}
+            <tr><td colspan="6" class="text-muted py-4">No hay clientes con ese filtro.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {{ paginacion(page, total_pages, total, '/clientes?filtro=' ~ filtro ~ '&buscar=' ~ buscar ~ '&', '') }}
+  </div>
+</div>
+
+<div class="modal fade" id="modalHistorial" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-dark text-white">
+      <div class="modal-header"><h5 class="modal-title" id="tituloHistorial">Historial</h5>
+        <button class="btn-close btn-close-white" data-bs-dismiss="modal" data-sin-carga data-sin-bloqueo></button></div>
+      <div class="modal-body" id="cuerpoHistorial"><p class="text-muted">Cargando...</p></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function verHistorial(id, correo){
+  document.getElementById('tituloHistorial').textContent = 'Historial: ' + correo;
+  document.getElementById('cuerpoHistorial').innerHTML = '<p class="text-muted">Cargando...</p>';
+  var m = new bootstrap.Modal(document.getElementById('modalHistorial'));
+  m.show();
+  fetch('/clientes/' + id + '/historial', {headers:{'X-Requested-With':'XMLHttpRequest'}})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d.ok || !d.historial.length){
+        document.getElementById('cuerpoHistorial').innerHTML = '<p class="text-muted">Sin cambios registrados.</p>';
+        return;
+      }
+      var html = '<ul class="list-group list-group-flush">';
+      d.historial.forEach(function(h){
+        html += '<li class="list-group-item bg-dark text-white">'
+          + '<strong>' + (h.anterior||'-') + ' → ' + h.nuevo + '</strong><br>'
+          + '<small class="text-muted">' + h.fecha + (h.admin ? ' · por ' + h.admin : ' · por cliente') + '</small>'
+          + (h.motivo ? '<br>' + h.motivo : '') + '</li>';
+      });
+      document.getElementById('cuerpoHistorial').innerHTML = html + '</ul>';
+    })
+    .catch(function(){ document.getElementById('cuerpoHistorial').innerHTML = '<p class="text-danger">Error al cargar.</p>'; });
+}
+</script>
+{% endblock %}

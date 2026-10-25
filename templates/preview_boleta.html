@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Boleta N° {{ venta_id }} - Multiservicios Richard</title>
+    <style>
+        body{
+            font-family: Arial, sans-serif;
+            width: 750px;
+            margin: auto;
+            color: #333;
+            padding-bottom: 40px;
+        }
+
+        .acciones{
+            text-align:center;
+            margin: 20px 0 30px;
+        }
+
+        .acciones a, .acciones button{
+            display:inline-block;
+            margin: 5px 6px;
+            padding: 12px 24px;
+            font-size:15px;
+            font-weight:bold;
+            border-radius:10px;
+            border:none;
+            cursor:pointer;
+            text-decoration:none;
+        }
+        .btn-descargar{ background:#dc3545; color:#fff; }
+        .btn-imprimir { background:#f39c12; color:#fff; }
+        .btn-volver   { background:#6c757d; color:#fff; }
+
+        .boleta-box{
+            border: 2px solid #000;
+            padding: 20px;
+        }
+
+        .header{
+            text-align:center;
+        }
+
+        .empresa{
+            font-size:22px;
+            font-weight:bold;
+        }
+
+        .ruc{
+            font-size:16px;
+            margin-top:5px;
+        }
+
+        .titulo{
+            font-size:18px;
+            font-weight:bold;
+            margin-top:10px;
+        }
+
+        .info{
+            margin-top:20px;
+            font-size:14px;
+        }
+
+        .info p{ margin: 4px 0; }
+
+        table{
+            width:100%;
+            border-collapse: collapse;
+            margin-top:20px;
+        }
+
+        th{
+            background:#f2f2f2;
+            border:1px solid #000;
+            padding:8px;
+        }
+
+        td{
+            border:1px solid #000;
+            padding:8px;
+            text-align:center;
+        }
+
+        .total-box{
+            text-align:right;
+            margin-top:15px;
+            font-size:18px;
+            font-weight:bold;
+        }
+
+        .footer{
+            margin-top:30px;
+            text-align:center;
+            font-size:13px;
+        }
+
+        @media print {
+            .acciones{ display:none; }
+            body{ padding-bottom:0; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="acciones">
+        <a href="/boleta_pdf/{{ venta_id }}" class="btn-descargar">📄 DESCARGAR BOLETA PDF</a>
+        <button class="btn-imprimir" onclick="window.print()">🖨 IMPRIMIR</button>
+        <button class="btn-volver" onclick="window.location.href='/'">🏠 VOLVER A LA TIENDA</button>
+    </div>
+
+<div class="boleta-box">
+
+    <div class="header">
+        <div class="empresa">MULTISERVICIOS RICHARD</div>
+        <div class="ruc">RUC: 10450119429</div>
+        <div>Huancayo - Perú</div>
+        <div class="titulo">BOLETA DE VENTA ELECTRÓNICA</div>
+        <div>N° {{ venta_id }}</div>
+    </div>
+
+    <div class="info">
+        <p><strong>Cliente:</strong> {{ nombre }}</p>
+        <p><strong>{% if venta and venta.doc_tipo %}{{ venta.doc_tipo|upper }}{% elif doc|length == 11 %}RUC{% else %}DNI{% endif %}:</strong> {{ doc }}</p>
+        {% if venta and venta.telefono %}
+        <p><strong>Celular:</strong> {{ venta.telefono }}</p>
+        {% endif %}
+        {% if venta and venta.correo %}
+        <p><strong>Correo:</strong> {{ venta.correo }}</p>
+        {% endif %}
+        {% if venta and venta.fecha %}
+        <p><strong>Fecha:</strong> {{ venta.fecha }}</p>
+        {% endif %}
+        {% if venta and venta.metodo_pago %}
+        <p><strong>Método de pago:</strong> {{ venta.metodo_pago|capitalize }}</p>
+        {% endif %}
+        {% if venta and venta.direccion_envio %}
+        <p><strong>Dirección de envío:</strong> {{ venta.direccion_envio }}</p>
+        {% endif %}
+    </div>
+
+    <table>
+        <tr>
+            <th>Producto</th>
+            <th>Cantidad</th>
+            <th>Precio</th>
+            <th>Subtotal</th>
+        </tr>
+
+        {% for p in productos %}
+        <tr>
+            <td>{{ p.nombre }}</td>
+            <td>{{ p.cantidad }}</td>
+            <td>S/ {{ "%.2f"|format(p.precio) }}</td>
+            <td>S/ {{ "%.2f"|format(p.cantidad * p.precio) }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <div class="total-box">
+        TOTAL: S/ {{ "%.2f"|format(total) }}
+    </div>
+
+    <div class="footer">
+        Gracias por su compra 🙌 <br>
+        Representación impresa de la boleta electrónica
+    </div>
+
+</div>
+
+</body>
+</html>

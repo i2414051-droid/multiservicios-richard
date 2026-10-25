@@ -1,0 +1,474 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<style>
+/* ── Selector con buscador (combo) ── */
+.campo-select{position:relative;min-width:200px;text-align:left}
+.campo-select .campo-select-input{padding-right:28px;cursor:text}
+.campo-select-lista{position:absolute;z-index:1050;top:calc(100% + 4px);left:0;right:0;max-height:230px;overflow:auto;background:var(--bg-card);border:1px solid var(--border-main);border-radius:10px;box-shadow:0 8px 22px rgba(0,0,0,.35);display:none}
+.campo-select.abierto .campo-select-lista{display:block}
+/* La tabla vive dentro de .table-responsive (Bootstrap: overflow:auto), que
+   recortaria la lista desplegable del buscador de producto. Mientras hay un
+   combo abierto se libera ese recorte; al cerrarlo vuelve el scroll en movil. */
+body.combo-abierto .table-responsive{overflow:visible}
+.campo-select-item{padding:7px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--text-primary);border-bottom:1px solid var(--border-subtle)}
+.campo-select-item:last-child{border-bottom:none}
+.campo-select-item:hover,.campo-select-item.activo{background:rgba(243,156,18,.15)}
+.campo-select-item-detalle{color:var(--text-muted);white-space:nowrap;font-size:.78rem}
+.campo-select-vacio{padding:8px 10px;color:var(--text-muted);font-size:.85rem}
+.campo-select-ok .campo-select-input{border-color:#28a745}
+.campo-select-error .campo-select-input{border-color:#dc3545}
+.campo-obligatorio{color:#dc3545}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 mt-4">
+  <h2 style="color:#f39c12;font-weight:800;margin-bottom:25px">
+    <i class="bi bi-box-arrow-in-down"></i> Registrar Ingreso de Productos
+  </h2>
+
+  <div id="errorForm" class="alert alert-danger d-none" role="alert"></div>
+
+  <form method="POST" action="/registrar-ingreso" id="formIngreso" data-sin-carga novalidate>
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-6">
+        <label class="form-label fw-bold">Proveedor <span class="campo-obligatorio">*</span></label>
+        <div class="campo-select" data-combo="proveedor">
+          <input type="text" class="form-control campo-select-input ti"
+                 placeholder="Escribir para buscar proveedor..." autocomplete="off"
+                 data-sin-carga data-sin-bloqueo value="">
+          <input type="hidden" name="proveedor_id" class="campo-select-valor"
+                 value="{% if valores %}{{ valores.proveedor_id }}{% endif %}">
+          <div class="campo-select-lista"></div>
+        </div>
+        <small class="text-muted" style="color:var(--text-muted)">Busca y selecciona el proveedor de la mercancía.</small>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-bold">Notas / Observaciones <span style="color:var(--text-muted)">(opcional)</span></label>
+        <input name="notas" placeholder="Ej: Ingreso por reposición mensual"
+               value="{% if valores %}{{ valores.notas }}{% endif %}"
+               class="form-control ti">
+      </div>
+    </div>
+
+    <div class="card mb-4 tc">
+      <div class="card-header d-flex justify-content-between align-items-center tc-header">
+        <h5 class="mb-0" style="color:#f39c12;font-weight:700">Productos a ingresar</h5>
+        <button type="button" id="btnAgregarFila"
+                class="btn btn-sm" data-sin-carga data-sin-bloqueo
+                style="background:#f39c12;color:#000;font-weight:bold;border-radius:15px">
+          <i class="bi bi-plus"></i> Agregar producto
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0 text-center align-middle" id="tabla-productos">
+            <thead class="tc-accent">
+              <tr>
+                <th>Producto <span class="campo-obligatorio">*</span></th>
+                <th>Stock actual</th>
+                <th>Cantidad <span class="campo-obligatorio">*</span></th>
+                <th>Precio compra / und <span class="campo-obligatorio">*</span></th>
+                <th>Precio venta / und <span class="campo-obligatorio">*</span></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% set filas_render = (valores.filas if valores and valores.filas else [{}]) %}
+              {% for fila in filas_render %}
+              {% set f_pid = fila.producto_id if fila.producto_id is defined and fila.producto_id != '' else '' %}
+              {% set f_cant = fila.cantidad if fila.cantidad is defined and fila.cantidad != '' else '' %}
+              {% set f_pc = fila.precio_compra if fila.precio_compra is defined and fila.precio_compra != '' else '' %}
+              {% set f_pv = fila.precio_venta if fila.precio_venta is defined and fila.precio_venta != '' else '' %}
+              <tr class="fila-producto">
+                <td>
+                  <div class="campo-select" data-combo="producto">
+                    <input type="text" class="form-control form-control-sm ti campo-select-input"
+                           placeholder="Buscar producto..." autocomplete="off"
+                           data-sin-carga data-sin-bloqueo value="">
+                    <input type="hidden" name="producto_id[]" class="campo-select-valor"
+                           value="{{ f_pid }}">
+                    <div class="campo-select-lista"></div>
+                  </div>
+                </td>
+                <td class="stock-val" style="color:var(--text-muted)">-</td>
+                <td><input type="number" name="cantidad[]" min="1" step="1"
+                           class="form-control form-control-sm ti campo-cantidad" style="width:90px;margin:auto"
+                           value="{{ f_cant }}" placeholder="Ej: 10"></td>
+                <td><input type="number" name="precio_compra[]" min="0" step="0.01"
+                           class="form-control form-control-sm ti campo-pc" style="width:110px;margin:auto"
+                           value="{{ f_pc }}" placeholder="0.00"></td>
+                <td><input type="number" name="precio_venta[]" min="0.01" step="0.01"
+                           class="form-control form-control-sm ti campo-pv" style="width:110px;margin:auto"
+                           value="{{ f_pv }}" placeholder="0.00"></td>
+                <td>
+                  <button type="button" class="btn btn-sm btn-danger btn-quitar-fila"
+                          data-sin-carga data-sin-bloqueo title="Quitar fila">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn" id="btnRegistrar"
+              style="background:#f39c12;font-weight:bold;border-radius:20px;padding:10px 30px">
+        <i class="bi bi-check-circle"></i> Registrar Ingreso
+      </button>
+      <a href="/ingresos" class="btn" style="border:1px solid #f39c12;color:#f39c12;border-radius:20px;padding:10px 30px">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  var PRODUCTOS   = {{ productos|tojson }};
+  var PROVEEDORES = {{ proveedores|tojson }};
+
+  var CATALOGOS = {
+    producto: {
+      datos: PRODUCTOS,
+      etiqueta: function(p){ return p.nombre + ' (S/ ' + p.precio.toFixed(2) + ')'; },
+      detalle: function(p){ return 'Stock: ' + p.stock; }
+    },
+    proveedor: {
+      datos: PROVEEDORES,
+      etiqueta: function(p){ return p.nombre; },
+      detalle: function(){ return ''; }
+    }
+  };
+
+  function norm(s){
+    return (s||'').toString().toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  }
+  function coinciden(datos, termino){
+    var t = norm(termino);
+    if (!t) return datos;
+    return datos.filter(function(p){ return norm(p.nombre).indexOf(t) !== -1; });
+  }
+
+  /* ── Inicializa un combo (wrapper .campo-select) ── */
+  function preparar(wrapper){
+    var tipo = wrapper.getAttribute('data-combo');
+    var cfg = CATALOGOS[tipo];
+    var input  = wrapper.querySelector('.campo-select-input');
+    var hidden = wrapper.querySelector('.campo-select-valor');
+    var lista  = wrapper.querySelector('.campo-select-lista');
+    var seleccion = null;
+    var indice = -1;
+
+    function pintar(items){
+      lista.innerHTML = '';
+      if (!items.length){
+        var v = document.createElement('div');
+        v.className = 'campo-select-vacio';
+        v.textContent = 'Sin resultados';
+        lista.appendChild(v);
+        return;
+      }
+      items.forEach(function(item, i){
+        var div = document.createElement('div');
+        div.className = 'campo-select-item';
+        var nom = document.createElement('span');
+        nom.textContent = cfg.etiqueta(item);
+        div.appendChild(nom);
+        var det = cfg.detalle(item);
+        if (det){
+          var s = document.createElement('small');
+          s.className = 'campo-select-item-detalle';
+          s.textContent = '· ' + det;
+          div.appendChild(s);
+        }
+        div.addEventListener('mousedown', function(ev){
+          ev.preventDefault();
+          seleccionar(item);
+        });
+        div.addEventListener('mouseenter', function(){ resaltar(i); });
+        lista.appendChild(div);
+      });
+    }
+
+    function resaltar(i){
+      indice = i;
+      Array.prototype.forEach.call(lista.children, function(el, k){
+        el.classList.toggle('activo', k === i);
+      });
+    }
+
+    function abrir(){
+      if (!listaAbiertas.has(wrapper)){
+        listaAbiertas.add(wrapper);
+        wrapper.classList.add('abierto');
+        document.body.classList.toggle('combo-abierto', listaAbiertas.size > 0);
+      }
+      // Siempre se repinta: asi al escribir se filtran los resultados
+      // aunque el evento focus no se haya disparado antes.
+      indice = -1;
+      pintar(coinciden(cfg.datos, input.value));
+    }
+    function cerrar(){
+      listaAbiertas.delete(wrapper);
+      wrapper.classList.remove('abierto');
+      document.body.classList.toggle('combo-abierto', listaAbiertas.size > 0);
+      lista.innerHTML = '';
+      indice = -1;
+    }
+    function scrollActivo(){
+      var el = lista.children[indice];
+      if (el) el.scrollIntoView({block:'nearest'});
+    }
+
+    function seleccionar(item){
+      seleccion = item || null;
+      hidden.value = item ? item.id : '';
+      wrapper.classList.toggle('campo-select-ok', !!item);
+      if (item){
+        input.value = cfg.etiqueta(item);
+        if (tipo === 'producto'){
+          var tr = wrapper.closest('tr');
+          var pv = tr.querySelector('.campo-pv');
+          var cant = tr.querySelector('.campo-cantidad');
+          var stock = tr.querySelector('.stock-val');
+          if (pv) pv.value = item.precio.toFixed(2);
+          if (cant && cant.value === '') cant.value = '1';
+          if (stock) stock.textContent = item.stock;
+          actualizarFila(tr);
+        }
+      } else {
+        input.value = '';
+      }
+      cerrar();
+    }
+
+    input.addEventListener('focus', abrir);
+    input.addEventListener('input', function(){
+      // Si se edito el texto, la seleccion previa deja de ser valida.
+      if (seleccion && cfg.etiqueta(seleccion) !== input.value){
+        seleccion = null;
+        hidden.value = '';
+        wrapper.classList.remove('campo-select-ok');
+        if (tipo === 'producto'){
+          var tr = wrapper.closest('tr');
+          var stock = tr.querySelector('.stock-val');
+          if (stock) stock.textContent = '-';
+          actualizarFila(tr);
+        }
+      }
+      indice = -1;
+      abrir();
+    });
+    input.addEventListener('keydown', function(ev){
+      var items = lista.children;
+      if (ev.key === 'ArrowDown'){
+        ev.preventDefault();
+        if (items.length) resaltar(Math.min((indice + 1), items.length - 1));
+        scrollActivo();
+      } else if (ev.key === 'ArrowUp'){
+        ev.preventDefault();
+        if (items.length) resaltar(Math.max(indice - 1, 0));
+        scrollActivo();
+      } else if (ev.key === 'Enter'){
+        if (indice >= 0 && items[indice]){
+          ev.preventDefault();
+          var item = coinciden(cfg.datos, input.value)[indice];
+          seleccionar(item);
+        } else {
+          ev.preventDefault();
+          cerrar();
+        }
+      } else if (ev.key === 'Escape'){
+        ev.preventDefault();
+        cerrar();
+      }
+    });
+    input.addEventListener('blur', function(){
+      setTimeout(function(){
+        if (!listaAbiertas.has(wrapper)) return;
+        var valido = seleccion && cfg.etiqueta(seleccion) === input.value;
+        if (!valido && input.value.trim()){
+          // Coincidencia exacta -> seleccionar; si no, limpiar.
+          var texto = norm(input.value.trim());
+          var match = cfg.datos.filter(function(p){ return norm(cfg.etiqueta(p)) === texto; });
+          if (match.length === 1){ seleccionar(match[0]); }
+          else { input.value = ''; }
+        }
+        cerrar();
+      }, 150);
+    });
+
+    /* Preseleccion durante el re-render tras un error del servidor */
+    var idInicial = parseInt(hidden.value, 10);
+    if (idInicial){
+      for (var i = 0; i < cfg.datos.length; i++){
+        if (cfg.datos[i].id === idInicial){
+          seleccion = cfg.datos[i];
+          input.value = cfg.etiqueta(cfg.datos[i]);
+          wrapper.classList.add('campo-select-ok');
+          if (tipo === 'producto'){
+            var tr = wrapper.closest('tr');
+            var st = tr.querySelector('.stock-val');
+            if (st) st.textContent = cfg.datos[i].stock;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  var listaAbiertas = new Set();
+  document.querySelectorAll('.campo-select').forEach(preparar);
+
+  /* Cerrar combos al hacer clic fuera */
+  document.addEventListener('mousedown', function(ev){
+    if (!ev.target.closest('.campo-select')){
+      listaAbiertas.forEach(function(w){ w.classList.remove('abierto'); });
+      listaAbiertas.clear();
+    }
+  });
+
+  /* ── Estado de cada fila: si tiene datos exige todos sus campos ── */
+  function actualizarFila(tr){
+    var inputs = tr.querySelectorAll('.campo-select-valor, .campo-cantidad, .campo-pc, .campo-pv');
+    var activa = false;
+    inputs.forEach(function(inp){
+      if (inp.value && inp.value !== '0') activa = true;
+    });
+    tr.classList.toggle('fila-activa', activa);
+    ['.campo-cantidad','.campo-pc','.campo-pv'].forEach(function(sel){
+      var el = tr.querySelector(sel);
+      if (!el) return;
+      if (activa) el.setAttribute('required', 'required');
+      else el.removeAttribute('required');
+    });
+  }
+  function bindFila(tr){
+    tr.querySelectorAll('input').forEach(function(inp){
+      inp.addEventListener('input', function(){ actualizarFila(tr); });
+      inp.addEventListener('change', function(){ actualizarFila(tr); });
+    });
+    var combo = tr.querySelector('.campo-select');
+    if (combo) preparar(combo);
+    var btnQ = tr.querySelector('.btn-quitar-fila');
+    if (btnQ){
+      btnQ.addEventListener('click', function(){
+        var filas = document.querySelectorAll('.fila-producto');
+        if (filas.length <= 1){
+          // Nunca quedarse sin filas: solo se limpia.
+          tr.querySelector('.campo-select-valor').value = '';
+          tr.querySelector('.campo-select-input').value = '';
+          tr.querySelector('.stock-val').textContent = '-';
+          Array.prototype.forEach.call(tr.querySelectorAll('.campo-cantidad,.campo-pc,.campo-pv'),
+            function(inp){ inp.value=''; });
+          actualizarFila(tr);
+          return;
+        }
+        tr.remove();
+      });
+    }
+    actualizarFila(tr);
+  }
+  document.querySelectorAll('.fila-producto').forEach(bindFila);
+
+  /* ── Agregar fila ── */
+  function crearFila(){
+    var tr = document.createElement('tr');
+    tr.className = 'fila-producto';
+    tr.innerHTML =
+      '<td>' +
+        '<div class="campo-select" data-combo="producto">' +
+          '<input type="text" class="form-control form-control-sm ti campo-select-input" ' +
+            'placeholder="Buscar producto..." autocomplete="off" data-sin-carga data-sin-bloqueo value="">' +
+          '<input type="hidden" name="producto_id[]" class="campo-select-valor" value="">' +
+          '<div class="campo-select-lista"></div>' +
+        '</div>' +
+      '</td>' +
+      '<td class="stock-val" style="color:var(--text-muted)">-</td>' +
+      '<td><input type="number" name="cantidad[]" min="1" step="1" ' +
+        'class="form-control form-control-sm ti campo-cantidad" style="width:90px;margin:auto" value="" placeholder="Ej: 10"></td>' +
+      '<td><input type="number" name="precio_compra[]" min="0" step="0.01" ' +
+        'class="form-control form-control-sm ti campo-pc" style="width:110px;margin:auto" value="" placeholder="0.00"></td>' +
+      '<td><input type="number" name="precio_venta[]" min="0.01" step="0.01" ' +
+        'class="form-control form-control-sm ti campo-pv" style="width:110px;margin:auto" value="" placeholder="0.00"></td>' +
+      '<td><button type="button" class="btn btn-sm btn-danger btn-quitar-fila" data-sin-carga data-sin-bloqueo title="Quitar fila">' +
+        '<i class="bi bi-trash"></i></button></td>';
+    document.querySelector('#tabla-productos tbody').appendChild(tr);
+    bindFila(tr);
+  }
+  document.getElementById('btnAgregarFila').addEventListener('click', crearFila);
+
+  /* ── Validacion al enviar ── */
+  function mostrarError(msgs){
+    var box = document.getElementById('errorForm');
+    box.classList.remove('d-none');
+    box.innerHTML = '<strong>Revisa el formulario:</strong><ul class="mb-0 mt-1 ps-3">' +
+      msgs.map(function(m){ return '<li>' + m + '</li>'; }).join('') + '</ul>';
+    box.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+
+  document.getElementById('formIngreso').addEventListener('submit', function(e){
+    var problemas = [];
+    var prov = document.querySelector('.campo-select[data-combo="proveedor"]');
+    if (!prov.querySelector('.campo-select-valor').value){
+      problemas.push('Debes seleccionar un proveedor.');
+      prov.classList.add('campo-select-error');
+    } else {
+      prov.classList.remove('campo-select-error');
+    }
+
+    var filas = document.querySelectorAll('.fila-producto');
+    var vistos = {};
+    var conDatos = 0;
+    filas.forEach(function(tr, idx){
+      if (!tr.classList.contains('fila-activa')) return;
+      conDatos++;
+      var sel = tr.querySelector('.campo-select-valor');
+      var cant = tr.querySelector('.campo-cantidad');
+      var pc = tr.querySelector('.campo-pc');
+      var pv = tr.querySelector('.campo-pv');
+      var n = idx + 1;
+
+      if (!sel.value){
+        problemas.push('Fila ' + n + ': selecciona el producto.');
+        tr.querySelector('.campo-select').classList.add('campo-select-error');
+      } else {
+        tr.querySelector('.campo-select').classList.remove('campo-select-error');
+        if (vistos[sel.value]) problemas.push('Fila ' + n + ': el producto está repetido.');
+        vistos[sel.value] = true;
+      }
+      var cantTexto = (cant.value || '').trim();
+      if (!/^\d+$/.test(cantTexto) || parseInt(cantTexto, 10) <= 0)
+        problemas.push('Fila ' + n + ': la cantidad debe ser un número entero mayor a 0.');
+      var pcNum = parseFloat(pc.value);
+      if (isNaN(pcNum) || pcNum < 0) problemas.push('Fila ' + n + ': precio de compra inválido.');
+      var pvNum = parseFloat(pv.value);
+      if (isNaN(pvNum) || pvNum <= 0) problemas.push('Fila ' + n + ': precio de venta debe ser mayor a 0.');
+    });
+
+    if (conDatos === 0) problemas.push('Agrega al menos un producto al ingreso.');
+
+    if (problemas.length){
+      e.preventDefault();
+      mostrarError(problemas);
+      return;
+    }
+
+    // Todo valido: se envia. Se muestra la barra de carga y se bloquea el boton.
+    var btn = document.getElementById('btnRegistrar');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Registrando...';
+    if (window.mostrarCarga) window.mostrarCarga();
+  });
+})();
+</script>
+{% endblock %}
