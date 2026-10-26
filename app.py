@@ -186,7 +186,7 @@ _ENDPOINTS_GET_ESCRITURA = frozenset({
     'eliminar_proveedor', 'eliminar_pedido', 'marcar_enviado',
     'eliminar_ingreso', 'eliminar_entrega', 'eliminar_salida',
     'eliminar_direccion', 'checkout', 'eliminar_carrito',
-    'aumentar_cantidad', 'agregar',
+    'aumentar_cantidad', 'agregar', 'ruta_init_db',
 })
 
 
@@ -1098,6 +1098,35 @@ def obtener_usuario():
         session['guest_id'] = str(uuid.uuid4())
     return session['guest_id']
 
+
+def _password_valida(password):
+    """Reglas de contraseña antes de pasarla a bcrypt.
+
+    bcrypt 5 rechaza (ValueError) las cadenas de mas de 72 bytes, asi que se
+    valida aqui: si no, un registro con una clave larga terminaba en error 500.
+    """
+    if len(password) < 8:
+        return False, 'La contraseña debe tener al menos 8 caracteres.'
+    if len(password.encode('utf-8')) > 72:
+        return False, 'La contraseña no puede superar los 72 caracteres.'
+    return True, ''
+
+
+def puede_ver_venta(venta):
+    """Un cliente solo ve sus ventas; un administrador ve todas."""
+    if session.get('rol') in ('admin', 'administrador'):
+        return True
+    if not venta or session.get('user_id') is None:
+        return False
+    try:
+        return int(venta.get('cliente_id')) == int(session['user_id'])
+    except (TypeError, ValueError):
+        return False
+
+
+class _SinStock(Exception):
+    """Se lanza cuando el stock cambio entre la validacion y el descuento."""
+
 def generar_boleta_pdf(venta_id):
     """Genera PDF en memoria y lo devuelve como bytes."""
     cur = mysql.connection.cursor()
@@ -1627,7 +1656,16 @@ def login():
             cur.close()
             return redirect('/login')
 
-        if usuario and bcrypt.check_password_hash(usuario['password'], password):
+        clave_ok = False
+        if usuario:
+            # Mas de 72 bytes hace que bcrypt lance ValueError: se trata como
+            # clave invalida en vez de devolver un 500 ante una peticion ajena.
+            if len(password.encode('utf-8')) <= 72:
+                try:
+                    clave_ok = bcrypt.check_password_hash(usuario['password'], password)
+                except (ValueError, TypeError):
+                    clave_ok = False
+        if usuario and clave_ok:
             # La fila NO se borra y el contador NO se baja: queda el historial de
             # los fallos de esta cuenta para poder revisarlo.
             sombra.pop(correo, None)
@@ -1725,7 +1763,7 @@ def logout():
 @app.route('/registro', methods=['GET','POST'])
 def registro():
     if request.method == 'POST':
-        correo           = request.form['correo']
+        correo           = request.form['correo'].strip()
         password         = request.form['password']
         confirmar        = request.form['confirmar']
         nombres          = request.form.get('nombres', '').strip()
@@ -1735,6 +1773,13 @@ def registro():
         telefono         = request.form.get('telefono', '').strip()
         if password != confirmar:
             flash('Las contraseñas no coinciden.', 'danger')
+            return redirect('/registro')
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo):
+            flash('Ingresa un correo electrónico válido.', 'danger')
+            return redirect('/registro')
+        ok, msg = _password_valida(password)
+        if not ok:
+            flash(msg, 'danger')
             return redirect('/registro')
         cur = mysql.connection.cursor()
         cur.execute("SELECT * FROM usuarios WHERE correo=%s", (correo,))
@@ -2306,8 +2351,15 @@ def boleta():
 
 @app.route('/boleta/<int:venta_id>')
 def boleta_form(venta_id):
-    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+    if 'user_id' not in session and not _es_admin():
         return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, cliente_id FROM ventas WHERE id=%s", (venta_id,))
+    venta = cur.fetchone()
+    cur.close()
+    if not venta or not puede_ver_venta(venta):
+        flash('No tienes acceso a esa boleta.', 'danger')
+        return redirect('/')
     return render_template('boleta_form.html', venta_id=venta_id)
 
 @app.route('/preview_boleta')
@@ -2323,11 +2375,11 @@ def preview_boleta():
         flash('Boleta no válida.', 'danger')
         return redirect('/')
     cur = mysql.connection.cursor()
-    cur.execute("""SELECT id, documento, doc_tipo, nombre, apellido, telefono, correo,
+    cur.execute("""SELECT id, cliente_id, documento, doc_tipo, nombre, apellido, telefono, correo,
                           total, fecha, metodo_pago, direccion_envio, notas_entrega
                    FROM ventas WHERE id=%s""", (venta_id,))
     venta = cur.fetchone()
-    if not venta:
+    if not venta or not puede_ver_venta(venta):
         cur.close()
         flash('Venta no encontrada.', 'danger')
         return redirect('/')
@@ -4309,7 +4361,15 @@ def procesar_compra():
         for item in items:
             cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
                         (venta_id, item['id'], item['cantidad'], item['precio']))
-            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
+            # Descuento condicional: si otro cliente compro la ultima unidad
+            # entre la validacion y este momento, rowcount es 0 y se aborta la
+            # compra (antes se restaba stock a ciegas y se podia sobrevender).
+            cur.execute(
+                f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s "
+                f"WHERE id=%s AND stock>=%s",
+                (item['cantidad'], item['id'], item['cantidad']))
+            if cur.rowcount != 1:
+                raise _SinStock(f'Stock insuficiente para: {item["nombre"]}.')
             verificar_stock_bajo(cur, item['id'])
         cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
         _carrito_invalidar(user_id)
@@ -4339,6 +4399,10 @@ def procesar_compra():
             return jsonify({'ok': True,
                             'redirect': f'/confirmacion/{venta_id}'})
         return redirect(f'/confirmacion/{venta_id}')
+    except _SinStock as exc:
+        # Otro cliente se quedo con las unidades: no se guarda nada.
+        mysql.connection.rollback()
+        return _chk_error(str(exc), '/carrito')
     except Exception as e:
         mysql.connection.rollback()
         print(f"[procesar_compra] {e}")
@@ -4356,7 +4420,7 @@ def confirmacion(id):
     cur = mysql.connection.cursor()
     cur.execute("SELECT * FROM ventas WHERE id=%s", (id,))
     venta = cur.fetchone()
-    if not venta:
+    if not venta or not puede_ver_venta(venta):
         flash('Venta no encontrada.', 'danger')
         return redirect('/')
     cur.execute(f"""
@@ -4405,6 +4469,21 @@ def perfil():
             nuevo_correo = request.form.get('correo', '').strip()
             if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", nuevo_correo):
                 flash('Ingresa un correo electrónico válido.', 'danger')
+                return redirect('/perfil')
+            # Cambiar el correo es la puerta a un reseteo de contraseña: se
+            # confirma con la clave actual para que una sesion robada no baste.
+            clave = request.form.get('password', '')
+            cur.execute("SELECT password FROM usuarios WHERE id=%s", (user_id,))
+            fila = cur.fetchone()
+            clave_ok = False
+            if clave and fila and len(clave.encode('utf-8')) <= 72:
+                try:
+                    clave_ok = bcrypt.check_password_hash(fila['password'], clave)
+                except (ValueError, TypeError):
+                    clave_ok = False
+            if not clave_ok:
+                flash('Confirma tu contraseña actual para cambiar el correo.', 'danger')
+                cur.close()
                 return redirect('/perfil')
             cur.execute("SELECT id FROM usuarios WHERE correo=%s AND id!=%s",
                         (nuevo_correo, user_id))
@@ -4536,8 +4615,9 @@ def cambiar_password():
     if not actual or not nueva:
         flash('Completa todos los campos.', 'danger')
         return redirect('/perfil')
-    if len(nueva) < 6:
-        flash('La nueva contraseña debe tener al menos 6 caracteres.', 'danger')
+    ok, msg = _password_valida(nueva)
+    if not ok:
+        flash(msg, 'danger')
         return redirect('/perfil')
     if nueva != confirmar:
         flash('Las contraseñas no coinciden.', 'danger')
@@ -4735,8 +4815,9 @@ def restablecer_password(token):
             return redirect(f'/restablecer-password/{token}')
         nueva = request.form.get('nueva', '')
         confirmar = request.form.get('confirmar_password', '')
-        if len(nueva) < 6:
-            flash('La contraseña debe tener al menos 6 caracteres.', 'danger')
+        ok, msg = _password_valida(nueva)
+        if not ok:
+            flash(msg, 'danger')
             return redirect(f'/restablecer-password/{token}')
         if nueva != confirmar:
             flash('Las contraseñas no coinciden.', 'danger')
@@ -4756,17 +4837,15 @@ def restablecer_password(token):
 # ─────────────────────────────────────────────
 @app.route('/boleta_pdf/<int:venta_id>')
 def boleta_pdf(venta_id):
-    if 'user_id' not in session and ('rol' not in session or session['rol'] not in ['admin','administrador']):
+    if 'user_id' not in session and not _es_admin():
         return redirect('/login')
-    user_id = session.get('user_id')
-    if user_id:
-        cur = mysql.connection.cursor()
-        cur.execute("SELECT id FROM ventas WHERE id=%s AND cliente_id=%s", (venta_id, user_id))
-        if not cur.fetchone():
-            cur.close()
-            flash('No tienes acceso a esta boleta.', 'danger')
-            return redirect('/')
-        cur.close()
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, cliente_id FROM ventas WHERE id=%s", (venta_id,))
+    venta = cur.fetchone()
+    cur.close()
+    if not venta or not puede_ver_venta(venta):
+        flash('No tienes acceso a esta boleta.', 'danger')
+        return redirect('/')
     pdf_bytes, _ = generar_boleta_pdf(venta_id)
     if not pdf_bytes:
         flash('Venta no encontrada.', 'danger')
@@ -4784,14 +4863,13 @@ def guardar_boleta():
     venta_id = request.form.get('venta_id')
     doc = request.form.get('doc', '')
     nombre = request.form.get('nombre', '')
-    user_id = session.get('user_id')
     cur = mysql.connection.cursor()
-    if user_id:
-        cur.execute("SELECT id FROM ventas WHERE id=%s AND cliente_id=%s", (venta_id, user_id))
-        if not cur.fetchone():
-            cur.close()
-            flash('No tienes acceso a esta venta.', 'danger')
-            return redirect('/')
+    cur.execute("SELECT id, cliente_id FROM ventas WHERE id=%s", (venta_id,))
+    venta = cur.fetchone()
+    if not venta or not puede_ver_venta(venta):
+        cur.close()
+        flash('No tienes acceso a esta venta.', 'danger')
+        return redirect('/')
     cur.execute("UPDATE ventas SET documento=%s, nombre=%s WHERE id=%s", (doc, nombre, venta_id))
     mysql.connection.commit()
     cur.close()

@@ -97,9 +97,13 @@
             <form id="formCorreo" class="campo-extra mt-2" method="POST" action="/perfil" style="display:none">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="accion" value="correo">
-              <div class="input-group">
+              <div class="mb-2">
                 <input type="email" class="form-control bg-dark text-white border-0" name="correo"
                        value="{{ usuario.correo }}" placeholder="Nuevo correo electrónico" required>
+              </div>
+              <div class="input-group">
+                <input type="password" class="form-control bg-dark text-white border-0" name="password"
+                       placeholder="Contraseña actual" autocomplete="current-password" required>
                 <button class="btn btn-warning fw-bold" type="submit">Guardar</button>
               </div>
             </form>
