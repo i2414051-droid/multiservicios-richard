@@ -20,6 +20,12 @@ local.out
 local.err
 run.out
 run.err
+# Scripts de depuracion de otra maquina (rutas C:\Users\david\...): no
+# funcionan aqui y exponian credenciales en los logs. El arranque bueno
+# es arrancar/arrancar_monolito.ps1.
+run_app.py
+start_app.ps1
+start_app2.ps1
 
 _fijar_ojo.py
 _ojofix.py
