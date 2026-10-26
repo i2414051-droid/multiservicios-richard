@@ -239,7 +239,7 @@ def _cabeceras_seguridad(resp):
         resp.headers.setdefault('Cache-Control', 'no-store')
     return resp
 
-UPLOAD_FOLDER = os.path.join('static', 'uploads')
+UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -4851,7 +4851,7 @@ def boleta_pdf(venta_id):
         flash('Venta no encontrada.', 'danger')
         return redirect('/')
     filename = f"boleta_{venta_id}.pdf"
-    filepath = os.path.join('static', filename)
+    filepath = os.path.join(app.root_path, 'static', filename)
     with open(filepath, 'wb') as f:
         f.write(pdf_bytes)
     return send_file(filepath, as_attachment=True)

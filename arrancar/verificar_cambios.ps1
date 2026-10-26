@@ -26,7 +26,7 @@ if (-not (Test-Path $python)) {
     Write-Host "[Verificar] No hay .venv. Crealo con:" -ForegroundColor Red
     Write-Host "  conda create -n proyecto python=3.13 -y" -ForegroundColor Yellow
     Write-Host "  conda activate proyecto" -ForegroundColor Yellow
-    Write-Host "  pip install -r requirements.txt" -ForegroundColor Yellow
+    Write-Host "  pip install -r monolito\requirements.txt" -ForegroundColor Yellow
     exit 1
 }
 
@@ -34,8 +34,8 @@ Push-Location $root
 try {
     # ── 1. Que todo compile ───────────────────────────────────────────
     Write-Host "`n[1/3] Compilacion de modulos" -ForegroundColor Cyan
-    $modulos = @('app.py', 'ms_clientes_ventas\app.py',
-                 'ms_gestion_almacen\app.py', 'kpi\routes_biz.py')
+    $modulos = @('monolito\app.py', 'microservicios\ms_clientes_ventas\app.py',
+                 'microservicios\ms_gestion_almacen\app.py', 'monolito\kpi\routes_biz.py')
     & $python -m py_compile @modulos
     if ($LASTEXITCODE -eq 0) {
         Write-Host "      OK los 4 modulos compilan" -ForegroundColor Green
@@ -46,7 +46,7 @@ try {
 
     # ── 2. Rastros de lo que se elimino ───────────────────────────────
     Write-Host "`n[2/3] Rastro de simbolos que deberian estar eliminados" -ForegroundColor Cyan
-    $rastro = Select-String -Path 'app.py', 'ms_clientes_ventas\app.py' `
+    $rastro = Select-String -Path 'monolito\app.py', 'microservicios\ms_clientes_ventas\app.py' `
                           -Pattern 'MAX_INTENTOS|\.seconds//60' -CaseSensitive
     if ($rastro) {
         Write-Host "      FALLA quedan rastros:" -ForegroundColor Red

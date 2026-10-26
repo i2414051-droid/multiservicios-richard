@@ -34,7 +34,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'cambiar-esta-clave-segura')
 app.config['SESSION_COOKIE_NAME'] = 'almacen_session'
 bcrypt = Bcrypt(app)
 
-UPLOAD_FOLDER = os.path.join('static', 'uploads')
+UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 

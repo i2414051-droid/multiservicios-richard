@@ -20,12 +20,17 @@ if (Test-Path $envFile) {
 if (-not $env:MYDB)  { $env:MYDB       = $env:MYSQL_DB_ALMACEN }
 if (-not $env:PORT)  { $env:PORT       = '5001' }
 
+$python = Join-Path $root '.venv\Scripts\python.exe'
+if (-not (Test-Path $python)) {
+    $python = 'python'
+}
+
 Write-Host "[MS Almacen] Puerto: $env:PORT  BD: $env:MYSQL_DB_ALMACEN"
 Write-Host "[MS Almacen] MS Ventas URL: $env:MS_VENTAS_URL"
 
-Push-Location (Join-Path $root 'ms_gestion_almacen')
+Push-Location (Join-Path $root 'microservicios\ms_gestion_almacen')
 try {
-    python app.py
+    & $python app.py
 } finally {
     Pop-Location
 }

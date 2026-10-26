@@ -20,7 +20,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'cambiar-esta-clave-segura')
 bcrypt = Bcrypt(app)
 
-UPLOAD_FOLDER = os.path.join('static', 'uploads')
+UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -1196,7 +1196,7 @@ def boleta_pdf(venta_id):
     if not pdf_bytes:
         return "Venta no encontrada"
     filename = f"boleta_{venta_id}.pdf"
-    filepath = os.path.join('static', filename)
+    filepath = os.path.join(app.root_path, 'static', filename)
     with open(filepath, 'wb') as f:
         f.write(pdf_bytes)
     return send_file(filepath, as_attachment=True)

@@ -7,13 +7,13 @@ __pycache__/
 *.pyc
 *.pyo
 .env
-static/uploads/*.jpg
-static/uploads/*.png
-static/uploads/*.webp
+**/static/uploads/*.jpg
+**/static/uploads/*.png
+**/static/uploads/*.webp
 # Comprobantes de pago de los clientes: son datos personales (nombre, monto,
 # metodo de pago) y el repositorio es publico. No se versionan.
-static/uploads/*.pdf
-static/boleta_*.pdf
+**/static/uploads/*.pdf
+**/static/boleta_*.pdf
 # Logs locales de prueba
 arrancar/*.log
 local.out

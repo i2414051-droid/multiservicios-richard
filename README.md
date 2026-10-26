@@ -1,35 +1,44 @@
 # Multiservicios Richard
 
-Sistema web de **multiservicios** (tienda en línea de materiales + gestión de almacén). El repositorio contiene dos partes:
+Sistema web de **multiservicios** (tienda en línea de materiales + gestión de almacén). El repositorio está separado en dos bloques independientes:
 
-1. **Monolito (raíz)** — es lo que se despliega en Render (el enlace público). Una sola app Flask que atiende portada, tienda, admin, boletas, comprobantes y almacén, conectada directamente a la base de datos real.
-2. **Microservicios (carpetas `ms_*`)** — la misma lógica separada en dos servicios independientes para correr localmente (ventas en `:5000` y almacén en `:5001`).
+1. **`monolito/`** — la app Flask única que se despliega en Render (el enlace público). Atiende portada, tienda, admin, boletas, comprobantes y almacén, conectada directamente a la base de datos real.
+2. **`microservicios/`** — la misma lógica separada en dos servicios para correr en local: `ms_clientes_ventas/` (ventas/tienda, `:5000`) y `ms_gestion_almacen/` (almacén, `:5001`).
 
 ---
 
 ## Estructura
 
 ```
-├── app.py                  ← Monolito (despliegue en Render via Procfile)
-├── Procfile                ← web: gunicorn app:app
-├── requirements.txt        ← Dependencias del monolito
-├── static/                 ← CSS, JS, imagenes, uploads
-├── templates/              ← HTML (portada, tienda, admin, boletas...)
-├── .env.example            ← Plantilla de variables (sin credenciales reales)
-│
-├── ms_clientes_ventas/     ← Micro: ventas + tienda (puerto 5000)
+├── monolito/                   ← App unica (lo que despliega Render)
 │   ├── app.py
-│   ├── Procfile
-│   └── templates/
-├── ms_gestion_almacen/     ← Micro: gestion de almacen (puerto 5001)
-│   ├── app.py
-│   ├── Procfile
-│   └── templates/
+│   ├── kpi/                    ← Paquete de KPIs
+│   ├── templates/              ← HTML (incluye kpi_biz/)
+│   ├── static/                 ← CSS, JS, imagenes, uploads
+│   ├── Procfile                ← web: gunicorn app:app
+│   └── requirements.txt
 │
-├── arrancar/               ← Scripts para levantar los micros en local
-│   ├── arrancar_ventas.ps1   (Python en :5000)
-│   └── arrancar_almacen.ps1  (Python en :5001)
+├── microservicios/
+│   ├── ms_clientes_ventas/     ← Micro: ventas + tienda (puerto 5000)
+│   │   ├── app.py
+│   │   ├── templates/, static/
+│   │   ├── Procfile
+│   │   ├── requirements.txt
+│   │   └── .env.example
+│   └── ms_gestion_almacen/     ← Micro: gestion de almacen (puerto 5001)
+│       ├── app.py
+│       ├── kpi/, templates/, static/
+│       ├── Procfile
+│       ├── requirements.txt
+│       └── .env.example
 │
+├── arrancar/                   ← Scripts para levantar todo en local
+│   ├── arrancar_monolito.ps1   (Python en :5000)
+│   ├── arrancar_ventas.ps1     (Python en :5000)
+│   └── arrancar_almacen.ps1    (Python en :5001)
+│
+├── .env.example                ← Plantilla compartida (sin credenciales)
+├── .env                        ← Config local (no versionado)
 └── README.md
 ```
 
@@ -75,14 +84,14 @@ APIPERU_TOKEN=tu_token_aqui
 
 ## Correr en local (microservicios)
 
-Desde la carpeta `arrancar/`:
+Desde la raíz del repo:
 
 ```powershell
 # Puerto 5000 — ventas / tienda
-.\arrancar_ventas.ps1
+.\arrancar\arrancar_ventas.ps1
 
 # Puerto 5001 — almacen
-.\arrancar_almacen.ps1
+.\arrancar\arrancar_almacen.ps1
 ```
 
 Luego abre:
@@ -102,6 +111,7 @@ Luego abre:
 ## Correr en local (monolito / como Render)
 
 ```powershell
+cd monolito
 pip install -r requirements.txt
 gunicorn app:app
 ```
@@ -109,16 +119,20 @@ gunicorn app:app
 o
 
 ```powershell
+cd monolito
 python app.py
 ```
+
+> Tambien puedes usar `.\arrancar\arrancar_monolito.ps1` desde la raiz: carga el `.env` compartido y arranca en `:5000`.
 
 ---
 
 ## Despliegue en Render
 
 1. Conecta el repo `multiservicios-richard` (rama `main`) a un **Web Service** de Render.
-2. El `Procfile` de la raíz ya incluye el puerto correcto: `web: gunicorn app:app --bind 0.0.0.0:$PORT`.
-3. En **Environment** agrega estas variables (las mismas de tu `.env`):
+2. En **Settings → Root Directory** pon `monolito` (ahi viven `app.py`, `Procfile` y `requirements.txt`).
+3. El `Procfile` de `monolito/` ya incluye el puerto correcto: `web: gunicorn app:app --bind 0.0.0.0:$PORT`.
+4. En **Environment** agrega estas variables (las mismas de tu `.env`):
    ```
    SECRET_KEY=tu_clave_secreta
    MYSQL_HOST=mysql-proyecto.alwaysdata.net
@@ -129,9 +143,11 @@ python app.py
    MYSQL_DB_ALMACEN=proyecto_gestion_almacen
    MYSQL_CHARSET=utf8mb4
    ```
-4. Guarda y despliega. El enlace quedará: `https://TU-SERVICIO.onrender.com`.
+5. Guarda y despliega. El enlace quedara: `https://TU-SERVICIO.onrender.com`.
 
-> **Importante:** sin las variables de entorno, la app intenta conectar a `localhost` y responde 500 en todas las páginas. Revisa que estén bien escritas (sin espacios) en Render → tu servicio → Environment.
+> **Importante:** sin las variables de entorno, la app intenta conectar a `localhost` y responde 500 en todas las paginas. Revisa que esten bien escritas (sin espacios) en Render → tu servicio → Environment.
+
+> **Si los microservicios tambien se despliegan:** crea un Web Service por cada uno y pon su Root Directory en `microservicios/ms_clientes_ventas` y `microservicios/ms_gestion_almacen`. No deben compartir el mismo servicio que el monolito.
 
 ## Solución de problemas (500 en producción)
 
@@ -154,11 +170,11 @@ Si el sitio responde *"Ocurrió un error interno. Revisa los logs."*, es un erro
 - BD almacen: `proyecto_gestion_almacen` (productos, ingresos, detalle_ingreso, salidas, detalle_salida, proveedores, productos_para_pedir, movimientos_stock, historial_stock)
 
 > Tablas retiradas (respaldo en `tablas_eliminadas_respaldo_*.sql`): `clientes`, `cancelacion`, `estados_cliente`.
-> El estado de cada cliente vive en `usuarios.estado`; el catálogo de estados válidos está en el dict `ESTADOS_CLIENTE` de `app.py` (la tabla `estados_cliente` se eliminó: no se leía en ningún request y el app la repoblaba sola al arrancar).
+> El estado de cada cliente vive en `usuarios.estado`; el catálogo de estados válidos está en el dict `ESTADOS_CLIENTE` de `monolito/app.py` (la tabla `estados_cliente` se eliminó: no se leía en ningún request y el app la repoblaba sola al arrancar).
 
 ---
 
-## Modulo de KPIs (`kpi/`)
+## Modulo de KPIs (`monolito/kpi/`)
 
 Panel en `/panel` (boton **KPIs** de Accesos Rapidos en `/dashboard`). Se recalcula
 **en vivo** en cada peticion y se refresca solo cada 30 s.
@@ -167,12 +183,12 @@ Panel en `/panel` (boton **KPIs** de Accesos Rapidos en `/dashboard`). Se recalc
 
 | Capa | Pieza | Que hace |
 |---|---|---|
-| Back-end | `kpi/repository.py` | Todo el SQL. Lee de las 2 bases (`ventas` de una, `almacen.productos` de la otra) |
-| Back-end | `kpi/service.py` | Formulas de los indicadores y semaforo |
-| Back-end | `kpi/settings.py` | Umbrales y catalogos (lo unico que hay que tocar para mover un objetivo) |
-| Back-end | `kpi/schema.py` | Crea `kpi_incidencias` y anade `created_at` a `carrito` y `bloqueos_ip` |
-| Front-end | `templates/kpi_biz/` | Panel (5 secciones) y macros de las tarjetas |
-| Front-end | `static/js/kpi-biz-dashboard.js` | Cambio de periodo y registro de incidencias sin recargar |
+| Back-end | `monolito/kpi/repository.py` | Todo el SQL. Lee de las 2 bases (`ventas` de una, `almacen.productos` de la otra) |
+| Back-end | `monolito/kpi/service.py` | Formulas de los indicadores y semaforo |
+| Back-end | `monolito/kpi/settings.py` | Umbrales y catalogos (lo unico que hay que tocar para mover un objetivo) |
+| Back-end | `monolito/kpi/schema.py` | Crea `kpi_incidencias` y anade `created_at` a `carrito` y `bloqueos_ip` |
+| Front-end | `monolito/templates/kpi_biz/` | Panel (5 secciones) y macros de las tarjetas |
+| Front-end | `monolito/static/js/kpi-biz-dashboard.js` | Cambio de periodo y registro de incidencias sin recargar |
 
 ### De donde sale cada dato
 
@@ -227,7 +243,7 @@ GET    /api/kpi-biz/incidencias-recentes
 
 ---
 
-### Registro del recorrido del cliente (`kpi/registro.py`)
+### Registro del recorrido del cliente (`monolito/kpi/registro.py`)
 
 El sistema no registraba ninguna interaccion del cliente salvo el carrito. Con este
 modulo queda el rastro de lo que hace, para poder medir despues:

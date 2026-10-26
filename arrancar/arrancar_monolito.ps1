@@ -1,12 +1,10 @@
 # ═══════════════════════════════════════════════════════════════════
-# Arranca el MONOLITO de la raiz (lo que Render despliega) - lee el .env
+# Arranca el MONOLITO desde monolito/ (lo que Render despliega) - lee el .env
 # USO: PowerShell  >  .\arrancar\arrancar_monolito.ps1
 # ═══════════════════════════════════════════════════════════════════
-# Por que existe: app.py NO lee el .env por si mismo. En Render funciona
-# porque el panel inyecta las variables en el entorno del proceso, pero en
-# local, sin esto, la app caeria en los defaults (localhost, root, sin
-# password) y daria 500 en todas las paginas. Los otros dos scripts de esta
-# carpeta ya hacen esta carga; aqui se hace para el monolito.
+# Este script carga el .env de la raiz en el proceso y arranca la app desde
+# monolito/. En Render las variables las inyecta el panel; en local, esto
+# garantiza que el monolito use las credenciales reales.
 # ───────────────────────────────────────────────────────────────────
 $ErrorActionPreference = 'Stop'
 $root    = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -46,7 +44,7 @@ Write-Host "[Monolito] BD almacen: $env:MYSQL_DB_ALMACEN"
 Write-Host "[Monolito] DEBUG_ERRORS: $env:DEBUG_ERRORS"
 Write-Host "[Monolito] http://localhost:$env:PORT"
 
-Push-Location $root
+Push-Location (Join-Path $root 'monolito')
 try {
     & $python app.py
 }

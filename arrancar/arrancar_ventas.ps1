@@ -29,7 +29,7 @@ if (-not (Test-Path $python)) {
 }
 
 Write-Host "[MS Ventas] Puerto: $env:PORT   MS Almacen URL: $env:MS_ALMACEN_URL"
-Push-Location (Join-Path $root 'ms_clientes_ventas')
+Push-Location (Join-Path $root 'microservicios\ms_clientes_ventas')
 try {
     & $python app.py
 } finally {

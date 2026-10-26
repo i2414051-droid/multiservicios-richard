@@ -21,8 +21,12 @@ if (-not (Test-Path $python)) {
 Write-Host "[Instalar] Actualizando pip/setuptools/wheel ..." -ForegroundColor Cyan
 & $python -m pip install --upgrade pip setuptools wheel
 
-Write-Host "[Instalar] Instalando requirements.txt ..." -ForegroundColor Cyan
-& $python -m pip install -r (Join-Path $root 'requirements.txt')
+Write-Host "[Instalar] Instalando requirements del monolito y microservicios ..." -ForegroundColor Cyan
+foreach ($req in @('monolito\requirements.txt',
+                   'microservicios\ms_clientes_ventas\requirements.txt',
+                   'microservicios\ms_gestion_almacen\requirements.txt')) {
+    & $python -m pip install -r (Join-Path $root $req)
+}
 
 # ── 3. Archivo .env ────────────────────────────────────────────────
 $envFile = Join-Path $root '.env'
