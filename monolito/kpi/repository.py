@@ -642,6 +642,8 @@ def fetch_snapshot(desde, hasta, prev_desde, prev_hasta, dias):
     salida = {
         'categorias': productos['categorias'],
         'ahora': escalares['ahora'],
+        # El inventario es una foto del momento, no un dato del periodo.
+        'inventario': productos.get('resumen') or {},
     }
 
     for clave, p_desde, p_hasta in (('actual', desde, hasta),
@@ -654,6 +656,7 @@ def fetch_snapshot(desde, hasta, prev_desde, prev_hasta, dias):
             'ventas': v['ventas'],
             'cancel_motivos': v['cancel_motivos'],
             'compras_cliente': v['compras_cliente'],
+            'entregas': v['entregas'],
             'repuestos': productos[clave]['repuestos'],
             'doh': productos[clave]['doh'],
             'categorias': productos['categorias'],
@@ -662,6 +665,78 @@ def fetch_snapshot(desde, hasta, prev_desde, prev_hasta, dias):
             'incidencias': incidencias[clave],
         }
     return salida
+
+
+ESTADOS_ENTREGA = ('pendiente', 'en camino', 'entregado', 'cancelado')
+
+
+def _normalizar_estado_entrega(fila):
+    """Estado de entrega de una venta, con respaldo en `ventas.estado`.
+
+    La fuente principal es `seguimiento_entregas`; si la venta todavia no
+    tiene seguimiento se usa su estado comercial. Una venta cancelada siempre
+    queda cancelada, aunque su seguimiento se haya quedado atras.
+    """
+    estado_venta = (fila.get('estado') or '').strip().lower()
+    if estado_venta == 'cancelado':
+        return 'cancelado'
+
+    estado = (fila.get('estado_entrega') or '').strip().lower().replace('_', ' ')
+    if estado == 'en proceso':
+        estado = 'pendiente'
+    if estado in ESTADOS_ENTREGA:
+        return estado
+    if estado_venta == 'entregado':
+        return 'entregado'
+    return 'pendiente'
+
+
+def _armar_entregas(filas):
+    """Agrupa las ventas por estado de entrega para la tabla de la seccion 1.
+
+    `monto_vendido` excluye cancelados: una venta cancelada no es ingreso.
+    `monto_en_espera` suma pendiente + en camino, que es el dinero que aun no
+    se entrega. Los cancelados se devuelven aparte para poder mostrarlos como
+    perdida sin ensuciar el total vendido.
+    """
+    acumulado = {estado: {'n': 0, 'monto': 0.0} for estado in ESTADOS_ENTREGA}
+    total = 0
+    sin_seguimiento = 0
+
+    for fila in filas or []:
+        estado = _normalizar_estado_entrega(fila)
+        monto = _f(fila.get('total'))
+        acumulado[estado]['n'] += 1
+        acumulado[estado]['monto'] += monto
+        total += 1
+        if not fila.get('tiene_seguimiento'):
+            sin_seguimiento += 1
+
+    filas_estado = []
+    for estado in ESTADOS_ENTREGA:
+        n = acumulado[estado]['n']
+        filas_estado.append({
+            'estado': estado,
+            'n': n,
+            'monto': round(acumulado[estado]['monto'], 2),
+            'pct': round(n / total * 100.0, 1) if total else 0.0,
+        })
+
+    monto_entregado = round(acumulado['entregado']['monto'], 2)
+    monto_en_espera = round(
+        acumulado['pendiente']['monto'] + acumulado['en camino']['monto'], 2)
+    monto_cancelado = round(acumulado['cancelado']['monto'], 2)
+
+    return {
+        'filas': filas_estado,
+        'pedidos_total': total,
+        'pedidos_validos': total - acumulado['cancelado']['n'],
+        'monto_vendido': round(monto_entregado + monto_en_espera, 2),
+        'monto_entregado': monto_entregado,
+        'monto_en_espera': monto_en_espera,
+        'monto_cancelado': monto_cancelado,
+        'sin_seguimiento': sin_seguimiento,
+    }
 
 
 def _armar_ventas(filas):
@@ -703,6 +778,7 @@ def _armar_ventas(filas):
             for motivo, n in sorted(motivos.items(), key=lambda kv: (-kv[1], kv[0]))
         ],
         'compras_cliente': compras,
+        'entregas': _armar_entregas(filas),
     }
 
 
@@ -714,15 +790,27 @@ def _ventas_dos_periodos(desde, hasta, prev_desde, prev_hasta):
             """SELECT 'actual' AS periodo, v.estado AS estado,
                       v.cliente_id AS cliente_id, v.fecha AS fecha,
                       v.total AS total,
-                      COALESCE(c.motivo_codigo,'sin_motivo') AS motivo
+                      COALESCE(c.motivo_codigo,'sin_motivo') AS motivo,
+                      COALESCE(s.estado,'') AS estado_entrega,
+                      (s.id IS NOT NULL) AS tiene_seguimiento
                FROM ventas v
                LEFT JOIN cancelaciones c ON c.venta_id = v.id
+               LEFT JOIN seguimiento_entregas s ON s.id = (
+                   SELECT MAX(s2.id) FROM seguimiento_entregas s2
+                   WHERE s2.venta_id = v.id
+               )
                WHERE v.fecha >= %s AND v.fecha < %s
                UNION ALL
                SELECT 'anterior', v.estado, v.cliente_id, v.fecha, v.total,
-                      COALESCE(c.motivo_codigo,'sin_motivo')
+                      COALESCE(c.motivo_codigo,'sin_motivo'),
+                      COALESCE(s.estado,''),
+                      (s.id IS NOT NULL)
                FROM ventas v
                LEFT JOIN cancelaciones c ON c.venta_id = v.id
+               LEFT JOIN seguimiento_entregas s ON s.id = (
+                   SELECT MAX(s2.id) FROM seguimiento_entregas s2
+                   WHERE s2.venta_id = v.id
+               )
                WHERE v.fecha >= %s AND v.fecha < %s""",
             (desde, hasta, prev_desde, prev_hasta),
         )
@@ -733,6 +821,30 @@ def _ventas_dos_periodos(desde, hasta, prev_desde, prev_hasta):
     for row in filas:
         salida[row['periodo']].append(row)
     return salida
+
+
+def fetch_entregas_periodo(desde, hasta):
+    """Respaldo del resumen de entregas cuando no se usa el snapshot rapido."""
+    cur = get_cursor()
+    try:
+        cur.execute(
+            """SELECT v.estado AS estado, v.total AS total,
+                      COALESCE(s.estado,'') AS estado_entrega,
+                      (s.id IS NOT NULL) AS tiene_seguimiento
+               FROM ventas v
+               LEFT JOIN seguimiento_entregas s ON s.id = (
+                   SELECT MAX(s2.id) FROM seguimiento_entregas s2
+                   WHERE s2.venta_id = v.id
+               )
+               WHERE v.fecha >= %s AND v.fecha < %s""",
+            (desde, hasta),
+        )
+        return _armar_entregas(cur.fetchall())
+    except Exception as exc:
+        current_app.logger.warning('KPI entregas fallo: %s', exc)
+        return _armar_entregas([])
+    finally:
+        cur.close()
 
 
 def _productos_dos_periodos(desde, hasta, prev_desde, prev_hasta):
@@ -795,7 +907,78 @@ def _productos_dos_periodos(desde, hasta, prev_desde, prev_hasta):
                 doh[categoria]['stock'] += _i(r['stock'])
                 doh[categoria]['unidades'] += unidades
                 doh[categoria]['existe'] = True
+
+    resumen = {
+        'total': len(filas),
+        'activos': 0,
+        'bajo_stock': 0,
+        'agotados': 0,
+        'bajo_stock_lista': [],
+    }
+    for r in filas:
+        if (r['estado'] or '').strip().lower() != 'activo':
+            continue
+        stock = _i(r['stock'])
+        resumen['activos'] += 1
+        if stock <= 0:
+            resumen['agotados'] += 1
+        if stock <= 5:
+            resumen['bajo_stock'] += 1
+            resumen['bajo_stock_lista'].append({
+                'id': _i(r['id']),
+                'nombre': r['nombre'],
+                'categoria': r['categoria'] or '',
+                'stock': stock,
+            })
+    resumen['bajo_stock_lista'].sort(
+        key=lambda p: (p['stock'], (p['nombre'] or '').casefold()))
+    resumen['bajo_stock_lista'] = resumen['bajo_stock_lista'][:5]
+    salida['resumen'] = resumen
     return salida
+
+
+def fetch_inventario_resumen():
+    """Resumen actual del catalogo para la seccion 2 (respaldo del snapshot)."""
+    almacen = almacen_db()
+    cur = get_cursor()
+    try:
+        cur.execute(
+            f"""SELECT id, nombre, categoria, stock, COALESCE(estado,'activo') AS estado
+                FROM {almacen}.productos"""
+        )
+        filas = cur.fetchall()
+    except Exception as exc:
+        current_app.logger.warning('KPI inventario fallo: %s', exc)
+        return {}
+    finally:
+        cur.close()
+
+    resumen = {
+        'total': len(filas),
+        'activos': 0,
+        'bajo_stock': 0,
+        'agotados': 0,
+        'bajo_stock_lista': [],
+    }
+    for r in filas:
+        if (r['estado'] or '').strip().lower() != 'activo':
+            continue
+        stock = _i(r['stock'])
+        resumen['activos'] += 1
+        if stock <= 0:
+            resumen['agotados'] += 1
+        if stock <= 5:
+            resumen['bajo_stock'] += 1
+            resumen['bajo_stock_lista'].append({
+                'id': _i(r['id']),
+                'nombre': r['nombre'],
+                'categoria': r['categoria'] or '',
+                'stock': stock,
+            })
+    resumen['bajo_stock_lista'].sort(
+        key=lambda p: (p['stock'], (p['nombre'] or '').casefold()))
+    resumen['bajo_stock_lista'] = resumen['bajo_stock_lista'][:5]
+    return resumen
 
 
 def _escalares_dos_periodos(desde, hasta, prev_desde, prev_hasta):

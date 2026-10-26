@@ -97,7 +97,26 @@
         var nuevo = doc.getElementById('kpiBizPanel');
         if (!nuevo) throw new Error('El servidor no devolvio el panel');
 
+        // El panel se reemplaza entero al refrescar. Guardamos que detalles
+        // estaban abiertos (y cuales cerrados) para no cerrarlos de golpe.
+        var estadosDetalle = {};
+        Array.prototype.forEach.call(
+          panel.querySelectorAll('details[data-detalle]'),
+          function (d) {
+            estadosDetalle[d.getAttribute('data-detalle')] = d.open;
+          }
+        );
+
         panel.innerHTML = nuevo.innerHTML;
+        Array.prototype.forEach.call(
+          panel.querySelectorAll('details[data-detalle]'),
+          function (d) {
+            var clave = d.getAttribute('data-detalle');
+            if (Object.prototype.hasOwnProperty.call(estadosDetalle, clave)) {
+              d.open = estadosDetalle[clave];
+            }
+          }
+        );
         ultimaCarga = Date.now();
 
         form = document.getElementById('kpiBizFiltros');

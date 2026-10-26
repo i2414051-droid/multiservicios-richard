@@ -207,13 +207,24 @@ Panel en `/panel` (boton **KPIs** de Accesos Rapidos en `/dashboard`). Se recalc
 | Indicador | Tabla |
 |---|---|
 | Volumen de ventas / Ingresos brutos | `ventas` |
+| Estado de entregas (seccion 1) | `seguimiento_entregas` (LEFT JOIN `ventas`) |
 | Cancelacion por error del cliente / Indice de motivos | `cancelaciones` (LEFT JOIN `ventas`) |
 | Frecuencia de compra por ciclo | `ventas` agrupado por `cliente_id` |
 | Quiebre de stock / Dias de inventario | `almacen.productos` + `detalle_venta` |
-| Devoluciones por incompatibilidad | `kpi_incidencias` (registro manual) |
+| Inventario, stock bajo y agotados | `almacen.productos` |
+| Devoluciones por incompatibilidad / Unidades devueltas | `kpi_incidencias` (registro manual) |
 | Bloqueo de cuentas / IPs bloqueadas | `intentos_usuario`, `bloqueos_ip` |
 | Intentos fallidos de login | `intentos_usuario` |
 | Abandono de carrito / Motivos | `carrito`, `kpi_incidencias` |
+
+> Las ventas nuevas crean su fila en `seguimiento_entregas` al confirmar la compra.
+> Las ventas anteriores se sincronizan con un backfill idempotente al arrancar la app.
+> Tambien se puede ejecutar a mano (primero sin `--aplicar`, que solo simula):
+>
+> ```powershell
+> .venv\Scripts\python.exe .\arrancar\backfill_entregas.py
+> .venv\Scripts\python.exe .\arrancar\backfill_entregas.py --aplicar
+> ```
 
 ### El reloj: manda la base de datos
 

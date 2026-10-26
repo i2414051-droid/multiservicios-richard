@@ -10,7 +10,7 @@
   almacen, seguridad, carritos); si una no llega, la seccion se pinta vacia en
   vez de romper el panel.
 #}
-{% from 'kpi_biz/macros/kpi_card.html' import tarjeta, variacion, tabla_detalle, tabla_motivos, vacio, semaforo_badge %}
+{% from 'kpi_biz/macros/kpi_card.html' import tarjeta, variacion, tabla_detalle, tabla_motivos, vacio, semaforo_badge, detalle_desplegable %}
 
 {% if kpis_biz %}
 {% set k = kpis_biz %}
@@ -102,8 +102,7 @@
         {{ tarjeta({
             'titulo': 'Ingresos Brutos',
             'icono': 'bi-currency-dollar',
-            'valor': s1.ingresos.valor,
-            'unidad': 'S/',
+            'valor': ('S/ ' ~ '%.2f'|format(s1.ingresos.valor)) if s1.ingresos.valor is not none else none,
             'pie': s1.ingresos.pie,
             'variacion': s1.ingresos.variacion,
             'mejor_si_sube': s1.ingresos.mejor_si_sube,
@@ -129,7 +128,101 @@
             'mejor_si_sube': s1.frecuencia_compra.mejor_si_sube,
             'semaforo': s1.frecuencia_compra.semaforo,
         }) }}
+        {{ tarjeta({
+            'titulo': 'Ventas Entregadas',
+            'icono': 'bi-check2-circle',
+            'valor': s1.ventas_exitosas.valor,
+            'unidad': 'pedidos',
+            'pie': s1.ventas_exitosas.pie,
+            'variacion': s1.ventas_exitosas.variacion,
+            'mejor_si_sube': s1.ventas_exitosas.mejor_si_sube,
+            'semaforo': s1.ventas_exitosas.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Monto Entregado',
+            'icono': 'bi-cash-coin',
+            'valor': s1.monto_entregado.valor,
+            'pie': s1.monto_entregado.pie,
+            'variacion': s1.monto_entregado.variacion,
+            'mejor_si_sube': s1.monto_entregado.mejor_si_sube,
+            'semaforo': s1.monto_entregado.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Monto en Espera',
+            'icono': 'bi-hourglass-split',
+            'valor': s1.monto_en_espera.valor,
+            'pie': s1.monto_en_espera.pie,
+            'variacion': s1.monto_en_espera.variacion,
+            'mejor_si_sube': s1.monto_en_espera.mejor_si_sube,
+            'semaforo': s1.monto_en_espera.semaforo,
+        }) }}
+        {{ tarjeta({
+            'titulo': 'Perdida por Cancelaciones',
+            'icono': 'bi-x-octagon',
+            'valor': s1.perdida_cancelacion.valor,
+            'pie': s1.perdida_cancelacion.pie,
+            'variacion': s1.perdida_cancelacion.variacion,
+            'mejor_si_sube': s1.perdida_cancelacion.mejor_si_sube,
+            'semaforo': s1.perdida_cancelacion.semaforo,
+        }) }}
       </div>
+
+      {% set e1 = s1.entregas|default({}, true) %}
+      {% if e1.filas %}
+      {% call detalle_desplegable('Estado de entregas', true, 'bi-truck') %}
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead>
+              <tr>
+                <th>Estado</th>
+                <th class="num">Pedidos</th>
+                <th class="num">Monto</th>
+                <th class="num">% de pedidos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in e1.filas %}
+              <tr>
+                <td>
+                  {% if f.estado == 'entregado' %}
+                    <span class="kpi-biz-estado is-ok"><i class="bi bi-check-circle"></i> {{ f.etiqueta }}</span>
+                  {% elif f.estado == 'en camino' %}
+                    <span class="kpi-biz-estado is-aviso"><i class="bi bi-truck"></i> {{ f.etiqueta }}</span>
+                  {% elif f.estado == 'cancelado' %}
+                    <span class="kpi-biz-estado is-critico"><i class="bi bi-x-circle"></i> {{ f.etiqueta }}</span>
+                  {% else %}
+                    <span class="kpi-biz-estado is-sin-datos"><i class="bi bi-clock"></i> {{ f.etiqueta }}</span>
+                  {% endif %}
+                </td>
+                <td class="num">{{ f.n }}</td>
+                <td class="num">S/ {{ '%.2f'|format(f.monto) }}</td>
+                <td class="num">{{ f.pct }}%</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr class="kpi-biz-tabla-total">
+                <td>Total</td>
+                <td class="num">{{ e1.pedidos_total }}</td>
+                <td class="num">S/ {{ '%.2f'|format(e1.monto_vendido) }}</td>
+                <td class="num">100%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p class="kpi-biz-nota kpi-biz-nota-tabla">
+          El total vendido (<strong>S/ {{ '%.2f'|format(e1.monto_vendido) }}</strong>)
+          no incluye los <strong>S/ {{ '%.2f'|format(e1.monto_cancelado) }}</strong>
+          cancelados. Pedidos validos: <strong>{{ e1.pedidos_validos }}</strong>
+          de <strong>{{ e1.pedidos_total }}</strong>.
+          {% if e1.sin_seguimiento %}
+            <br>{{ e1.sin_seguimiento }} venta(s) sin seguimiento se contaron por su estado comercial.
+          {% endif %}
+        </p>
+      {% endcall %}
+      {% else %}
+        {{ vacio('bi-truck', 'Sin ventas en el periodo') }}
+      {% endif %}
 
       {{ tabla_detalle('Detalle de ventas del periodo', s1.volumen.detalle) }}
       {{ tabla_detalle('Detalle de frecuencia de compra', s1.frecuencia_compra.detalle) }}
@@ -189,6 +282,48 @@
             'semaforo': s2.devoluciones_incompat.semaforo,
         }) }}
       </div>
+
+      {% set inv = s2.resumen_inventario|default({}, true) %}
+      {% if inv %}
+      {% call detalle_desplegable('Resumen de inventario y stock bajo', true, 'bi-box-seam') %}
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead><tr><th>Indicador</th><th class="num">Valor</th></tr></thead>
+            <tbody>
+              <tr><td>Productos activos</td><td class="num">{{ inv.activos }}</td></tr>
+              <tr><td>Productos con stock bajo (stock &le; 5)</td><td class="num">{{ inv.bajo_stock }}</td></tr>
+              <tr><td>Productos agotados (stock &le; 0)</td><td class="num">{{ inv.agotados }}</td></tr>
+              <tr><td>Unidades devueltas registradas</td><td class="num">{{ inv.devoluciones_unidades }}</td></tr>
+              <tr><td>Casos de devolucion registrados</td><td class="num">{{ inv.devoluciones_casos }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        {% if s2.bajo_stock_lista %}
+        <h6 class="kpi-biz-subtitulo">Top 5 productos con menor stock</h6>
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead>
+              <tr><th>Producto</th><th>Categoria</th><th class="num">Stock</th></tr>
+            </thead>
+            <tbody>
+              {% for p in s2.bajo_stock_lista %}
+              <tr>
+                <td>{{ p.nombre }}</td>
+                <td>{{ p.categoria or '—' }}</td>
+                <td class="num">
+                  <span class="kpi-biz-stock {{ 'is-critico' if p.stock <= 0 else 'is-aviso' }}">{{ p.stock }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+          {{ vacio('bi-check-circle', 'Sin productos activos con stock bajo') }}
+        {% endif %}
+      {% endcall %}
+      {% endif %}
 
       {{ tabla_detalle('Detalle de quiebre de repuestos', s2.quiebre_repuestos.detalle) }}
       {{ tabla_detalle('Detalle de dias de inventario', (s2.doh_accesorios.detalle or []) + (s2.doh_repuestos.detalle or [])) }}
@@ -323,8 +458,7 @@
       </form>
 
       {% if k.incidencias_recientes %}
-      <div class="mt-4">
-        <h6 class="text-muted">Ultimas incidencias registradas</h6>
+      {% call detalle_desplegable('Ultimas incidencias registradas', false, 'bi-clock-history') %}
         <div class="table-responsive">
           <table class="kpi-biz-tabla">
             <thead>
@@ -352,7 +486,7 @@
             </tbody>
           </table>
         </div>
-      </div>
+      {% endcall %}
       {% else %}
         {{ vacio('bi-journal-x', 'Todavia no hay incidencias registradas') }}
       {% endif %}

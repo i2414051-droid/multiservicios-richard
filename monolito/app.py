@@ -41,6 +41,20 @@ import requests
 from kpi import init_kpi_biz
 from kpi import registro as kpi_reg
 
+
+def _invalidar_cache_kpi():
+    """Fuerza a que el panel refleje un cambio de venta/entrega al instante.
+
+    El panel guarda el snapshot en cache. Se invalida desde las rutas que
+    escriben ventas o seguimiento_entregas, no desde el refresco automatico.
+    """
+    try:
+        from kpi.routes_biz import invalidar_cache
+        invalidar_cache()
+    except Exception:
+        # Un fallo de cache nunca debe tumbar la operacion de negocio.
+        pass
+
 logging.basicConfig(level=logging.ERROR)
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -658,6 +672,32 @@ def _deduplicar_intentos(cur):
     return len(sobrantes)
 
 
+def _backfill_entregas(cur):
+    """Crea seguimiento para ventas que aun no lo tengan.
+
+    Es idempotente: el LEFT JOIN solo selecciona ventas sin ninguna fila en
+    `seguimiento_entregas`. Se ejecuta una vez al arrancar para que las ventas
+    anteriores a esta funcionalidad aparezcan en /entregas y en el KPI.
+    """
+    cur.execute("""
+        INSERT INTO seguimiento_entregas
+            (venta_id, estado, direccion_envio, fecha_entrega, notas)
+        SELECT v.id,
+               CASE v.estado
+                   WHEN 'entregado' THEN 'entregado'
+                   WHEN 'cancelado' THEN 'cancelado'
+                   ELSE 'pendiente'
+               END,
+               v.direccion_envio,
+               CASE WHEN v.estado = 'entregado' THEN v.fecha ELSE NULL END,
+               'Seguimiento creado al sincronizar ventas existentes.'
+        FROM ventas v
+        LEFT JOIN seguimiento_entregas s ON s.venta_id = v.id
+        WHERE s.id IS NULL
+    """)
+    return cur.rowcount
+
+
 def init_db():
     global ALMACEN_DB
     try:
@@ -960,6 +1000,19 @@ def _init_db_inner():
 
         mysql.connection.commit()
         app.logger.info("[init_db] Tablas BD principal OK")
+
+        # Sincroniza ventas antiguas con /entregas. No crea tablas ni cambia
+        # estados: solo inserta el seguimiento que falte.
+        try:
+            creados = _backfill_entregas(cur)
+            mysql.connection.commit()
+            if creados:
+                app.logger.info(
+                    "[init_db] Seguimiento creado para %s venta(s) existente(s)",
+                    creados)
+        except Exception as e:
+            app.logger.warning(
+                "[init_db] No se pudo sincronizar seguimiento de ventas: %s", e)
 
         # ── Base de datos de Gestión de Almacén ─────────────────────────
         cur = mysql.connection.cursor()
@@ -2910,6 +2963,7 @@ def actualizar_estado_venta(venta_id):
         restaurar_stock_venta(cur, venta_id)
         registrar_cancelacion(cur, venta_id, 'otro', 'Cancelado por administrador', 'admin')
     mysql.connection.commit()
+    _invalidar_cache_kpi()
     cur.close()
     flash(f'Venta #{venta_id} actualizada a "{estado}".', 'success')
     return redirect('/historial-compras')
@@ -3645,6 +3699,7 @@ def crear_entrega(venta_id):
     cur.execute("INSERT INTO seguimiento_entregas (venta_id, estado, direccion_envio, fecha_estimada, notas) VALUES (%s,'pendiente',%s,%s,%s)",
                 (venta_id, direccion, fecha_est, notas))
     mysql.connection.commit()
+    _invalidar_cache_kpi()
     cur.close()
     flash(f'Entrega para venta #{venta_id} creada.', 'success')
     return redirect('/entregas')
@@ -3700,6 +3755,7 @@ def actualizar_entrega(id):
         restaurar_stock_venta(cur, venta_id)
         registrar_cancelacion(cur, venta_id, 'otro', 'Cancelado por administrador', 'admin')
     mysql.connection.commit()
+    _invalidar_cache_kpi()
     cur.close()
     flash('Estado de entrega actualizado.', 'success')
     return redirect('/entregas')
@@ -3711,6 +3767,7 @@ def eliminar_entrega(id):
     cur = mysql.connection.cursor()
     cur.execute("DELETE FROM seguimiento_entregas WHERE id=%s", (id,))
     mysql.connection.commit()
+    _invalidar_cache_kpi()
     cur.close()
     flash('Seguimiento de entrega eliminado.', 'success')
     return redirect('/entregas')
@@ -3970,6 +4027,7 @@ def agregar_productos_entrega(entrega_id):
             cur.execute("INSERT INTO entrega_productos (entrega_id, producto_id, cantidad) VALUES (%s,%s,%s)",
                         (entrega_id, pid, cant))
     mysql.connection.commit()
+    _invalidar_cache_kpi()
     cur.close()
     flash('Productos de entrega actualizados.', 'success')
     return redirect('/entregas')
@@ -3991,7 +4049,7 @@ def asignar_entrega(venta_id):
         WHERE d.venta_id=%s
     """.format(ALMACEN_DB), (venta_id,))
     productos_venta = cur.fetchall()
-    cur.execute("SELECT id, direccion, distrito, referencia FROM direcciones WHERE usuario_id=%s", (venta['documento'] or ''))
+    cur.execute("SELECT id, direccion, distrito, referencia FROM direcciones WHERE usuario_id=%s", (venta['documento'] or '',))
     direcciones = cur.fetchall()
 
     if request.method == 'POST':
@@ -4001,9 +4059,28 @@ def asignar_entrega(venta_id):
         direccion = request.form.get('direccion_envio', '')
         fecha_est = request.form.get('fecha_estimada') or None
         notas = request.form.get('notas', '')
-        cur.execute("INSERT INTO seguimiento_entregas (venta_id, estado, direccion_envio, fecha_estimada, notas) VALUES (%s,'pendiente',%s,%s,%s)",
-                    (venta_id, direccion, fecha_est, notas))
-        entrega_id = cur.lastrowid
+        # Una venta ya nace con seguimiento. Si existe, se actualiza en vez
+        # de insertar otra fila: el KPI y /entregas deben ver una sola.
+        cur.execute("""SELECT id FROM seguimiento_entregas
+                       WHERE venta_id=%s ORDER BY id DESC LIMIT 1""",
+                    (venta_id,))
+        existente = cur.fetchone()
+        if existente:
+            entrega_id = existente['id']
+            cur.execute("""UPDATE seguimiento_entregas
+                           SET direccion_envio=%s, fecha_estimada=%s, notas=%s
+                           WHERE id=%s""",
+                        (direccion, fecha_est, notas, entrega_id))
+            cur.execute("DELETE FROM entrega_productos WHERE entrega_id=%s",
+                        (entrega_id,))
+            accion = 'actualizada'
+        else:
+            cur.execute("""INSERT INTO seguimiento_entregas
+                           (venta_id, estado, direccion_envio, fecha_estimada, notas)
+                           VALUES (%s,'pendiente',%s,%s,%s)""",
+                        (venta_id, direccion, fecha_est, notas))
+            entrega_id = cur.lastrowid
+            accion = 'creada'
         producto_ids = request.form.getlist('producto_id[]')
         cantidades = request.form.getlist('cantidad[]')
         for i in range(len(producto_ids)):
@@ -4016,8 +4093,9 @@ def asignar_entrega(venta_id):
                 cur.execute("INSERT INTO entrega_productos (entrega_id, producto_id, cantidad) VALUES (%s,%s,%s)",
                             (entrega_id, pid, cant))
         mysql.connection.commit()
+        _invalidar_cache_kpi()
         cur.close()
-        flash(f'Entrega #{entrega_id} creada para venta #{venta_id}.', 'success')
+        flash(f'Entrega #{entrega_id} {accion} para venta #{venta_id}.', 'success')
         return redirect('/entregas')
 
     cur.close()
@@ -4372,6 +4450,13 @@ def procesar_compra():
             VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo, nombres, apellidos, telefono, correo, notas_entrega))
         venta_id = cur.lastrowid
+        # Toda venta nace con seguimiento para que /entregas y el KPI de la
+        # seccion 1 lean exactamente la misma fuente desde el primer minuto.
+        cur.execute("""INSERT INTO seguimiento_entregas
+            (venta_id, estado, direccion_envio, notas)
+            VALUES(%s, 'pendiente', %s, %s)""",
+            (venta_id, direccion_envio,
+             'Seguimiento creado automaticamente al registrar la venta.'))
         for item in items:
             cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
                         (venta_id, item['id'], item['cantidad'], item['precio']))
@@ -4396,6 +4481,7 @@ def procesar_compra():
             (nombres, apellidos, telefono, doc_tipo, doc_numero, user_id))
 
         mysql.connection.commit()
+        _invalidar_cache_kpi()
 
         # KPI: la compra se completo. Se cierra la sesion de compra y se
         # marcan las busquedas de esta visita como convertidas, que es lo que
@@ -4769,6 +4855,7 @@ def cancelar_pedido(venta_id):
     # Registrar motivo de cancelación
     registrar_cancelacion(cur, venta_id, motivo, detalle or None, 'cliente')
     mysql.connection.commit()
+    _invalidar_cache_kpi()
     cur.close()
     flash(f'Pedido #{venta_id} cancelado. El stock fue devuelto y el monto actualizado.', 'success')
     return redirect('/mis-entregas')

@@ -90,6 +90,27 @@
 
 
 {#
+  Contenedor desplegable comun para los detalles de cada seccion.
+
+  Usa <details>/<summary> nativo: funciona sin JavaScript, conserva la
+  accesibilidad del teclado y no depende de Bootstrap. El atributo
+  data-detalle permite que kpi-biz-dashboard.js recuerde que bloques estaban
+  abiertos cuando el panel se refresca.
+#}
+{% macro detalle_desplegable(titulo, abierto=false, icono='bi-list-ul') %}
+<details class="kpi-biz-detalle" data-detalle="{{ titulo }}"{% if abierto %} open{% endif %}>
+  <summary>
+    <span><i class="bi {{ icono }}"></i>{{ titulo }}</span>
+    <i class="bi bi-chevron-down kpi-biz-detalle-flecha"></i>
+  </summary>
+  <div class="kpi-biz-detalle-cuerpo">
+    {{ caller() }}
+  </div>
+</details>
+{% endmacro %}
+
+
+{#
   Tabla de detalle simple (etiqueta / valor).
 
   Se usa debajo de cada seccion para mostrar el desglose que no cabe en una
@@ -97,21 +118,26 @@
 #}
 {% macro tabla_detalle(titulo, filas) %}
   {% if filas %}
-  <div class="mt-4">
-    <h6 class="text-muted">{{ titulo }}</h6>
-    <div class="table-responsive">
-      <table class="kpi-biz-tabla">
-        <thead><tr><th>Detalle</th><th class="num">Valor</th></tr></thead>
-        <tbody>
-          {% for etiqueta, valor in filas %}
-            {% if valor %}
-            <tr><td>{{ etiqueta }}</td><td class="num">{{ valor }}</td></tr>
-            {% endif %}
-          {% endfor %}
-        </tbody>
-      </table>
+  <details class="kpi-biz-detalle" data-detalle="{{ titulo }}">
+    <summary>
+      <span><i class="bi bi-list-ul"></i>{{ titulo }}</span>
+      <i class="bi bi-chevron-down kpi-biz-detalle-flecha"></i>
+    </summary>
+    <div class="kpi-biz-detalle-cuerpo">
+      <div class="table-responsive">
+        <table class="kpi-biz-tabla">
+          <thead><tr><th>Detalle</th><th class="num">Valor</th></tr></thead>
+          <tbody>
+            {% for etiqueta, valor in filas %}
+              {% if valor %}
+              <tr><td>{{ etiqueta }}</td><td class="num">{{ valor }}</td></tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </details>
   {% endif %}
 {% endmacro %}
 
@@ -122,27 +148,32 @@
 #}
 {% macro tabla_motivos(titulo, motivos, con_pct=false) %}
   {% if motivos %}
-  <div class="mt-4">
-    <h6 class="text-muted">{{ titulo }}</h6>
-    <div class="table-responsive">
-      <table class="kpi-biz-tabla">
-        <thead>
-          <tr>
-            <th>Motivo</th><th class="num">Casos</th>
-            {% if con_pct %}<th class="num">%</th>{% endif %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for m in motivos %}
-          <tr>
-            <td>{{ m.etiqueta }}</td>
-            <td class="num">{{ m.n }}</td>
-            {% if con_pct %}<td class="num">{{ m.pct }}%</td>{% endif %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <details class="kpi-biz-detalle" data-detalle="{{ titulo }}">
+    <summary>
+      <span><i class="bi bi-tags"></i>{{ titulo }}</span>
+      <i class="bi bi-chevron-down kpi-biz-detalle-flecha"></i>
+    </summary>
+    <div class="kpi-biz-detalle-cuerpo">
+      <div class="table-responsive">
+        <table class="kpi-biz-tabla">
+          <thead>
+            <tr>
+              <th>Motivo</th><th class="num">Casos</th>
+              {% if con_pct %}<th class="num">%</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in motivos %}
+            <tr>
+              <td>{{ m.etiqueta }}</td>
+              <td class="num">{{ m.n }}</td>
+              {% if con_pct %}<td class="num">{{ m.pct }}%</td>{% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </details>
   {% endif %}
 {% endmacro %}

@@ -18,6 +18,13 @@ from . import repository, settings
 
 PRESETS = ('hoy', '7d', '30d', 'mes', 'personalizado')
 
+ETIQUETAS_ENTREGA = {
+    'pendiente': 'Pendiente',
+    'en camino': 'En camino',
+    'entregado': 'Entregado',
+    'cancelado': 'Cancelado',
+}
+
 
 # ─────────────────────────────────────────────
 # PERIODO
@@ -169,6 +176,9 @@ def build_snapshot(periodo):
             periodo['desde'], periodo['hasta'],
             periodo['prev_desde'], periodo['prev_hasta'], dias)
         actual, anterior = datos['actual'], datos['anterior']
+        # El inventario se calcula una sola vez: es una foto del catalogo, no
+        # un agregado del periodo actual ni del anterior.
+        actual['inventario'] = datos.get('inventario') or {}
         generado = datos.get('ahora')
     except Exception as exc:
         current_app.logger.warning(
@@ -232,6 +242,8 @@ def _collect(desde, hasta, dias):
         'ventas': lambda: repository.fetch_ventas_periodo(desde, hasta),
         'cancel_motivos': lambda: repository.fetch_cancelaciones_por_motivo(desde, hasta),
         'compras_cliente': lambda: repository.fetch_compras_por_cliente(desde, hasta),
+        'entregas': lambda: repository.fetch_entregas_periodo(desde, hasta),
+        'inventario': lambda: repository.fetch_inventario_resumen(),
         'repuestos': lambda: repository.fetch_repuestos_demanda(desde, hasta),
         'doh': lambda: repository.fetch_doh_categorias(desde, hasta),
         'categorias': lambda: repository.categorias_existentes(),
@@ -278,11 +290,11 @@ def _seccion_ventas(actual, anterior):
 
     ingresos = _indicador(
         'ingresos_brutos', round(monto, 2),
-        pie=f"S/ {monto:,.2f} facturado",
+        pie=f"S/ {monto:,.2f} vendido (sin cancelados)",
         variacion=_variacion(monto, monto_ant),
         detalle=[
-            ('Ingresos brutos', f"S/ {monto:,.2f}"),
-            ('Importe no facturado (cancelados)', f"S/ {canceladas.get('monto', 0.0):,.2f}"),
+            ('Monto vendido (sin cancelados)', f"S/ {monto:,.2f}"),
+            ('Importe cancelado (perdida)', f"S/ {canceladas.get('monto', 0.0):,.2f}"),
         ],
     )
 
@@ -319,12 +331,105 @@ def _seccion_ventas(actual, anterior):
         detalle=detalle_freq,
     )
 
+    # ── Estado de entregas ──
+    # La fuente es `seguimiento_entregas`, la misma que alimenta el boton
+    # "Entregas" (/entregas). Si una venta antigua no tiene seguimiento se usa
+    # su estado comercial como respaldo.
+    entregas = actual.get('entregas') or {}
+    entregas_ant = anterior.get('entregas') or {}
+    filas_entrega = []
+    for fila in entregas.get('filas') or []:
+        filas_entrega.append({
+            'estado': fila.get('estado'),
+            'etiqueta': ETIQUETAS_ENTREGA.get(fila.get('estado'), fila.get('estado')),
+            'n': fila.get('n', 0),
+            'monto': fila.get('monto', 0.0),
+            'pct': fila.get('pct', 0.0),
+        })
+
+    def _n_estado(resumen, estado):
+        for fila in resumen.get('filas') or []:
+            if fila.get('estado') == estado:
+                return fila.get('n', 0)
+        return 0
+
+    pedidos_total = entregas.get('pedidos_total') or total_n
+    n_entregadas = _n_estado(entregas, 'entregado')
+    n_canceladas = _n_estado(entregas, 'cancelado')
+    n_en_espera = _n_estado(entregas, 'pendiente') + _n_estado(entregas, 'en camino')
+    n_entregadas_ant = _n_estado(entregas_ant, 'entregado')
+
+    monto_entregado = round(float(entregas.get('monto_entregado', 0.0)), 2)
+    monto_en_espera = round(float(entregas.get('monto_en_espera', 0.0)), 2)
+    monto_cancelado = round(float(entregas.get('monto_cancelado', 0.0)), 2)
+    monto_vendido = round(float(entregas.get('monto_vendido', monto)), 2)
+    monto_entregado_ant = round(float(entregas_ant.get('monto_entregado', 0.0)), 2)
+    monto_en_espera_ant = round(float(entregas_ant.get('monto_en_espera', 0.0)), 2)
+    monto_cancelado_ant = round(float(entregas_ant.get('monto_cancelado', 0.0)), 2)
+    pct_canceladas = _pct(n_canceladas, pedidos_total)
+
+    ventas_exitosas = {
+        'clave': 'ventas_exitosas',
+        'valor': n_entregadas,
+        'pie': f"de {pedidos_total} pedido(s) totales",
+        'variacion': _variacion(n_entregadas, n_entregadas_ant),
+        'mejor_si_sube': True,
+        'semaforo': 'is-ok' if n_entregadas else 'is-sin-datos',
+        'detalle': [],
+        'motivos': [],
+    }
+    monto_entregado_card = {
+        'clave': 'monto_entregado',
+        'valor': f"S/ {monto_entregado:,.2f}",
+        'pie': f"{n_entregadas} pedido(s) entregado(s)",
+        'variacion': _variacion(monto_entregado, monto_entregado_ant),
+        'mejor_si_sube': True,
+        'semaforo': 'is-ok' if monto_entregado > 0 else 'is-sin-datos',
+        'detalle': [],
+        'motivos': [],
+    }
+    monto_en_espera_card = {
+        'clave': 'monto_en_espera',
+        'valor': f"S/ {monto_en_espera:,.2f}",
+        'pie': f"{n_en_espera} pedido(s) por entregar (pendiente + en camino)",
+        'variacion': _variacion(monto_en_espera, monto_en_espera_ant),
+        'mejor_si_sube': False,
+        'semaforo': 'is-aviso' if monto_en_espera > 0 else 'is-ok',
+        'detalle': [],
+        'motivos': [],
+    }
+    perdida_cancelacion = {
+        'clave': 'monto_cancelado',
+        'valor': f"S/ {monto_cancelado:,.2f}",
+        'pie': (f"{n_canceladas} pedido(s) cancelado(s) · "
+                f"{pct_canceladas:.1f}% de los pedidos"),
+        'variacion': _variacion(monto_cancelado, monto_cancelado_ant),
+        'mejor_si_sube': False,
+        'semaforo': 'is-critico' if monto_cancelado > 0 else 'is-ok',
+        'detalle': [],
+        'motivos': [],
+    }
+
     return {
         'volumen': volumen,
         'ingresos': ingresos,
         'cancelacion_error_cliente': cancelacion,
         'frecuencia_compra': frecuencia,
         'motivos_cancelacion': motivos_tabla,
+        'entregas': {
+            'filas': filas_entrega,
+            'pedidos_total': pedidos_total,
+            'pedidos_validos': entregas.get('pedidos_validos') or (total_n - n_canceladas),
+            'monto_vendido': monto_vendido,
+            'monto_entregado': monto_entregado,
+            'monto_en_espera': monto_en_espera,
+            'monto_cancelado': monto_cancelado,
+            'sin_seguimiento': entregas.get('sin_seguimiento', 0),
+        },
+        'ventas_exitosas': ventas_exitosas,
+        'monto_entregado': monto_entregado_card,
+        'monto_en_espera': monto_en_espera_card,
+        'perdida_cancelacion': perdida_cancelacion,
     }
 
 
@@ -431,11 +536,27 @@ def _seccion_almacen(actual, anterior):
                   'n': i['n']} for i in devol],
     )
 
+    # Resumen actual del catalogo. No depende del periodo: stock es una foto
+    # del momento. Las devoluciones si salen de las incidencias del periodo.
+    inventario = actual.get('inventario') or {}
+    unidades_devol = sum((i.get('unidades') or 0) for i in devol)
+    resumen_inventario = {
+        'total': inventario.get('total', 0),
+        'activos': inventario.get('activos', 0),
+        'bajo_stock': inventario.get('bajo_stock', 0),
+        'agotados': inventario.get('agotados', 0),
+        'devoluciones_unidades': unidades_devol,
+        'devoluciones_casos': total_devol,
+    }
+    bajo_stock_lista = inventario.get('bajo_stock_lista') or []
+
     return {
         'quiebre_repuestos': quiebre,
         'doh_accesorios': doh_acc,
         'doh_repuestos': doh_rep,
         'devoluciones_incompat': dev_inc,
+        'resumen_inventario': resumen_inventario,
+        'bajo_stock_lista': bajo_stock_lista,
     }
 
 

@@ -281,6 +281,120 @@
   text-align: right;
 }
 
+.kpi-biz-tabla tfoot td {
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: none;
+  padding-top: .65rem;
+}
+
+.kpi-biz-tabla-total td {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+/* ── Detalles desplegables ── */
+.kpi-biz-detalle {
+  margin-top: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(127, 127, 127, .035);
+  overflow: hidden;
+}
+
+.kpi-biz-detalle > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .7rem .9rem;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .025em;
+}
+
+.kpi-biz-detalle > summary::-webkit-details-marker {
+  display: none;
+}
+
+.kpi-biz-detalle > summary:hover {
+  background: rgba(243, 156, 18, .06);
+}
+
+.kpi-biz-detalle > summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+}
+
+.kpi-biz-detalle > summary .bi-list-ul,
+.kpi-biz-detalle > summary .bi-tags,
+.kpi-biz-detalle > summary .bi-truck,
+.kpi-biz-detalle > summary .bi-box-seam,
+.kpi-biz-detalle > summary .bi-clock-history {
+  color: var(--kpi-naranja-txt);
+}
+
+.kpi-biz-detalle-flecha {
+  color: var(--kpi-muted-txt);
+  transition: transform .2s ease;
+}
+
+.kpi-biz-detalle[open] .kpi-biz-detalle-flecha {
+  transform: rotate(180deg);
+}
+
+.kpi-biz-detalle-cuerpo {
+  padding: .1rem .9rem .9rem;
+}
+
+.kpi-biz-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-weight: 600;
+}
+
+.kpi-biz-estado.is-ok { color: var(--kpi-verde-txt); }
+.kpi-biz-estado.is-aviso { color: var(--kpi-amarillo-txt); }
+.kpi-biz-estado.is-critico { color: var(--kpi-rojo-txt); }
+.kpi-biz-estado.is-sin-datos { color: var(--kpi-muted-txt); }
+
+.kpi-biz-stock {
+  display: inline-block;
+  min-width: 2rem;
+  padding: .1rem .45rem;
+  border-radius: 99px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.kpi-biz-stock.is-aviso {
+  background: rgba(234, 179, 8, .15);
+  color: var(--kpi-amarillo-txt);
+}
+
+.kpi-biz-stock.is-critico {
+  background: rgba(239, 68, 68, .15);
+  color: var(--kpi-rojo-txt);
+}
+
+.kpi-biz-subtitulo {
+  margin: 1rem 0 .45rem;
+  color: var(--kpi-muted-txt);
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.kpi-biz-nota-tabla {
+  margin: .75rem 0 0;
+  font-size: .78rem;
+}
+
 /* ── Badges ── */
 .kpi-biz-badge {
   flex-shrink: 0;
