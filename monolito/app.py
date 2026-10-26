@@ -246,6 +246,16 @@ UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+
+def _thumb_imagen(imagen):
+    """Ruta de la miniatura para listados; el detalle usa la imagen completa."""
+    if isinstance(imagen, str) and imagen.startswith('imagenes/'):
+        return 'imagenes/thumbs/' + imagen[len('imagenes/'):]
+    return imagen
+
+
+app.jinja_env.filters['thumb'] = _thumb_imagen
+
 # ─────────────────────────────────────────────
 # MYSQL (env vars para Render)
 # ─────────────────────────────────────────────

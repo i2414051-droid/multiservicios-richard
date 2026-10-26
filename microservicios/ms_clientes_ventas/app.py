@@ -32,6 +32,16 @@ def _cache_imagenes(resp):
     return resp
 
 
+def _thumb_imagen(imagen):
+    """Ruta de la miniatura para listados; el detalle usa la imagen completa."""
+    if isinstance(imagen, str) and imagen.startswith('imagenes/'):
+        return 'imagenes/thumbs/' + imagen[len('imagenes/'):]
+    return imagen
+
+
+app.jinja_env.filters['thumb'] = _thumb_imagen
+
+
 # ─────────────────────────────────────────────
 # MYSQL — BD Principal (proyecto_multiservicios_richard)
 # ─────────────────────────────────────────────

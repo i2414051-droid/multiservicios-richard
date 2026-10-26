@@ -209,7 +209,7 @@
                                 <td>
                                     <div class="d-flex align-items-center gap-2">
                                         {% if p.imagen %}
-                                        <img loading="lazy" decoding="async" src="{{ url_for('static', filename=p.imagen) }}" width="35" height="35" style="border-radius:8px;object-fit:cover">
+                                        <img loading="lazy" decoding="async" src="{{ url_for('static', filename=(p.imagen|thumb)) }}" width="35" height="35" style="border-radius:8px;object-fit:cover">
                                         {% endif %}
                                         {{ p.nombre }}
                                     </div>

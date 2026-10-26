@@ -179,6 +179,7 @@ Si el sitio responde *"Ocurrió un error interno. Revisa los logs."*, es un erro
 - Cada app sirve sus fotos desde su propia carpeta `static/imagenes/` (el monolito y cada micro tienen una copia). No se sirven desde MySQL.
 - `productos.imagen` guarda la ruta `imagenes/<archivo>`; `productos.imagen_datos` conserva el original como respaldo.
 - Las fotos que superan 1600 px se reducen a 1600 px con alta calidad; el resto se copia byte a byte, sin recomprimir.
+- Los listados usan `static/imagenes/thumbs/` (máximo 400 px); la ficha de producto usa la imagen completa.
 - Las respuestas de `/static/imagenes/` se cachean un año (`Cache-Control: public, max-age=31536000, immutable`) y las miniaturas usan `loading="lazy"`.
 - Si cambias una foto, reemplázala en las tres carpetas (`monolito/`, `ms_clientes_ventas/` y `ms_gestion_almacen/`) y actualiza el registro.
 

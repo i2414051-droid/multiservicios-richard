@@ -36,7 +36,7 @@
       {% for p in productos %}
       <div class="d-flex align-items-center gap-3 py-2 t-line">
         {% if p.imagen %}
-        <img loading="lazy" decoding="async" src="/static/{{ p.imagen }}" style="width:45px;height:45px;object-fit:cover;border-radius:8px" alt="">
+        <img loading="lazy" decoding="async" src="/static/{{ p.imagen|thumb }}" style="width:45px;height:45px;object-fit:cover;border-radius:8px" alt="">
         {% endif %}
         <div class="flex-grow-1">
           <span style="color:var(--text-primary)">{{ p.nombre }}</span><br>

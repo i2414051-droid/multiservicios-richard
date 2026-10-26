@@ -226,7 +226,7 @@
               {% for item in items %}
               <div class="d-flex align-items-center gap-3 py-2 t-line">
                 {% if item.imagen %}
-                <img loading="lazy" decoding="async" src="/static/{{ item.imagen }}" style="width:50px;height:50px;object-fit:cover;border-radius:10px" alt="">
+                <img loading="lazy" decoding="async" src="/static/{{ item.imagen|thumb }}" style="width:50px;height:50px;object-fit:cover;border-radius:10px" alt="">
                 {% else %}
                 <div style="width:50px;height:50px;background:var(--bg-body-3);border-radius:10px;display:flex;align-items:center;justify-content:center">
                   <i class="bi bi-image" style="color:var(--text-muted)"></i>

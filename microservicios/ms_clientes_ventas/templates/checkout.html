@@ -62,7 +62,7 @@
             {% for item in items %}
             <div class="d-flex align-items-center gap-3 py-2 border-bottom" style="border-color:var(--border-subtle)">
               {% if item.imagen %}
-              <img loading="lazy" decoding="async" src="/static/{{ item.imagen }}" style="width:50px;height:50px;object-fit:cover;border-radius:10px" alt="">
+              <img loading="lazy" decoding="async" src="/static/{{ item.imagen|thumb }}" style="width:50px;height:50px;object-fit:cover;border-radius:10px" alt="">
               {% else %}
               <div style="width:50px;height:50px;background:var(--bg-input);border-radius:10px;display:flex;align-items:center;justify-content:center">
                 <i class="bi bi-image" style="color:var(--text-muted)"></i>
@@ -184,7 +184,7 @@
                      onmouseover="this.style.borderColor='#f39c12';this.style.transform='translateY(-2px)'" 
                      onmouseout="this.style.borderColor='var(--border-card)';this.style.transform='translateY(0)'">
                   {% if p.imagen %}
-                  <img loading="lazy" decoding="async" src="/static/{{ p.imagen }}" alt="{{ p.nombre }}"
+                  <img loading="lazy" decoding="async" src="/static/{{ p.imagen|thumb }}" alt="{{ p.nombre }}"
                        style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;margin-bottom:8px">
                   {% else %}
                   <div style="width:100%;aspect-ratio:1/1;background:var(--bg-input);border-radius:8px;margin-bottom:8px;display:flex;align-items:center;justify-content:center">
