@@ -125,14 +125,15 @@ class _CursorContado:
     def execute(self, sql, *args, **kwargs):
         inicio = time.perf_counter()
         try:
+            self._dueno._preparar(sql)
             return self._cur.execute(sql, *args, **kwargs)
         finally:
             self._dueno._anotar(sql, time.perf_counter() - inicio)
 
     def executemany(self, sql, *args, **kwargs):
         inicio = time.perf_counter()
-        self._dueno._marcar_escritura(sql)
         try:
+            self._dueno._preparar(sql)
             return self._cur.executemany(sql, *args, **kwargs)
         finally:
             self._dueno._sumar_tiempo(time.perf_counter() - inicio)
@@ -147,12 +148,13 @@ class _CursorContado:
 class _ConexionCacheada:
     """Proxy de la conexion real que recuerda si quedo algo sin commitear."""
 
-    __slots__ = ('_conn', 'sucia', 'cerrada', 'ultimo_uso', 'consultas',
-                 'ms_bd', 'lentas')
+    __slots__ = ('_conn', 'sucia', 'en_transaccion', 'cerrada', 'ultimo_uso',
+                 'consultas', 'ms_bd', 'lentas')
 
     def __init__(self, conn):
         self._conn = conn
         self.sucia = False
+        self.en_transaccion = False
         self.cerrada = False
         self.ultimo_uso = time.time()
         self.consultas = 0
@@ -166,10 +168,12 @@ class _ConexionCacheada:
     def commit(self):
         self._conn.commit()
         self.sucia = False
+        self.en_transaccion = False
 
     def rollback(self):
         self._conn.rollback()
         self.sucia = False
+        self.en_transaccion = False
 
     def close(self):
         self.cerrada = True
@@ -181,7 +185,26 @@ class _ConexionCacheada:
     def __getattr__(self, nombre):
         return getattr(self._conn, nombre)
 
-    # ── metricas ──
+    # ── transacciones y metricas ──
+    def _preparar(self, sql):
+        """Abre la transaccion antes de la primera escritura de la peticion.
+
+        Las conexiones viven en autocommit: una lectura no deja transaccion
+        abierta, asi que no queda un snapshot viejo ni candados de metadatos
+        que bloqueen un ALTER, y no hay que pagar un ROLLBACK por peticion.
+        Si la peticion va a escribir, se abre una transaccion explicita para
+        que las operaciones de varios pasos (venta + detalle + stock) sigan
+        siendo atomicas; el commit que ya hace la app la cierra.
+        """
+        try:
+            cabeza = sql.lstrip().split(None, 1)[0].upper()
+        except Exception:
+            return
+        if cabeza in _DML and not self.en_transaccion:
+            self._conn.begin()
+            self.en_transaccion = True
+            self.sucia = True
+
     def _marcar_escritura(self, sql):
         try:
             cabeza = sql.lstrip().split(None, 1)[0].upper()
@@ -222,7 +245,7 @@ def _mysql_obtener():
         try:
             if conn.cerrada:
                 raise RuntimeError('conexion cerrada')
-            if conn.sucia:
+            if conn.en_transaccion:
                 conn.rollback()
             if (time.time() - conn.ultimo_uso) > _POOL_PING_TRAS:
                 conn.ping(True)
@@ -237,6 +260,8 @@ def _mysql_obtener():
 
     try:
         conn = _ConexionCacheada(_mysql_conectar(mysql))
+        # Autocommit a nivel de conexion: ver _ConexionCacheada._preparar.
+        conn.autocommit(True)
     except Exception:
         _pool_cupo.release()
         raise
@@ -249,7 +274,10 @@ def _mysql_liberar(exc=None):
     if conn is None:
         return
     try:
-        if conn.sucia:
+        # Solo si quedo una escritura sin confirmar: en autocommit una lectura
+        # no deja transaccion abierta, asi que no hay nada que deshacer ni
+        # viaje de red que pagar.
+        if conn.en_transaccion:
             conn.rollback()
     except Exception:
         conn.cerrada = True
@@ -1102,15 +1130,63 @@ def whatsapp_url(celular, mensaje):
 # ─────────────────────────────────────────────
 # CONTEXT PROCESSOR
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# CACHE DEL CONTADOR DEL CARRITO
+# ─────────────────────────────────────────────
+# `cantidad_carrito` es un context processor: se ejecuta en TODAS las paginas
+# renderizadas y hacia una consulta (~190 ms con la BD remota), incluso para
+# invitados que nunca tienen carrito (obtener_usuario les crea un guest_id).
+# El numero solo cambia cuando algo escribe en `carrito`, asi que se guarda
+# unos segundos y se invalida en cada operacion que toque la tabla.
+_CARRITO_TTL = 30
+_carrito_cache = {}
+_carrito_lock = threading.Lock()
+
+
+def _carrito_invalidar(*usuarios):
+    """Olvida el contador cacheado de uno o varios usuarios."""
+    with _carrito_lock:
+        for usuario in usuarios:
+            if usuario is not None:
+                _carrito_cache.pop(str(usuario), None)
+
+
+def _carrito_purgar(ahora):
+    """Quita entradas vencidas para que la cache no crezca sin limite.
+
+    Se llama con `_carrito_lock` ya tomado."""
+    if len(_carrito_cache) <= 500:
+        return
+    vencidas = [k for k, (momento, _) in _carrito_cache.items()
+                if ahora - momento >= _CARRITO_TTL]
+    for clave in vencidas:
+        _carrito_cache.pop(clave, None)
+    if len(_carrito_cache) > 500:
+        sobrantes = len(_carrito_cache) - 500
+        for clave in sorted(_carrito_cache,
+                            key=lambda k: _carrito_cache[k][0])[:sobrantes]:
+            _carrito_cache.pop(clave, None)
+
+
 @app.context_processor
 def cantidad_carrito():
     try:
         usuario = obtener_usuario()
+        clave = str(usuario)
+        ahora = time.time()
+        with _carrito_lock:
+            guardado = _carrito_cache.get(clave)
+            if guardado is not None and (ahora - guardado[0]) < _CARRITO_TTL:
+                return dict(cantidad_carrito=guardado[1])
         cur = mysql.connection.cursor()
         cur.execute("SELECT SUM(cantidad) AS total FROM carrito WHERE usuario_id=%s", (usuario,))
         res = cur.fetchone()
-        return dict(cantidad_carrito=res['total'] if res['total'] else 0)
-    except:
+        total = int(res['total']) if res and res['total'] else 0
+        with _carrito_lock:
+            _carrito_cache[clave] = (ahora, total)
+            _carrito_purgar(ahora)
+        return dict(cantidad_carrito=total)
+    except Exception:
         return dict(cantidad_carrito=0)
 
 
@@ -1976,6 +2052,7 @@ def actualizar_cantidad(id_producto):
             (nueva, id_producto, usuario),
         )
     mysql.connection.commit()
+    _carrito_invalidar(usuario)
 
     subtotal = round(nueva * float(fila['precio']), 2) if nueva > 0 else 0.0
     total = _total_carrito(usuario)
@@ -3891,6 +3968,9 @@ def checkout():
     if 'guest_id' in session:
         cur.execute("UPDATE carrito SET usuario_id=%s WHERE usuario_id=%s", (str(user_id), session['guest_id']))
         mysql.connection.commit()
+        # El carrito del invitado pasa a ser del usuario: el contador cambia
+        # para las dos claves.
+        _carrito_invalidar(user_id, session.get('guest_id'))
     cur.execute(f"""
         SELECT c.id, c.producto_id, p.nombre, p.precio, p.imagen, c.cantidad
         FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
@@ -4018,6 +4098,7 @@ def procesar_compra():
             cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['id']))
             verificar_stock_bajo(cur, item['id'])
         cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
+        _carrito_invalidar(user_id)
 
         cur.execute("""UPDATE usuarios SET
             nombre=IFNULL(nombre,%s), apellido=IFNULL(apellido,%s),
@@ -4511,6 +4592,7 @@ def eliminar_carrito(id):
     cur = mysql.connection.cursor()
     cur.execute("DELETE FROM carrito WHERE id=%s AND usuario_id=%s", (id, usuario))
     mysql.connection.commit()
+    _carrito_invalidar(usuario)
     cur.close()
     return redirect('/carrito')
 
@@ -4529,6 +4611,7 @@ def aumentar_cantidad(id_producto):
         if en_carrito < prod['stock']:
             cur.execute("UPDATE carrito SET cantidad=cantidad+1 WHERE producto_id=%s AND usuario_id=%s", (id_producto, usuario))
             mysql.connection.commit()
+            _carrito_invalidar(usuario)
         else:
             flash('No hay más stock disponible.', 'warning')
     cur.close()
@@ -4578,6 +4661,7 @@ def agregar(id):
         else:
             cur.execute("INSERT INTO carrito (usuario_id, producto_id, cantidad) VALUES(%s,%s,1)", (usuario, id))
         mysql.connection.commit()
+        _carrito_invalidar(usuario)
 
         # KPI: paso 1 del recorrido. Armar el carrito es el primer paso de la
         # intencion de compra; aqui nace la sesion que luego va avanzando.

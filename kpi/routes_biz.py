@@ -146,10 +146,15 @@ def get_snapshot():
     """
     clave = _clave_cache(request.args)
     ahora = time.time()
-    with _cache_lock:
-        guardado = _cache_snapshots.get(clave)
-        if guardado is not None and (ahora - guardado[0]) < _CACHE_TTL:
-            return guardado[1]
+    # `forzar=1` lo manda el boton "Actualizar" del panel: el admin pide
+    # datos frescos y se salta la lectura de la cache. El resultado se
+    # guarda igual, para que los refrescos automaticos lo aprovechen.
+    forzar = request.args.get('forzar') == '1'
+    if not forzar:
+        with _cache_lock:
+            guardado = _cache_snapshots.get(clave)
+            if guardado is not None and (ahora - guardado[0]) < _CACHE_TTL:
+                return guardado[1]
 
     try:
         periodo = service.resolve_period(request.args)
@@ -268,6 +273,10 @@ def api_registrar_incidencia():
     except Exception as exc:
         current_app.logger.error('KPI-BIZ: fallo al registrar incidencia: %s', exc)
         return jsonify({'ok': False, 'error': str(exc)}), 500
+    finally:
+        # La incidencia cambia los indicadores: se tira la cache para que el
+        # siguiente panel muestre el dato nuevo sin esperar el TTL.
+        invalidar_cache()
 
 
 @kpi_biz_bp.route('/api/kpi-biz/incidencia/<int:inc_id>', methods=['DELETE'])
@@ -281,6 +290,8 @@ def api_eliminar_incidencia(inc_id):
     except Exception as exc:
         current_app.logger.error('KPI-BIZ: fallo al borrar incidencia: %s', exc)
         return jsonify({'ok': False, 'error': str(exc)}), 500
+    finally:
+        invalidar_cache()
 
 
 @kpi_biz_bp.route('/api/kpi-biz/incidencias-recientes')

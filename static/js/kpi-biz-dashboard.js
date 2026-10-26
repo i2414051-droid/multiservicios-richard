@@ -24,10 +24,11 @@
 
   var cargando = false;
   var temporizador = null;
-  // Refresco automatico: el panel tiene que mostrar el estado del negocio en
-  // vivo, no de cada 5 minutos. 30 s es lo que aguanta alwaysdata sin que
-  // dos administradores dejen el panel abierto al mismo tiempo.
-  var REFRESH_MS = 30000;
+  var ultimaCarga = 0;
+  // Refresco automatico cada 2 minutos. El servidor guarda el snapshot en
+  // cache (KPI_CACHE_TTL), asi que casi todos los refrescos son instantaneos
+  // y el recalculo real (~4-5 s) ocurre cada ~4 min, en segundo plano.
+  var REFRESH_MS = 120000;
 
   function mostrarAviso(texto) {
     if (!aviso) return;
@@ -73,14 +74,17 @@
     );
   }
 
-  function cargar() {
+  function cargar(forzar) {
     if (cargando) return Promise.resolve();
     marcarCarga(true);
     ocultarAviso();
 
     var p = parametros();
+    // `forzar` pide al servidor que ignore la cache. Se anade solo a la
+    // peticion: la URL visible no debe quedar con ese parametro.
+    var url = urlFragmento + '?' + p.toString() + (forzar ? '&forzar=1' : '');
 
-    return fetch(urlFragmento + '?' + p.toString(), {
+    return fetch(url, {
       headers: { 'X-Requested-With': 'fetch' },
       credentials: 'same-origin'
     })
@@ -94,6 +98,7 @@
         if (!nuevo) throw new Error('El servidor no devolvio el panel');
 
         panel.innerHTML = nuevo.innerHTML;
+        ultimaCarga = Date.now();
 
         form = document.getElementById('kpiBizFiltros');
         preset = document.getElementById('kpiBizPreset');
@@ -120,7 +125,12 @@
       temporizador = null;
     }
     if (activo) {
-      temporizador = setInterval(cargar, REFRESH_MS);
+      temporizador = setInterval(function () {
+        // Con la pestana en segundo plano no se pide nada: puede haber
+        // muchas pestanas abiertas y no hay que gastar cuota de la BD.
+        if (document.hidden) return;
+        cargar(false);
+      }, REFRESH_MS);
     }
   }
 
@@ -145,7 +155,8 @@
     if (botonActualizar) {
       botonActualizar.addEventListener('click', function () {
         botonActualizar.classList.add('kpi-biz-actualizando');
-        cargar();
+        // Pulsacion manual: se piden datos frescos y se salta la cache.
+        cargar(true);
         setTimeout(function () {
           var b = document.getElementById('kpiBizActualizar');
           if (b) b.classList.remove('kpi-biz-actualizando');
@@ -159,7 +170,8 @@
           setTimeout(ocultarAviso, 2500);
         } else {
           alternarRefresco(true);
-          mostrarAviso('Se actualizara cada 60 s. Doble clic para detenerlo.');
+          mostrarAviso('Se actualizara cada ' + Math.round(REFRESH_MS / 1000) +
+                       ' s. Doble clic para detenerlo.');
           setTimeout(ocultarAviso, 4000);
         }
       });
@@ -317,6 +329,9 @@
   alternarRefresco(true);
 
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) cargar();
+    if (document.hidden) return;
+    // Al volver a la pestana solo se recarga si los datos ya tienen un rato:
+    // cambiar de ventana no debe disparar una peticion cada vez.
+    if (Date.now() - ultimaCarga > 60000) cargar(false);
   });
 })();
