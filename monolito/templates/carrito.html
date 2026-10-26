@@ -118,7 +118,7 @@
                             {% endif %}
                         </div>
                         {% if p.imagen %}
-                        <img src="{{ url_for('static', filename=p.imagen) }}" class="producto-img">
+                        <img loading="lazy" decoding="async" src="{{ url_for('static', filename=p.imagen) }}" class="producto-img">
                         {% endif %}
                         <div class="card-body">
                             <h5>{{ p.nombre }}</h5>

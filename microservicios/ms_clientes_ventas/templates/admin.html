@@ -110,7 +110,7 @@
                         <td>{{ p.id }}</td>
                         <td>
                             {% if p.imagen %}
-                            <img src="{{ url_for('static', filename=p.imagen) }}" width="60" class="rounded">
+                            <img loading="lazy" decoding="async" src="{{ url_for('static', filename=p.imagen) }}" width="60" class="rounded">
                             {% else %}
                             <span class="text-muted">—</span>
                             {% endif %}

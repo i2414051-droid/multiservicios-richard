@@ -121,7 +121,7 @@ Productos destacados
 
 {% if p.imagen %}
 
-<img
+<img loading="lazy" decoding="async"
 src="{{ url_for('static',filename=p.imagen) }}"
 class="producto-img">
 

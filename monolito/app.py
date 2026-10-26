@@ -237,6 +237,9 @@ def _cabeceras_seguridad(resp):
     # (boton "atras" despues de cerrar sesion).
     if not request.path.startswith('/static/'):
         resp.headers.setdefault('Cache-Control', 'no-store')
+    elif request.path.startswith('/static/imagenes/'):
+        # Nombres con hash: se pueden cachear de forma agresiva.
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
 
 UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
@@ -513,8 +516,9 @@ ALMACEN_DB = os.environ.get('MYSQL_DB_ALMACEN', 'proyecto_gestion_almacen')
 # Columnas de `productos` para listados y fichas. Se excluyen a proposito
 # imagen_datos/imagen_mime: son LONGBLOB (varios MB por producto) y un
 # `SELECT *` los descarga TODOS en cada portada/carrito. Contra una BD
-# remota eso costaba ~2 s por pagina. La imagen se sirve aparte, bajo
-# demanda, desde /static/uploads/... (_servir_imagen_desde_db).
+# remota eso costaba ~2 s por pagina. El catalogo se sirve como archivo
+# estatico desde /static/imagenes/... y las subidas nuevas desde
+# /static/uploads/... con respaldo en la BD (_servir_imagen_desde_db).
 COLS_PRODUCTO = ('id, nombre, descripcion, precio, stock, categoria, '
                  'imagen, estado, created_at')
 # Guard: la base de almacén NUNCA debe ser la base principal. Si la variable de
@@ -5040,24 +5044,25 @@ def _ensure_db_fallback():
 # ─────────────────────────────────────────────
 # IMAGENES PERSISTENTES DE PRODUCTOS
 # ─────────────────────────────────────────────
-# Los archivos subidos viven en static/uploads, un disco EFIMERO: en Render se
-# borra al reiniciar/spin-down (por eso la imagen se veia unos minutos y luego
-# desaparecia) y ademas esta en .gitignore. Para que persistan, al subir se
-# guardan los bytes en la BD (productos.imagen_datos). Aqui se envuelve la
-# vista estatica de Flask: si el archivo no esta en disco, se busca el blob en
-# la BD y se devuelve. Asi las plantillas que ya usan
-# url_for('static', filename='uploads/...') siguen funcionando sin cambios.
+# El catalogo vive en static/imagenes/ y se versiona con cada app, asi que se
+# sirve directo desde disco (rapido y cacheable). Las subidas nuevas van a
+# static/uploads, un disco EFIMERO: en Render se borra al reiniciar/spin-down
+# (por eso la imagen se veia unos minutos y luego desaparecia) y ademas esta
+# en .gitignore. Para que persistan, al subir se guardan los bytes en la BD
+# (productos.imagen_datos). Aqui se envuelve la vista estatica de Flask: si el
+# archivo no esta en disco, se busca el blob en la BD y se devuelve. Asi las
+# plantillas que usan url_for('static', filename=... ) siguen funcionando.
 _static_original = app.view_functions.get('static')
 
 
 def _servir_imagen_desde_db(filename):
-    """Devuelve el blob guardado en la BD para 'uploads/<filename>' o None."""
+    """Devuelve el blob guardado en la BD para la ruta relativa indicada."""
     try:
         cur = mysql.connection.cursor()
         cur.execute(
             f"SELECT imagen_datos, imagen_mime FROM {ALMACEN_DB}.productos "
             f"WHERE imagen=%s AND imagen_datos IS NOT NULL LIMIT 1",
-            ('uploads/' + filename,),
+            (filename,),
         )
         fila = cur.fetchone()
         cur.close()
@@ -5077,8 +5082,8 @@ def _static_con_db(filename):
     try:
         return _static_original(filename=filename)
     except NotFound:
-        if filename.startswith('uploads/'):
-            resp = _servir_imagen_desde_db(filename[len('uploads/'):])
+        if filename.startswith(('uploads/', 'imagenes/')):
+            resp = _servir_imagen_desde_db(filename)
             if resp is not None:
                 return resp
         raise

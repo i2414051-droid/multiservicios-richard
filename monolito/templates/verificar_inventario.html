@@ -82,7 +82,7 @@
               <td>
                 <div class="d-flex align-items-center gap-2">
                   {% if p.imagen %}
-                  <img src="{{ p.imagen }}" style="width:36px;height:36px;object-fit:cover;border-radius:8px" alt="">
+                  <img loading="lazy" decoding="async" src="{{ p.imagen }}" style="width:36px;height:36px;object-fit:cover;border-radius:8px" alt="">
                   {% endif %}
                   <span>{{ p.nombre }}</span>
                 </div>

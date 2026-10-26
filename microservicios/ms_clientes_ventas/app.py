@@ -24,6 +24,14 @@ UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+
+@app.after_request
+def _cache_imagenes(resp):
+    if request.path.startswith('/static/imagenes/'):
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
+
+
 # ─────────────────────────────────────────────
 # MYSQL — BD Principal (proyecto_multiservicios_richard)
 # ─────────────────────────────────────────────
