@@ -67,6 +67,9 @@ def resolve_period(args):
         'prev_desde': desde - duracion,
         'prev_hasta': desde,
         'dias': max(1, round(duracion.total_seconds() / 86400)),
+        # Se reutiliza en build_snapshot para no pedir otra vez el reloj de la
+        # BD (cada consulta cuesta ~190 ms contra la BD remota).
+        'ahora': hoy,
     }
 
 
@@ -154,17 +157,34 @@ def _percentil(valores, p):
 # ─────────────────────────────────────────────
 def build_snapshot(periodo):
     """Calcula todas las secciones del periodo y del anterior."""
+    dias = periodo.get('dias') or 30
+    actual = anterior = None
+    generado = None
+
+    # Camino rapido: los dos periodos en 4 consultas. Si algo falla (una tabla
+    # que no existe en una instalacion vieja, por ejemplo) se cae al calculo
+    # dataset por dataset, que es el de siempre.
     try:
-        actual = _collect(periodo['desde'], periodo['hasta'], periodo['dias'])
+        datos = repository.fetch_snapshot(
+            periodo['desde'], periodo['hasta'],
+            periodo['prev_desde'], periodo['prev_hasta'], dias)
+        actual, anterior = datos['actual'], datos['anterior']
+        generado = datos.get('ahora')
     except Exception as exc:
-        current_app.logger.warning('KPI _collect actual fallo: %s', exc)
-        actual = {}
-    try:
-        anterior = _collect(periodo['prev_desde'], periodo['prev_hasta'],
-                            periodo['dias'])
-    except Exception as exc:
-        current_app.logger.warning('KPI _collect anterior fallo: %s', exc)
-        anterior = {}
+        current_app.logger.warning(
+            'KPI snapshot rapido fallo (%s); se consulta dataset por dataset', exc)
+
+    if actual is None:
+        try:
+            actual = _collect(periodo['desde'], periodo['hasta'], dias)
+        except Exception as exc:
+            current_app.logger.warning('KPI _collect actual fallo: %s', exc)
+            actual = {}
+        try:
+            anterior = _collect(periodo['prev_desde'], periodo['prev_hasta'], dias)
+        except Exception as exc:
+            current_app.logger.warning('KPI _collect anterior fallo: %s', exc)
+            anterior = {}
 
     def safe_call(fn, *args):
         try:
@@ -177,7 +197,7 @@ def build_snapshot(periodo):
         'periodo': periodo,
         # La hora de generacion es la de la base de datos: es la misma que
         # puso las marcas de tiempo de los datos que se estan mostrando.
-        'generado_en': repository.ahora_bd(),
+        'generado_en': generado or periodo.get('ahora') or repository.ahora_bd(),
         'ventas': safe_call(_seccion_ventas, actual, anterior),
         'almacen': safe_call(_seccion_almacen, actual, anterior),
         'seguridad': safe_call(_seccion_seguridad, actual, anterior),

@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>Multiservicios Richard</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
@@ -271,16 +272,50 @@ function bloquearBotones(){
 }
 
 (function(){
+  // Todo fetch/XHR que escribe manda el token CSRF del <meta>. Asi ninguna
+  // llamada nueva se olvida de incluirlo y el servidor puede exigirlo siempre.
+  var TOKEN = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+
+  function conToken(init, metodo){
+    if (!TOKEN || metodo === 'GET' || metodo === 'HEAD') return init;
+    init = init || {};
+    try {
+      var h = new Headers(init.headers || {});
+      if (!h.has('X-CSRF-Token')) h.set('X-CSRF-Token', TOKEN);
+      init.headers = h;
+    } catch (e) {}
+    return init;
+  }
+
   var _fetch = window.fetch;
   if (_fetch) {
-    window.fetch = function(){
-      var p = _fetch.apply(this, arguments);
+    window.fetch = function(input, init){
+      try {
+        var metodo = String((init && init.method) ||
+                            (input && input.method) || 'GET').toUpperCase();
+        if (metodo !== 'GET' && metodo !== 'HEAD' && typeof input === 'string') {
+          init = conToken(init, metodo);
+        }
+      } catch (e) {}
+      var p = _fetch.call(this, input, init);
       p.then(function(){ setTimeout(function(){ window.reactivarBotones(); }, 120); }, function(){ setTimeout(function(){ window.reactivarBotones(); }, 120); });
       return p;
     };
   }
+
+  var _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(metodo){
+    this.__csrfMetodo = String(metodo || 'GET').toUpperCase();
+    return _open.apply(this, arguments);
+  };
+
   var _send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function(){
+    try {
+      if (TOKEN && this.__csrfMetodo && this.__csrfMetodo !== 'GET' && this.__csrfMetodo !== 'HEAD') {
+        this.setRequestHeader('X-CSRF-Token', TOKEN);
+      }
+    } catch (e) {}
     this.addEventListener('loadend', function(){ setTimeout(function(){ window.reactivarBotones(); }, 120); });
     return _send.apply(this, arguments);
   };

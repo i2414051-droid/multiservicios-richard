@@ -623,6 +623,275 @@ def fetch_incidencias_recientes(limite=10, tipos=None):
         cur.close()
 
 
+# ─────────────────────────────────────────────
+# SNAPSHOT COMPLETO EN POCAS CONSULTAS
+# ─────────────────────────────────────────────
+# El panel pedia los mismos datos dos veces (periodo actual y anterior) con una
+# consulta por dataset: 20 idas y vueltas, ~190 ms cada una contra la BD
+# remota. Estas funciones piden los dos periodos en la misma consulta y dejan
+# la agrupacion a Python. El resultado es el mismo que el de las funciones de
+# arriba, que se conservan como respaldo y para el resto del modulo.
+def fetch_snapshot(desde, hasta, prev_desde, prev_hasta, dias):
+    """Datos de los dos periodos en 4 consultas (antes: 20)."""
+    ventas = _ventas_dos_periodos(desde, hasta, prev_desde, prev_hasta)
+    productos = _productos_dos_periodos(desde, hasta, prev_desde, prev_hasta)
+    escalares = _escalares_dos_periodos(desde, hasta, prev_desde, prev_hasta)
+    incidencias = _incidencias_dos_periodos(desde, hasta, prev_desde, prev_hasta)
+
+    dias = max(1, int(dias))
+    salida = {
+        'categorias': productos['categorias'],
+        'ahora': escalares['ahora'],
+    }
+
+    for clave, p_desde, p_hasta in (('actual', desde, hasta),
+                                    ('anterior', prev_desde, prev_hasta)):
+        v = _armar_ventas(ventas[clave])
+        salida[clave] = {
+            'desde': p_desde,
+            'hasta': p_hasta,
+            'dias': dias,
+            'ventas': v['ventas'],
+            'cancel_motivos': v['cancel_motivos'],
+            'compras_cliente': v['compras_cliente'],
+            'repuestos': productos[clave]['repuestos'],
+            'doh': productos[clave]['doh'],
+            'categorias': productos['categorias'],
+            'seguridad': escalares[clave],
+            'carritos': escalares['carritos_' + clave],
+            'incidencias': incidencias[clave],
+        }
+    return salida
+
+
+def _armar_ventas(filas):
+    """Reparte las filas crudas en los mismos agregados que las funciones viejas."""
+    from decimal import Decimal
+
+    validas = {'n': 0, 'monto': Decimal('0')}
+    canceladas = {'n': 0, 'monto': Decimal('0')}
+    motivos = {}
+    compras = []
+    for row in filas:
+        estado = (row['estado'] or '').lower()
+        monto = Decimal(str(row['total'] or 0))
+        if estado == 'cancelado':
+            canceladas['n'] += 1
+            canceladas['monto'] += monto
+            motivo = row['motivo'] or 'sin_motivo'
+            motivos[motivo] = motivos.get(motivo, 0) + 1
+        else:
+            validas['n'] += 1
+            validas['monto'] += monto
+            compras.append({'cliente_id': row['cliente_id'],
+                            'fecha': row['fecha']})
+    # Mismo criterio de ordenacion que el SQL anterior: por cliente (NULL
+    # primero, como hace MySQL en ASC) y luego por fecha.
+    compras.sort(key=lambda f: (f['cliente_id'] is not None,
+                               f['cliente_id'] if f['cliente_id'] is not None else 0,
+                               f['fecha']))
+    return {
+        'ventas': {
+            'validas': {'n': validas['n'],
+                        'monto': round(float(validas['monto']), 2)},
+            'canceladas': {'n': canceladas['n'],
+                           'monto': round(float(canceladas['monto']), 2)},
+            'total_n': validas['n'] + canceladas['n'],
+        },
+        'cancel_motivos': [
+            {'motivo': motivo, 'n': n}
+            for motivo, n in sorted(motivos.items(), key=lambda kv: (-kv[1], kv[0]))
+        ],
+        'compras_cliente': compras,
+    }
+
+
+def _ventas_dos_periodos(desde, hasta, prev_desde, prev_hasta):
+    """Filas de venta (con su motivo de cancelacion) de los dos periodos."""
+    cur = get_cursor()
+    try:
+        cur.execute(
+            """SELECT 'actual' AS periodo, v.estado AS estado,
+                      v.cliente_id AS cliente_id, v.fecha AS fecha,
+                      v.total AS total,
+                      COALESCE(c.motivo_codigo,'sin_motivo') AS motivo
+               FROM ventas v
+               LEFT JOIN cancelaciones c ON c.venta_id = v.id
+               WHERE v.fecha >= %s AND v.fecha < %s
+               UNION ALL
+               SELECT 'anterior', v.estado, v.cliente_id, v.fecha, v.total,
+                      COALESCE(c.motivo_codigo,'sin_motivo')
+               FROM ventas v
+               LEFT JOIN cancelaciones c ON c.venta_id = v.id
+               WHERE v.fecha >= %s AND v.fecha < %s""",
+            (desde, hasta, prev_desde, prev_hasta),
+        )
+        filas = cur.fetchall()
+    finally:
+        cur.close()
+    salida = {'actual': [], 'anterior': []}
+    for row in filas:
+        salida[row['periodo']].append(row)
+    return salida
+
+
+def _productos_dos_periodos(desde, hasta, prev_desde, prev_hasta):
+    """Catalogo con stock y unidades vendidas de cada periodo, en una consulta."""
+    almacen = almacen_db()
+    cur = get_cursor()
+    try:
+        cur.execute(
+            f"""SELECT p.id AS id, p.nombre AS nombre,
+                       p.categoria AS categoria,
+                       COALESCE(p.stock,0) AS stock,
+                       COALESCE(p.estado,'activo') AS estado,
+                       COALESCE(s.u_actual,0) AS u_actual,
+                       COALESCE(s.u_anterior,0) AS u_anterior
+                FROM {almacen}.productos p
+                LEFT JOIN (
+                    SELECT dv.producto_id AS pid,
+                           SUM(CASE WHEN v.fecha >= %s AND v.fecha < %s
+                                    THEN dv.cantidad ELSE 0 END) AS u_actual,
+                           SUM(CASE WHEN v.fecha >= %s AND v.fecha < %s
+                                    THEN dv.cantidad ELSE 0 END) AS u_anterior
+                    FROM detalle_venta dv
+                    JOIN ventas v ON v.id = dv.venta_id
+                    WHERE COALESCE(v.estado,'') <> 'cancelado'
+                    GROUP BY dv.producto_id
+                ) s ON s.pid = p.id""",
+            (desde, hasta, prev_desde, prev_hasta),
+        )
+        filas = cur.fetchall()
+    finally:
+        cur.close()
+
+    repuestos_cfg = tuple(settings.CATEGORIA_REPUESTOS)
+    repuestos_ci = {c.casefold() for c in repuestos_cfg}
+    doh_cfg = tuple(settings.CATEGORIA_ACCESORIOS + settings.CATEGORIA_REPUESTOS)
+
+    categorias = sorted({(r['categoria'] or '').strip() for r in filas})
+    salida = {
+        'categorias': categorias,
+        'actual': {'repuestos': [], 'doh': {
+            c: {'stock': 0, 'unidades': 0, 'existe': False} for c in doh_cfg}},
+        'anterior': {'repuestos': [], 'doh': {
+            c: {'stock': 0, 'unidades': 0, 'existe': False} for c in doh_cfg}},
+    }
+    for clave, campo in (('actual', 'u_actual'), ('anterior', 'u_anterior')):
+        repuestos = salida[clave]['repuestos']
+        doh = salida[clave]['doh']
+        for r in filas:
+            categoria = (r['categoria'] or '')
+            activo = r['estado'] == 'activo'
+            unidades = _i(r[campo])
+            if activo and categoria.casefold() in repuestos_ci:
+                repuestos.append({
+                    'id': _i(r['id']),
+                    'nombre': r['nombre'],
+                    'stock': _i(r['stock']),
+                    'unidades': unidades,
+                })
+            if activo and categoria in doh:
+                doh[categoria]['stock'] += _i(r['stock'])
+                doh[categoria]['unidades'] += unidades
+                doh[categoria]['existe'] = True
+    return salida
+
+
+def _escalares_dos_periodos(desde, hasta, prev_desde, prev_hasta):
+    """Seguridad, carritos y hora de la BD en una sola consulta."""
+    umbral = settings.UMBRAL_BLOQUEO_LOGIN
+    campos = [
+        "(SELECT NOW()) AS ahora",
+        "(SELECT COUNT(*) FROM intentos_usuario WHERE ultimo_fallo >= %s AND ultimo_fallo < %s) AS a_cuentas",
+        "(SELECT COALESCE(SUM(CASE WHEN COALESCE(max_intentos,0) >= %s THEN 1 ELSE 0 END),0) FROM intentos_usuario WHERE ultimo_fallo >= %s AND ultimo_fallo < %s) AS a_bloqueadas",
+        "(SELECT COALESCE(SUM(intentos),0) FROM intentos_usuario WHERE ultimo_fallo >= %s AND ultimo_fallo < %s) AS a_intentos",
+        "(SELECT COUNT(*) FROM intentos_usuario WHERE ultimo_fallo >= %s AND ultimo_fallo < %s) AS b_cuentas",
+        "(SELECT COALESCE(SUM(CASE WHEN COALESCE(max_intentos,0) >= %s THEN 1 ELSE 0 END),0) FROM intentos_usuario WHERE ultimo_fallo >= %s AND ultimo_fallo < %s) AS b_bloqueadas",
+        "(SELECT COALESCE(SUM(intentos),0) FROM intentos_usuario WHERE ultimo_fallo >= %s AND ultimo_fallo < %s) AS b_intentos",
+    ]
+    params = [
+        desde, hasta,
+        umbral, desde, hasta,
+        desde, hasta,
+        prev_desde, prev_hasta,
+        umbral, prev_desde, prev_hasta,
+        prev_desde, prev_hasta,
+    ]
+    tiene_bloqueos = 'created_at' in columnas_de('bloqueos_ip')
+    if tiene_bloqueos:
+        campos += [
+            "(SELECT COUNT(*) FROM bloqueos_ip WHERE created_at >= %s AND created_at < %s) AS a_ips",
+            "(SELECT COUNT(*) FROM bloqueos_ip WHERE created_at >= %s AND created_at < %s) AS b_ips",
+        ]
+        params += [desde, hasta, prev_desde, prev_hasta]
+    tiene_carrito = 'created_at' in columnas_de('carrito')
+    if tiene_carrito:
+        campos += [
+            "(SELECT COUNT(DISTINCT usuario_id) FROM carrito WHERE created_at >= %s AND created_at < %s) AS a_carritos",
+            "(SELECT COUNT(DISTINCT usuario_id) FROM carrito WHERE created_at >= %s AND created_at < %s) AS b_carritos",
+        ]
+        params += [desde, hasta, prev_desde, prev_hasta]
+
+    cur = get_cursor()
+    try:
+        cur.execute("SELECT " + ", ".join(campos), tuple(params))
+        fila = cur.fetchone() or {}
+    finally:
+        cur.close()
+
+    def _seg(prefijo):
+        return {
+            'cuentas_intentos': _i(fila.get(prefijo + '_cuentas')),
+            'cuentas_bloqueadas': _i(fila.get(prefijo + '_bloqueadas')),
+            'intentos_total': _i(fila.get(prefijo + '_intentos')),
+            'ips_bloqueadas': _i(fila.get(prefijo + '_ips')) if tiene_bloqueos else 0,
+        }
+
+    return {
+        'ahora': fila.get('ahora') or ahora_bd(),
+        'actual': _seg('a'),
+        'anterior': _seg('b'),
+        'carritos_actual': _i(fila.get('a_carritos')) if tiene_carrito else None,
+        'carritos_anterior': _i(fila.get('b_carritos')) if tiene_carrito else None,
+    }
+
+
+def _incidencias_dos_periodos(desde, hasta, prev_desde, prev_hasta):
+    """Incidencias agrupadas por tipo y motivo, para los dos periodos."""
+    cur = get_cursor()
+    try:
+        cur.execute(
+            """SELECT 'actual' AS periodo, tipo, motivo,
+                      COUNT(*) AS n,
+                      COALESCE(SUM(cantidad), 0) AS unidades
+               FROM kpi_incidencias
+               WHERE fecha >= %s AND fecha < %s
+               GROUP BY tipo, motivo
+               UNION ALL
+               SELECT 'anterior', tipo, motivo,
+                      COUNT(*), COALESCE(SUM(cantidad), 0)
+               FROM kpi_incidencias
+               WHERE fecha >= %s AND fecha < %s
+               GROUP BY tipo, motivo""",
+            (desde, hasta, prev_desde, prev_hasta),
+        )
+        filas = cur.fetchall()
+    finally:
+        cur.close()
+    salida = {'actual': [], 'anterior': []}
+    for row in filas:
+        salida[row['periodo']].append({
+            'tipo': row['tipo'],
+            'motivo': row['motivo'],
+            'n': _i(row['n']),
+            'unidades': _i(row['unidades']),
+        })
+    for clave in salida:
+        salida[clave].sort(key=lambda i: (-i['n'], i['tipo'], i['motivo']))
+    return salida
+
+
 def insert_incidencia(tipo, motivo, cantidad=1, venta_id=None, producto_id=None,
                       referencia=None, nota=None):
     """Registra una incidencia de operacion. Devuelve el id creado."""

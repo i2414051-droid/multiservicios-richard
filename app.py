@@ -27,12 +27,13 @@ from functools import wraps
 from urllib.parse import quote, urlencode
 
 from flask import (Flask, render_template, request, redirect,
-                   url_for, session, jsonify, flash, send_file, Response, g)
+                   url_for, session, jsonify, flash, send_file, Response, g, abort)
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
 from flask_mail import Mail, Message
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import HTTPException, NotFound
+from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
 
 # Modulo de KPIs de negocio (ventas y almacen). Se registra mas abajo,
@@ -51,7 +52,37 @@ from reportlab.lib.units import inch
 # APP SETUP
 # ─────────────────────────────────────────────
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32)
+
+# SECRET_KEY firma la cookie de sesion. Si falta, cada proceso genera una
+# distinta: con varios workers (o varias instancias) el usuario se desloguea al
+# azar y los tokens CSRF dejan de valer. Por eso se avisa fuerte en el log.
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    logging.getLogger(__name__).warning(
+        'SECRET_KEY no esta definida: se usa una clave aleatoria por proceso. '
+        'Con varios workers las sesiones se invalidan entre si. Definela en el entorno.')
+    _secret_key = os.urandom(32)
+app.secret_key = _secret_key
+
+# Detras del proxy de Render el cliente real llega en X-Forwarded-For/Proto.
+# Sin esto request.remote_addr es el proxy: todos los visitantes compartirian
+# IP (el bloqueo por IP castigaria a todos) y la cookie Secure no se pondria.
+if os.environ.get('RENDER') or os.environ.get('TRAS_PROXY') == '1':
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+# Cookies de sesion: fuera del alcance de JavaScript, sin viajar en peticiones
+# cruzadas y solo por HTTPS cuando la app esta publicada.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=(os.environ.get(
+        'SESSION_COOKIE_SECURE',
+        '1' if os.environ.get('RENDER') else '0') == '1'),
+    # Tope de subida: una foto de movil ronda 5-10 MB. 16 MB deja margen y
+    # evita que un cliente mande un archivo gigante y agote la memoria.
+    MAX_CONTENT_LENGTH=int(os.environ.get('MAX_CONTENT_MB', '16')) * 1024 * 1024,
+)
+
 bcrypt = Bcrypt(app)
 
 # ─────────────────────────────────────────────
@@ -66,9 +97,147 @@ app.jinja_env.globals['csrf_token'] = generate_csrf_token
 
 def validate_csrf():
     token = request.form.get('_csrf_token') or request.headers.get('X-CSRF-Token')
-    if not token or token != session.get('_csrf_token'):
+    esperado = session.get('_csrf_token')
+    if not token or not esperado:
         return False
-    return True
+    # compare_digest evita filtrar el token por el tiempo de comparacion.
+    return secrets.compare_digest(str(token), str(esperado))
+
+
+# ─────────────────────────────────────────────
+# CSRF GLOBAL Y LIMITE DE PETICIONES
+# ─────────────────────────────────────────────
+# Todo lo que escribe (POST/PUT/PATCH/DELETE) exige token, incluidas las rutas
+# que antes se olvidaban de comprobarlo. Sin esto, un sitio externo podia
+# lanzar operaciones con la sesion abierta del usuario.
+_METODOS_SEGUROS = ('GET', 'HEAD', 'OPTIONS', 'TRACE')
+_ENDPOINTS_SIN_CSRF = frozenset({'static'})
+
+# Limite por IP y endpoint, en ventana fija de 60 s. Es por proceso: con dos
+# workers el limite efectivo se duplica, pero sigue frenando la fuerza bruta y
+# las rafagas antes de que lleguen a bcrypt o a la BD.
+_RATE_LOCK = threading.Lock()
+_RATE = {}
+_RATE_MAX_CLAVES = 20000
+_LIMITES = {
+    'login': (12, 60),
+    'registro': (10, 60),
+    'recuperar_password': (5, 60),
+    'restablecer_password': (5, 60),
+    'api_validar_documento': (30, 60),
+}
+_LIMITE_POST_GENERAL = (120, 60)
+
+
+def _rate_permitido(clave, limite, ventana):
+    """True si la clave no supero `limite` en la ventana actual."""
+    ahora = time.time()
+    with _RATE_LOCK:
+        inicio, cuenta = _RATE.get(clave, (ahora, 0))
+        if ahora - inicio >= ventana:
+            inicio, cuenta = ahora, 0
+        cuenta += 1
+        _RATE[clave] = (inicio, cuenta)
+        if len(_RATE) > _RATE_MAX_CLAVES:
+            for k in [k for k, (t, _) in _RATE.items() if ahora - t >= ventana]:
+                _RATE.pop(k, None)
+    return cuenta <= limite
+
+
+def _respuesta_429(ventana):
+    if request.path.startswith('/api/') or request.is_json:
+        return jsonify({'ok': False,
+                        'error': 'Demasiadas solicitudes. Intenta en un minuto.'}), \
+            429, {'Retry-After': str(ventana)}
+    return ('<!doctype html><html lang="es"><meta charset="utf-8">'
+            '<h1>Demasiadas solicitudes</h1>'
+            '<p>Espera un minuto e intenta de nuevo.</p>'), \
+        429, {'Retry-After': str(ventana),
+              'Content-Type': 'text/html; charset=utf-8'}
+
+
+@app.before_request
+def _limitar_peticiones():
+    if request.method in _METODOS_SEGUROS:
+        return None
+    ip = request.remote_addr or 'desconocida'
+    limite, ventana = _LIMITE_POST_GENERAL
+    if not _rate_permitido('todo:%s' % ip, limite, ventana):
+        return _respuesta_429(ventana)
+    regla = _LIMITES.get(request.endpoint)
+    if regla and not _rate_permitido('%s:%s' % (request.endpoint, ip),
+                                     regla[0], regla[1]):
+        return _respuesta_429(regla[1])
+    return None
+
+
+def _referer_local():
+    ref = request.referrer
+    return bool(ref) and ref.startswith(request.host_url)
+
+
+# Rutas GET que escriben en la BD (borrados, carrito, checkout...). Un sitio
+# externo podia dispararlas con solo conseguir que el usuario pulsara un
+# enlace. Sec-Fetch-Site lo distingue; los navegadores que no lo mandan siguen
+# funcionando igual.
+_ENDPOINTS_GET_ESCRITURA = frozenset({
+    'eliminar_producto', 'activar_producto', 'eliminar_producto_definitivo',
+    'consultar', 'ocultar_venta', 'mostrar_venta', 'limpiar_historial',
+    'eliminar_proveedor', 'eliminar_pedido', 'marcar_enviado',
+    'eliminar_ingreso', 'eliminar_entrega', 'eliminar_salida',
+    'eliminar_direccion', 'checkout', 'eliminar_carrito',
+    'aumentar_cantidad', 'agregar',
+})
+
+
+@app.before_request
+def _bloquear_get_cruzado():
+    if request.method != 'GET':
+        return None
+    if request.endpoint not in _ENDPOINTS_GET_ESCRITURA:
+        return None
+    if (request.headers.get('Sec-Fetch-Site') or '').lower() == 'cross-site':
+        abort(403)
+    return None
+
+
+@app.before_request
+def _exigir_csrf():
+    if request.method in _METODOS_SEGUROS:
+        return None
+    if request.endpoint in _ENDPOINTS_SIN_CSRF:
+        return None
+    if validate_csrf():
+        return None
+    if (request.path.startswith('/api/')
+            or request.is_json
+            or request.headers.get('X-Requested-With') == 'fetch'):
+        return jsonify({'ok': False,
+                        'error': 'Token CSRF invalido o vencido.'}), 400
+    flash('Tu sesion vencio o el formulario no es valido. Intenta de nuevo.', 'danger')
+    return redirect(request.referrer if _referer_local() else '/')
+
+
+@app.after_request
+def _cabeceras_seguridad(resp):
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    resp.headers.setdefault('Permissions-Policy',
+                            'geolocation=(), microphone=(), camera=()')
+    # CSP minima: no toca scripts ni estilos (la app usa mucho inline), pero
+    # impide enmarcar el sitio (clickjacking) y secuestrar la base del documento.
+    resp.headers.setdefault(
+        'Content-Security-Policy',
+        "frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
+    if request.is_secure:
+        resp.headers.setdefault('Strict-Transport-Security',
+                                'max-age=31536000; includeSubDomains')
+    # Paginas con datos del usuario: que no queden en la cache del navegador
+    # (boton "atras" despues de cerrar sesion).
+    if not request.path.startswith('/static/'):
+        resp.headers.setdefault('Cache-Control', 'no-store')
+    return resp
 
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -1681,6 +1850,44 @@ def admin():
 # ─────────────────────────────────────────────
 # PRODUCTOS CRUD
 # ─────────────────────────────────────────────
+# Tipo real de la imagen por sus primeros bytes. No se confia en el nombre ni
+# en el Content-Type que declara el navegador: un .html subido como "imagen"
+# se serviria desde el mismo dominio y podria ejecutar JavaScript.
+_FIRMAS_IMAGEN = (
+    (b'\xff\xd8\xff', 'image/jpeg'),
+    (b'\x89PNG\r\n\x1a\n', 'image/png'),
+    (b'GIF87a', 'image/gif'),
+    (b'GIF89a', 'image/gif'),
+)
+_EXT_IMAGEN = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/avif': '.avif',
+    'image/heic': '.heic',
+}
+_MIMES_IMAGEN = frozenset(_EXT_IMAGEN)
+
+
+def _mime_imagen(datos):
+    """Tipo real de la imagen, o None si no es una de las admitidas."""
+    if not datos:
+        return None
+    for firma, mime in _FIRMAS_IMAGEN:
+        if datos.startswith(firma):
+            return mime
+    if datos[:4] == b'RIFF' and datos[8:12] == b'WEBP':
+        return 'image/webp'
+    if datos[4:8] == b'ftyp':
+        marca = datos[8:12]
+        if marca in (b'avif', b'avis'):
+            return 'image/avif'
+        if marca in (b'heic', b'heix', b'hevc', b'hevx', b'mif1'):
+            return 'image/heic'
+    return None
+
+
 def _procesar_imagen_producto(imagen):
     """Procesa una imagen subida y devuelve (ruta_relativa, bytes, mime).
 
@@ -1690,13 +1897,12 @@ def _procesar_imagen_producto(imagen):
     ruta relativa mantiene compatibilidad con plantillas existentes."""
     if not imagen or not imagen.filename:
         return None, None, None
-    base = secure_filename(imagen.filename)
-    if not base:
-        ext = os.path.splitext(imagen.filename)[1].lower()
-        base = 'imagen' + ext
-    fn = secrets.token_hex(8) + '_' + base
     datos = imagen.read()
-    mime = imagen.mimetype or 'image/jpeg'
+    mime = _mime_imagen(datos)
+    if not mime:
+        raise ValueError('El archivo no es una imagen valida (JPG, PNG, GIF, WEBP o AVIF).')
+    base = os.path.splitext(secure_filename(imagen.filename))[0][:60] or 'imagen'
+    fn = secrets.token_hex(8) + '_' + base + _EXT_IMAGEN[mime]
     try:
         with open(os.path.join(app.config['UPLOAD_FOLDER'], fn), 'wb') as f:
             f.write(datos)
@@ -1725,7 +1931,11 @@ def agregar_producto():
         flash('No se permiten precios negativos', 'danger')
         return redirect('/admin')
     imagen = request.files.get('imagen')
-    imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
+    try:
+        imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
+    except ValueError as exc:
+        flash(str(exc), 'danger')
+        return redirect('/admin')
 
     cur = mysql.connection.cursor()
     cur.execute(f"""
@@ -1766,7 +1976,11 @@ def editar_producto(id):
             return redirect(f'/editar_producto/{id}')
 
         if imagen and imagen.filename:
-            imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
+            try:
+                imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
+            except ValueError as exc:
+                flash(str(exc), 'danger')
+                return redirect(f'/editar_producto/{id}')
             cur.execute(f"""
                 UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
                 stock=%s, categoria=%s, imagen=%s, imagen_datos=%s, imagen_mime=%s WHERE id=%s
@@ -1855,7 +2069,7 @@ def consultar(tipo, numero):
 def api_validar_documento():
     if 'user_id' not in session:
         return jsonify({'error': 'No autenticado'}), 401
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     tipo = data.get('tipo', '')
     numero = data.get('numero', '')
     nombres = data.get('nombres', '').strip()
@@ -4773,7 +4987,12 @@ def _servir_imagen_desde_db(filename):
         return None
     if not fila or not fila['imagen_datos']:
         return None
-    return Response(fila['imagen_datos'], mimetype=fila['imagen_mime'] or 'image/jpeg')
+    # Defensa en profundidad: si una fila antigua guardo un Content-Type que no
+    # es de imagen, no se devuelve como pagina ejecutable.
+    mime = (fila['imagen_mime'] or '').lower().split(';')[0].strip()
+    if mime not in _MIMES_IMAGEN:
+        mime = 'application/octet-stream'
+    return Response(fila['imagen_datos'], mimetype=mime)
 
 
 def _static_con_db(filename):

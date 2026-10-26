@@ -91,6 +91,10 @@ def _json_safe(valor):
 _CACHE_MAX = 24                      # periodos distintos que se conservan
 _cache_snapshots = {}
 _cache_lock = threading.Lock()
+# Calculos en marcha por periodo. Si dos peticiones piden el mismo periodo a
+# la vez, solo una consulta la BD y la otra espera su resultado: con varios
+# administradores refrescando a la vez no se multiplican las consultas.
+_cache_en_curso = {}
 
 
 def _ttl_desde_entorno():
@@ -150,26 +154,58 @@ def get_snapshot():
     # datos frescos y se salta la lectura de la cache. El resultado se
     # guarda igual, para que los refrescos automaticos lo aprovechen.
     forzar = request.args.get('forzar') == '1'
+
+    evento = None
     if not forzar:
         with _cache_lock:
             guardado = _cache_snapshots.get(clave)
             if guardado is not None and (ahora - guardado[0]) < _CACHE_TTL:
                 return guardado[1]
+            evento = _cache_en_curso.get(clave)
+            if evento is None:
+                evento = threading.Event()
+                _cache_en_curso[clave] = evento
+                dueno = True
+            else:
+                dueno = False
+        if not dueno:
+            # Otra peticion esta calculando ese periodo: se espera su
+            # resultado en vez de repetir las mismas consultas.
+            if not evento.wait(timeout=60):
+                with _cache_lock:
+                    if _cache_en_curso.get(clave) is evento:
+                        _cache_en_curso.pop(clave, None)
+            with _cache_lock:
+                guardado = _cache_snapshots.get(clave)
+            if guardado is not None:
+                return guardado[1]
+            evento = None       # el calculo ajeno fallo: se intenta aqui
 
+    guardado_ok = False
     try:
         periodo = service.resolve_period(request.args)
         snapshot = service.build_snapshot(periodo)
+        guardado_ok = True
     except Exception as exc:
         current_app.logger.warning('KPI-BIZ get_snapshot fallo: %s', exc)
-        return _snapshot_vacio()
+        snapshot = _snapshot_vacio()
 
-    with _cache_lock:
-        _cache_snapshots[clave] = (ahora, snapshot)
-        if len(_cache_snapshots) > _CACHE_MAX:
-            viejos = sorted(_cache_snapshots,
-                            key=lambda k: _cache_snapshots[k][0])
-            for k in viejos[:len(_cache_snapshots) - _CACHE_MAX]:
-                _cache_snapshots.pop(k, None)
+    if guardado_ok:
+        with _cache_lock:
+            _cache_snapshots[clave] = (ahora, snapshot)
+            if len(_cache_snapshots) > _CACHE_MAX:
+                viejos = sorted(_cache_snapshots,
+                                key=lambda k: _cache_snapshots[k][0])
+                for k in viejos[:len(_cache_snapshots) - _CACHE_MAX]:
+                    _cache_snapshots.pop(k, None)
+
+    # Se despierta a las peticiones que esperaban ESTE calculo despues de
+    # guardarlo: asi encuentran el resultado y no lo repiten.
+    if evento is not None:
+        with _cache_lock:
+            if _cache_en_curso.get(clave) is evento:
+                _cache_en_curso.pop(clave, None)
+        evento.set()
     return snapshot
 
 
