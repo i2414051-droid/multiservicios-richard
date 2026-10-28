@@ -12,7 +12,7 @@
         <a class="page-link" href="{{ base_url }}page=1{{ qs }}" style="background:var(--bg-card);color:var(--text-primary);border-color:var(--border-card)">«</a>
       </li>
       <li class="page-item {% if page <= 1 %}disabled{% endif %}">
-        <a class="page-link" href="{{ base_url }}page={{ page-1 }}{{ qs }}" style="background:var(--bg-card);color:var(--text-primary);border-color:var(--border-card)">‹</a>
+        <a class="page-link" href="{{ base_url }}page={{ page-1 }}{{ qs }}" title="Página anterior" style="background:var(--bg-card);color:var(--text-primary);border-color:var(--border-card)">‹ Anterior</a>
       </li>
       {% set start = [1, page-2] | max %}
       {% set end = [total_pages, page+2] | min %}
@@ -23,7 +23,7 @@
       </li>
       {% endfor %}
       <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
-        <a class="page-link" href="{{ base_url }}page={{ page+1 }}{{ qs }}" style="background:var(--bg-card);color:var(--text-primary);border-color:var(--border-card)">›</a>
+        <a class="page-link" href="{{ base_url }}page={{ page+1 }}{{ qs }}" title="Página siguiente" style="background:var(--bg-card);color:var(--text-primary);border-color:var(--border-card)">Siguiente ›</a>
       </li>
       <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
         <a class="page-link" href="{{ base_url }}page={{ total_pages }}{{ qs }}" style="background:var(--bg-card);color:var(--text-primary);border-color:var(--border-card)">»</a>

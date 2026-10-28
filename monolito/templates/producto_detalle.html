@@ -8,21 +8,44 @@
     </ol>
   </nav>
 
-  <div class="row g-4">
-    <!-- IMAGEN -->
-    <div class="col-md-5 text-center">
-      {% if producto.imagen %}
-      <img src="/static/{{ producto.imagen }}" alt="{{ producto.nombre }}"
-           style="max-width:100%;border-radius:18px;border:2px solid rgba(243,156,18,.3)">
+  <div class="row g-4 align-items-start">
+    <!-- IMAGEN / GALERÍA -->
+    <div class="col-lg-6">
+      {% if imagenes %}
+      <div class="galeria-detalle d-flex align-items-start gap-3">
+        {% if imagenes|length > 1 %}
+        <div class="galeria-thumbs d-flex flex-column gap-2">
+          {% for img in imagenes %}
+          <button type="button" class="btn p-0 border-0 btn-miniatura{% if loop.first %} activa{% endif %}"
+                  data-src="{{ url_for('static', filename=img) }}"
+                  onclick="verImagen(this, '{{ url_for('static', filename=img) }}')"
+                  title="Ver imagen {{ loop.index }} de {{ producto.nombre }}">
+            <img src="{{ url_for('static', filename=(img|thumb)) }}"
+                 loading="eager"
+                 decoding="sync"
+                 alt="Imagen {{ loop.index }} de {{ producto.nombre }}">
+          </button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="galeria-principal flex-grow-1">
+          <img id="imagenPrincipal" src="{{ url_for('static', filename=imagenes[0]) }}"
+               alt="{{ producto.nombre }}"
+               loading="eager"
+               decoding="sync"
+               fetchpriority="high"
+               style="width:100%;height:auto;max-height:560px;object-fit:contain;border-radius:18px;border:2px solid rgba(243,156,18,.3);background:#0b0b0b">
+        </div>
+      </div>
       {% else %}
-      <div class="tc-gold" style="border-radius:18px;padding:80px">
+      <div class="tc-gold text-center" style="border-radius:18px;padding:80px">
         <i class="bi bi-image" style="font-size:80px;color:var(--text-muted)"></i>
       </div>
       {% endif %}
     </div>
 
     <!-- DETALLES -->
-    <div class="col-md-7">
+    <div class="col-lg-6">
       <div class="card tc">
         <div class="card-body p-4">
           <h2 style="color:#f39c12;font-weight:800">{{ producto.nombre }}</h2>
@@ -61,4 +84,44 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  var principal = document.getElementById('imagenPrincipal');
+  if (!principal) return;
+  var cache = {};
+  document.querySelectorAll('.btn-miniatura[data-src]').forEach(function(btn){
+    var s = btn.getAttribute('data-src');
+    if (s && !cache[s]) {
+      cache[s] = new Image();
+      cache[s].src = s;
+    }
+  });
+  window.verImagen = function(boton, src) {
+    if (!principal || !src) return;
+    if (principal.src && principal.src.indexOf(src) !== -1) {
+      document.querySelectorAll('.btn-miniatura').forEach(function (b) { b.classList.remove('activa'); });
+      if (boton) boton.classList.add('activa');
+      return;
+    }
+    if (!cache[src]) {
+      cache[src] = new Image();
+      cache[src].src = src;
+    }
+    var img = cache[src];
+    var apply = function(){
+      principal.src = img.src;
+      document.querySelectorAll('.btn-miniatura').forEach(function (b) { b.classList.remove('activa'); });
+      if (boton) boton.classList.add('activa');
+    };
+    if (img.complete && img.naturalWidth > 0) {
+      apply();
+    } else {
+      img.onload = apply;
+    }
+  };
+})();
+</script>
 {% endblock %}

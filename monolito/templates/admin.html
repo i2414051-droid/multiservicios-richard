@@ -11,9 +11,6 @@
     <h2 class="mb-3">Panel Administrador</h2>
 
     <div class="d-flex gap-2 mb-4 flex-wrap">
-        <a href="/logout" class="btn btn-outline-danger">
-            <i class="bi bi-box-arrow-right"></i> Cerrar sesión
-        </a>
         <a href="/productos-para-pedir" class="btn btn-outline-danger position-relative">
             <i class="bi bi-cart-dash"></i> Productos para Pedir
             {% if pedidos_pendientes > 0 %}
@@ -23,7 +20,7 @@
             {% endif %}
         </a>
         <a href="/proveedores" class="btn btn-outline-info">
-            <i class="bi bi-truck"></i> Proveedores
+            <i class="bi bi-person"></i> Proveedores
             {% if total_proveedores > 0 %}
             <span class="badge bg-info text-dark ms-1">{{ total_proveedores }}</span>
             {% endif %}
@@ -62,8 +59,9 @@
                         </select>
                     </div>
                     <div class="col-md-4 mb-3">
-                        <label class="form-label">Imagen</label>
-                        <input type="file" name="imagen" class="form-control" accept="image/*" required>
+                        <label class="form-label">Imágenes (1 a 4)</label>
+                        <input type="file" name="imagenes" class="form-control" accept="image/*" multiple required>
+                        <div class="form-text">La primera imagen será la principal. Puedes subir hasta 4.</div>
                     </div>
                 </div>
                 <button class="btn btn-success w-100">

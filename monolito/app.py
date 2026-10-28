@@ -642,6 +642,33 @@ def paginate_query(cur, sql_count, sql_data, params, page, per_page=PER_PAGE):
     return items, total, page, total_pages
 
 # ─────────────────────────────────────────────
+# LIBRO DE RECLAMACIONES
+# ─────────────────────────────────────────────
+# Datos del proveedor que se imprimen en la hoja. Se pueden cambiar por
+# variables de entorno sin tocar el codigo.
+EMPRESA_INFO = {
+    'nombre': os.environ.get('EMPRESA_NOMBRE', 'MULTISERVICIOS RICHARD'),
+    'ruc': os.environ.get('EMPRESA_RUC', '10450119429'),
+    'domicilio': os.environ.get('EMPRESA_DOMICILIO', 'Huancayo, Perú'),
+    'correo': os.environ.get('EMPRESA_CORREO', ''),
+}
+DIAS_RESPUESTA_RECLAMO = int(os.environ.get('DIAS_RESPUESTA_RECLAMO', '15'))
+app.jinja_env.globals['empresa_info'] = EMPRESA_INFO
+app.jinja_env.globals['dias_respuesta_reclamo'] = DIAS_RESPUESTA_RECLAMO
+
+
+def _fecha_legible(valor, formato='%d/%m/%Y'):
+    """Formatea fechas de la BD aunque el driver devuelva texto."""
+    if not valor:
+        return '—'
+    if hasattr(valor, 'strftime'):
+        return valor.strftime(formato)
+    return str(valor)
+
+app.jinja_env.filters['fecha'] = _fecha_legible
+app.jinja_env.filters['fechahora'] = lambda v: _fecha_legible(v, '%d/%m/%Y %H:%M')
+
+# ─────────────────────────────────────────────
 # INIT TABLAS NUEVAS
 # ─────────────────────────────────────────────
 # Dias que se guarda una fila de intentos_usuario sin actividad. Pasado el
@@ -741,6 +768,39 @@ def _init_db_inner():
                 cur.execute(sql)
             except Exception:
                 pass
+
+        # Libro de Reclamaciones (Ley 29571 y D.S. 011-2011-PCM). Vive en la BD
+        # principal: es un registro legal, independiente del catalogo. `token`
+        # permite que el consumidor vea su constancia sin exponer la de otros
+        # (el codigo correlativo es adivinable; el token no).
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reclamaciones (
+                id                        INT AUTO_INCREMENT PRIMARY KEY,
+                codigo                    VARCHAR(30) UNIQUE,
+                token                     VARCHAR(64) UNIQUE,
+                fecha                     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                tipo                      VARCHAR(20) NOT NULL DEFAULT 'reclamo',
+                consumidor_nombre         VARCHAR(200) NOT NULL,
+                consumidor_documento_tipo VARCHAR(20) DEFAULT 'DNI',
+                consumidor_documento      VARCHAR(20),
+                consumidor_domicilio      VARCHAR(300),
+                consumidor_telefono       VARCHAR(20),
+                consumidor_correo         VARCHAR(200),
+                bien_tipo                 VARCHAR(20) DEFAULT 'producto',
+                bien_descripcion          TEXT,
+                bien_monto                DECIMAL(10,2),
+                detalle                   TEXT NOT NULL,
+                pedido                    TEXT,
+                estado                    VARCHAR(20) DEFAULT 'pendiente',
+                respuesta                 TEXT,
+                fecha_respuesta           DATETIME,
+                respondido_por            VARCHAR(150),
+                fecha_limite              DATETIME,
+                created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX ix_reclamaciones_estado (estado),
+                INDEX ix_reclamaciones_fecha (fecha)
+            )
+        """)
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS carrito (
@@ -1054,6 +1114,23 @@ def _init_db_inner():
                 cur.execute(sql)
             except Exception:
                 pass
+
+        # Galeria de productos: hasta 4 imagenes por producto. La principal se
+        # sigue guardando en productos.imagen/imagen_datos/imagen_mime (asi no
+        # se rompen listados ni carrito) y las demas viven aqui, con sus bytes
+        # en la BD por la misma razon que la principal (disco efimero en Render).
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.productos_imagenes (
+                id           INT AUTO_INCREMENT PRIMARY KEY,
+                producto_id  INT NOT NULL,
+                imagen       VARCHAR(300),
+                imagen_datos LONGBLOB,
+                imagen_mime  VARCHAR(100),
+                orden        INT DEFAULT 0,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX ix_producto_imagenes_producto (producto_id)
+            )
+        """)
 
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.proveedores (
@@ -1900,6 +1977,9 @@ def dashboard():
     cur.execute("SELECT COUNT(*) AS total FROM ventas WHERE estado='en espera'")
     ventas_pendientes = cur.fetchone()['total'] or 0
 
+    cur.execute("SELECT COUNT(*) AS total FROM reclamaciones WHERE estado='pendiente'")
+    reclamaciones_pendientes = cur.fetchone()['total'] or 0
+
     cur.execute("""
         SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento
         FROM ventas v ORDER BY v.fecha DESC LIMIT 5
@@ -1925,6 +2005,7 @@ def dashboard():
                            pedidos_pendientes=pedidos_pendientes,
                            total_proveedores=total_proveedores,
                            ventas_pendientes=ventas_pendientes,
+                           reclamaciones_pendientes=reclamaciones_pendientes,
                            ultimas_ventas=ultimas_ventas,
                            productos_stock_bajo=productos_stock_bajo)
 
@@ -2023,6 +2104,72 @@ def _procesar_imagen_producto(imagen):
     return 'uploads/' + fn, datos, mime
 
 
+MAX_IMAGENES_PRODUCTO = 4
+
+
+def _archivos_imagenes_producto(nombre_campo='imagenes', nombre_unico='imagen'):
+    """Archivos de imagen subidos para un producto (de 1 a 4).
+
+    Acepta el campo multiple `imagenes` y, por compatibilidad con formularios
+    antiguos, el campo individual `imagen`."""
+    archivos = [f for f in request.files.getlist(nombre_campo) if f and f.filename]
+    if not archivos:
+        unico = request.files.get(nombre_unico)
+        if unico and unico.filename:
+            archivos = [unico]
+    return archivos
+
+
+def _procesar_imagenes_producto(archivos):
+    """Valida y procesa los archivos. Devuelve [(ruta, bytes, mime), ...]."""
+    if not archivos:
+        raise ValueError('Debes subir al menos una imagen del producto.')
+    if len(archivos) > MAX_IMAGENES_PRODUCTO:
+        raise ValueError(
+            f'Puedes subir como maximo {MAX_IMAGENES_PRODUCTO} imagenes por producto.'
+        )
+    return [_procesar_imagen_producto(f) for f in archivos]
+
+
+def _imagenes_extra(cur, producto_ids):
+    """Mapa {producto_id: [rutas]} con las imagenes adicionales de cada producto."""
+    ids = [int(i) for i in producto_ids if i is not None]
+    if not ids:
+        return {}
+    marcas = ','.join(['%s'] * len(ids))
+    cur.execute(
+        f"SELECT producto_id, imagen FROM {ALMACEN_DB}.productos_imagenes "
+        f"WHERE producto_id IN ({marcas}) AND imagen IS NOT NULL "
+        f"ORDER BY producto_id, orden, id",
+        tuple(ids),
+    )
+    mapa = {}
+    for fila in cur.fetchall():
+        mapa.setdefault(fila['producto_id'], []).append(fila['imagen'])
+    return mapa
+
+
+def _filas_extra(cur, producto_id):
+    """Filas de las imagenes adicionales de un producto (id, imagen, orden)."""
+    cur.execute(
+        f"SELECT id, imagen, orden FROM {ALMACEN_DB}.productos_imagenes "
+        f"WHERE producto_id=%s ORDER BY orden, id",
+        (producto_id,),
+    )
+    return cur.fetchall()
+
+
+def _insertar_extras(cur, producto_id, procesadas, orden_inicial=1):
+    """Guarda las imagenes adicionales (todas menos la principal)."""
+    for i, (ruta, datos, mime) in enumerate(procesadas, start=orden_inicial):
+        cur.execute(
+            f"INSERT INTO {ALMACEN_DB}.productos_imagenes "
+            f"(producto_id, imagen, imagen_datos, imagen_mime, orden) "
+            f"VALUES (%s,%s,%s,%s,%s)",
+            (producto_id, ruta, datos, mime, i),
+        )
+
+
 @app.route('/agregar_producto', methods=['POST'])
 def agregar_producto():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -2042,20 +2189,26 @@ def agregar_producto():
     if precio < 0:
         flash('No se permiten precios negativos', 'danger')
         return redirect('/admin')
-    imagen = request.files.get('imagen')
     try:
-        imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
+        procesadas = _procesar_imagenes_producto(_archivos_imagenes_producto())
     except ValueError as exc:
         flash(str(exc), 'danger')
         return redirect('/admin')
+
+    # La primera imagen es la principal (compatibilidad con listados/carrito);
+    # las siguientes se guardan como galeria del producto.
+    imagen_db, imagen_datos, imagen_mime = procesadas[0]
+    extras = procesadas[1:]
 
     cur = mysql.connection.cursor()
     cur.execute(f"""
         INSERT INTO {ALMACEN_DB}.productos (nombre, descripcion, precio, stock, categoria, imagen, imagen_datos, imagen_mime)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
     """, (nombre, descripcion, precio, stock, categoria, imagen_db, imagen_datos, imagen_mime))
-    mysql.connection.commit()
     nuevo_id = cur.lastrowid
+    if extras:
+        _insertar_extras(cur, nuevo_id, extras, orden_inicial=1)
+    mysql.connection.commit()
     verificar_stock_bajo(cur, nuevo_id)
     mysql.connection.commit()
     return redirect('/admin')
@@ -2078,7 +2231,6 @@ def editar_producto(id):
             flash('Precio o stock con valor inválido.', 'danger')
             return redirect(f'/editar_producto/{id}')
         categoria   = request.form['categoria']
-        imagen      = request.files.get('imagen')
 
         if precio < 0:
             flash('No se permiten precios negativos.', 'danger')
@@ -2087,21 +2239,95 @@ def editar_producto(id):
             flash('No se permiten valores negativos en el stock.', 'danger')
             return redirect(f'/editar_producto/{id}')
 
-        if imagen and imagen.filename:
-            try:
-                imagen_db, imagen_datos, imagen_mime = _procesar_imagen_producto(imagen)
-            except ValueError as exc:
-                flash(str(exc), 'danger')
-                return redirect(f'/editar_producto/{id}')
+        # ── Galeria: que se conserva, que se borra y que se agrega ──
+        cur.execute(f"SELECT imagen FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
+        actual = cur.fetchone()
+        if not actual:
+            cur.close()
+            flash('Producto no encontrado.', 'danger')
+            return redirect('/admin')
+        extras_actuales = _filas_extra(cur, id)
+
+        eliminar_ids = {int(v) for v in request.form.getlist('eliminar_imagen')
+                        if str(v).isdigit()}
+        quitar_principal = request.form.get('eliminar_principal') == '1'
+        conservar = [f for f in extras_actuales if f['id'] not in eliminar_ids]
+
+        archivos_nuevos = _archivos_imagenes_producto()
+        try:
+            archivo_principal = request.files.get('imagen')
+            principal = None
+            if archivo_principal and archivo_principal.filename:
+                principal = _procesar_imagen_producto(archivo_principal)
+            nuevos = _procesar_imagenes_producto(archivos_nuevos) if archivos_nuevos else []
+        except ValueError as exc:
+            flash(str(exc), 'danger')
+            return redirect(f'/editar_producto/{id}')
+
+        # Plan final antes de escribir nada en la BD:
+        #   principal = imagen nueva que reemplaza a la principal
+        #   mantener  = la principal actual se queda como esta
+        #   si no hay principal, se promueve la primera imagen disponible.
+        mantener = principal is None and bool(actual['imagen']) and not quitar_principal
+        promover_fila = None
+        if principal is None and not mantener:
+            if conservar:
+                promover_fila = conservar.pop(0)
+            elif nuevos:
+                principal = nuevos.pop(0)
+
+        total = (1 if (principal is not None or mantener or promover_fila) else 0) \
+            + len(conservar) + len(nuevos)
+        if total > MAX_IMAGENES_PRODUCTO:
+            flash(
+                f'Un producto admite como maximo {MAX_IMAGENES_PRODUCTO} imagenes '
+                f'(con estos cambios quedarian {total}). Elimina alguna antes de guardar.',
+                'danger',
+            )
+            return redirect(f'/editar_producto/{id}')
+
+        if promover_fila is not None:
+            cur.execute(
+                f"SELECT imagen_datos, imagen_mime FROM {ALMACEN_DB}.productos_imagenes "
+                f"WHERE id=%s AND producto_id=%s",
+                (promover_fila['id'], id),
+            )
+            blob = cur.fetchone() or {}
+            principal = (promover_fila['imagen'], blob.get('imagen_datos'),
+                         blob.get('imagen_mime'))
+            cur.execute(
+                f"DELETE FROM {ALMACEN_DB}.productos_imagenes WHERE id=%s AND producto_id=%s",
+                (promover_fila['id'], id),
+            )
+
+        if principal is not None:
+            imagen_db, imagen_datos, imagen_mime = principal
             cur.execute(f"""
                 UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
                 stock=%s, categoria=%s, imagen=%s, imagen_datos=%s, imagen_mime=%s WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, imagen_db, imagen_datos, imagen_mime, id))
-        else:
+        elif mantener:
             cur.execute(f"""
                 UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
                 stock=%s, categoria=%s WHERE id=%s
             """, (nombre, descripcion, precio, stock, categoria, id))
+        else:
+            cur.execute(f"""
+                UPDATE {ALMACEN_DB}.productos SET nombre=%s, descripcion=%s, precio=%s,
+                stock=%s, categoria=%s, imagen=NULL, imagen_datos=NULL, imagen_mime=NULL WHERE id=%s
+            """, (nombre, descripcion, precio, stock, categoria, id))
+
+        for fila in extras_actuales:
+            if fila['id'] in eliminar_ids:
+                cur.execute(
+                    f"DELETE FROM {ALMACEN_DB}.productos_imagenes "
+                    f"WHERE id=%s AND producto_id=%s",
+                    (fila['id'], id),
+                )
+
+        if nuevos:
+            orden_base = max([int(f['orden'] or 0) for f in conservar], default=0) + 1
+            _insertar_extras(cur, id, nuevos, orden_inicial=orden_base)
 
         mysql.connection.commit()
         verificar_stock_bajo(cur, id)
@@ -2112,7 +2338,15 @@ def editar_producto(id):
 
     cur.execute(f"SELECT {COLS_PRODUCTO} FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
     producto = cur.fetchone()
-    return render_template('editar_producto.html', producto=producto, categorias=CATEGORIAS)
+    if not producto:
+        cur.close()
+        flash('Producto no encontrado.', 'danger')
+        return redirect('/admin')
+    extras = _filas_extra(cur, id)
+    cur.close()
+    return render_template('editar_producto.html', producto=producto,
+                           categorias=CATEGORIAS, extras=extras,
+                           max_imagenes=MAX_IMAGENES_PRODUCTO)
 
 @app.route('/eliminar_producto/<int:id>')
 def eliminar_producto(id):
@@ -2139,6 +2373,7 @@ def eliminar_producto_definitivo(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
+    cur.execute(f"DELETE FROM {ALMACEN_DB}.productos_imagenes WHERE producto_id=%s", (id,))
     cur.execute(f"DELETE FROM {ALMACEN_DB}.productos WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
@@ -2247,6 +2482,10 @@ def index():
         vals.append(categoria)
     cur.execute(sql, tuple(vals))
     productos = cur.fetchall()
+    extras = _imagenes_extra(cur, [p['id'] for p in productos])
+    for p in productos:
+        p['imagenes_extra'] = extras.get(p['id'], [])
+    cur.close()
     # KPI: lo que el cliente escribe en el buscador. Sirve para saber que
     # busca la gente (y que no tenemos) y cuanto convierte el buscador.
     kpi_reg.registrar_busqueda(buscar, len(productos))
@@ -3162,6 +3401,53 @@ def historial_estado_cliente(user_id):
 # ─────────────────────────────────────────────
 # PROVEEDORES
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# VALIDACION DE PROVEEDORES
+# ─────────────────────────────────────────────
+# Solo letras (con tildes/ñ) y espacios simples en el nombre; documento,
+# celular y RUC solo digitos. La validacion del navegador ayuda, pero estas
+# comprobaciones son la autoridad: nadie puede saltarselas con un POST manual.
+_RE_NOMBRE_PERSONA = re.compile(
+    r'^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*$'
+)
+_RE_CORREO = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _validar_proveedor(form):
+    """Valida y normaliza los datos del proveedor. Devuelve (datos, error)."""
+    nombre    = ' '.join((form.get('nombre') or '').split())
+    celular   = (form.get('celular') or '').strip()
+    correo    = (form.get('correo') or '').strip()
+    dni       = (form.get('dni') or '').strip()
+    ruc       = (form.get('ruc') or '').strip()
+
+    if not nombre:
+        return None, 'El nombre del proveedor es obligatorio.'
+    if not _RE_NOMBRE_PERSONA.match(nombre) or sum(c.isalpha() for c in nombre) < 4:
+        return None, ('El nombre debe tener al menos 4 letras y solo puede contener '
+                      'letras y espacios (sin números ni signos).')
+    if celular and not re.fullmatch(r'\d{9}', celular):
+        return None, 'El celular debe tener exactamente 9 números (solo dígitos).'
+    if correo and not _RE_CORREO.match(correo):
+        return None, ('El correo electrónico debe incluir @ y un dominio válido '
+                      '(ejemplo@correo.com).')
+    if dni and not re.fullmatch(r'\d{8}', dni):
+        return None, 'El DNI debe tener exactamente 8 números.'
+    if ruc and not re.fullmatch(r'\d{11}', ruc):
+        return None, 'El RUC debe tener exactamente 11 números.'
+
+    return {
+        'nombre': nombre,
+        'celular': celular,
+        'correo': correo,
+        'dni': dni,
+        'ruc': ruc,
+        'direccion': (form.get('direccion') or '').strip(),
+        'categoria': (form.get('categoria') or '').strip(),
+        'notas': (form.get('notas') or '').strip(),
+    }, None
+
+
 @app.route('/proveedores', methods=['GET','POST'])
 def proveedores():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -3171,20 +3457,17 @@ def proveedores():
         if not validate_csrf():
             flash('Token CSRF inválido.', 'danger')
             return redirect('/proveedores')
-        nombre    = request.form.get('nombre','')
-        celular   = request.form.get('celular','')
-        correo    = request.form.get('correo','')
-        dni       = request.form.get('dni','')
-        ruc       = request.form.get('ruc','')
-        direccion = request.form.get('direccion','')
-        categoria = request.form.get('categoria','')
-        notas     = request.form.get('notas','')
+        datos, error = _validar_proveedor(request.form)
+        if error:
+            flash(error, 'danger')
+            return redirect('/proveedores')
         cur.execute(f"""
             INSERT INTO {ALMACEN_DB}.proveedores (nombre, celular, correo, dni, ruc, direccion, categoria, notas)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (nombre, celular, correo, dni, ruc, direccion, categoria, notas))
+        """, (datos['nombre'], datos['celular'], datos['correo'], datos['dni'],
+              datos['ruc'], datos['direccion'], datos['categoria'], datos['notas']))
         mysql.connection.commit()
-        flash(f'Proveedor "{nombre}" agregado correctamente.', 'success')
+        flash(f'Proveedor "{datos["nombre"]}" agregado correctamente.', 'success')
         return redirect('/proveedores')
 
     buscar = request.args.get('buscar','')
@@ -3213,15 +3496,15 @@ def editar_proveedor(id):
         if not validate_csrf():
             flash('Token CSRF inválido.', 'danger')
             return redirect(f'/proveedores/editar/{id}')
+        datos, error = _validar_proveedor(request.form)
+        if error:
+            flash(error, 'danger')
+            return redirect(f'/proveedores/editar/{id}')
         cur.execute(f"""
             UPDATE {ALMACEN_DB}.proveedores SET nombre=%s, celular=%s, correo=%s, dni=%s,
             ruc=%s, direccion=%s, categoria=%s, notas=%s WHERE id=%s
-        """, (
-            request.form.get('nombre'), request.form.get('celular'),
-            request.form.get('correo'), request.form.get('dni'),
-            request.form.get('ruc'),    request.form.get('direccion'),
-            request.form.get('categoria'), request.form.get('notas'), id
-        ))
+        """, (datos['nombre'], datos['celular'], datos['correo'], datos['dni'],
+              datos['ruc'], datos['direccion'], datos['categoria'], datos['notas'], id))
         mysql.connection.commit()
         flash('Proveedor actualizado.', 'success')
         return redirect('/proveedores')
@@ -3241,6 +3524,261 @@ def eliminar_proveedor(id):
     cur.close()
     flash('Proveedor eliminado.', 'success')
     return redirect('/proveedores')
+
+# ─────────────────────────────────────────────
+# LIBRO DE RECLAMACIONES
+# ─────────────────────────────────────────────
+def _dias_para_limite(fecha_limite):
+    """Dias que faltan para el plazo de respuesta (negativo si ya vencio)."""
+    if not fecha_limite:
+        return None
+    return (fecha_limite.date() - datetime.now().date()).days
+
+
+def _validar_reclamacion(form):
+    """Valida la hoja de reclamacion. Devuelve (datos, errores)."""
+    datos = {
+        'tipo': (form.get('tipo') or 'reclamo').strip().lower(),
+        'consumidor_nombre': ' '.join((form.get('consumidor_nombre') or '').split()),
+        'consumidor_documento_tipo': (form.get('consumidor_documento_tipo') or 'DNI').strip().upper(),
+        'consumidor_documento': (form.get('consumidor_documento') or '').strip(),
+        'consumidor_domicilio': (form.get('consumidor_domicilio') or '').strip(),
+        'consumidor_telefono': (form.get('consumidor_telefono') or '').strip(),
+        'consumidor_correo': (form.get('consumidor_correo') or '').strip(),
+        'bien_tipo': 'producto',
+        'bien_descripcion': (form.get('bien_descripcion') or '').strip(),
+        'bien_monto': (form.get('bien_monto') or '').strip(),
+        'detalle': (form.get('detalle') or '').strip(),
+        'pedido': (form.get('pedido') or '').strip(),
+    }
+    errores = []
+
+    if datos['tipo'] not in ('reclamo', 'queja'):
+        errores.append('Selecciona si tu caso es un reclamo o una queja.')
+
+    nombre = datos['consumidor_nombre']
+    if (not nombre or not _RE_NOMBRE_PERSONA.match(nombre)
+            or sum(c.isalpha() for c in nombre) < 4):
+        errores.append('El nombre completo debe tener al menos 4 letras '
+                       '(solo letras y espacios).')
+
+    tipo_doc = datos['consumidor_documento_tipo']
+    doc = datos['consumidor_documento']
+    if tipo_doc not in ('DNI', 'CE', 'PASAPORTE'):
+        errores.append('Selecciona un tipo de documento válido.')
+    elif tipo_doc == 'DNI':
+        if not re.fullmatch(r'\d{8}', doc):
+            errores.append('El DNI debe tener exactamente 8 números.')
+    elif not re.fullmatch(r'[A-Za-z0-9]{6,12}', doc):
+        errores.append('El carné o pasaporte debe tener entre 6 y 12 letras o números.')
+
+    if len(datos['consumidor_domicilio']) < 5:
+        errores.append('Ingresa tu domicilio completo (mínimo 5 caracteres).')
+
+    tel = datos['consumidor_telefono']
+    if tel and not re.fullmatch(r'\d{6,15}', tel):
+        errores.append('El teléfono solo debe contener números (entre 6 y 15 dígitos).')
+
+    correo = datos['consumidor_correo']
+    if correo and not _RE_CORREO.match(correo):
+        errores.append('El correo electrónico debe incluir @ y un dominio válido '
+                       '(ejemplo@correo.com).')
+    if not tel and not correo:
+        errores.append('Ingresa al menos un teléfono o un correo electrónico de contacto.')
+
+    if len(datos['bien_descripcion']) < 3:
+        errores.append('Describe el producto comprado (mínimo 3 caracteres).')
+
+    monto = None
+    if datos['bien_monto']:
+        try:
+            monto = round(float(datos['bien_monto'].replace(',', '.')), 2)
+            if monto < 0:
+                raise ValueError
+        except ValueError:
+            errores.append('El monto debe ser un número mayor o igual a 0.')
+    datos['bien_monto'] = monto
+
+    if len(datos['detalle']) < 15:
+        errores.append('Cuéntanos con detalle lo ocurrido (mínimo 15 caracteres).')
+    if len(datos['pedido']) < 5:
+        errores.append('Indica qué solución o pedido concreto esperas (mínimo 5 caracteres).')
+
+    return datos, errores
+
+
+@app.route('/libro-de-reclamaciones', methods=['GET', 'POST'])
+def libro_reclamaciones():
+    """Formulario publico del Libro de Reclamaciones."""
+    valores = {}
+    if request.method == 'POST':
+        if not validate_csrf():
+            flash('Tu sesión venció. Vuelve a enviar el formulario.', 'danger')
+            return redirect('/libro-de-reclamaciones')
+
+        datos, errores = _validar_reclamacion(request.form)
+        if errores:
+            for e in errores:
+                flash(e, 'danger')
+            valores = request.form.to_dict()
+            return render_template('libro_reclamaciones.html', valores=valores), 400
+
+        token = secrets.token_urlsafe(24)
+        fecha = datetime.now()
+        fecha_limite = fecha + timedelta(days=DIAS_RESPUESTA_RECLAMO)
+        cur = mysql.connection.cursor()
+        cur.execute("""
+            INSERT INTO reclamaciones
+              (codigo, token, fecha, tipo, consumidor_nombre,
+               consumidor_documento_tipo, consumidor_documento,
+               consumidor_domicilio, consumidor_telefono, consumidor_correo,
+               bien_tipo, bien_descripcion, bien_monto, detalle, pedido,
+               estado, fecha_limite)
+            VALUES (NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pendiente',%s)
+        """, (
+            token, fecha, datos['tipo'], datos['consumidor_nombre'],
+            datos['consumidor_documento_tipo'], datos['consumidor_documento'],
+            datos['consumidor_domicilio'], datos['consumidor_telefono'],
+            datos['consumidor_correo'], datos['bien_tipo'],
+            datos['bien_descripcion'], datos['bien_monto'], datos['detalle'],
+            datos['pedido'], fecha_limite,
+        ))
+        rid = cur.lastrowid
+        codigo = f'LR-{fecha.year}-{rid:06d}'
+        cur.execute("UPDATE reclamaciones SET codigo=%s WHERE id=%s", (codigo, rid))
+        mysql.connection.commit()
+        cur.close()
+        return redirect(url_for('constancia_reclamacion', token=token))
+
+    return render_template('libro_reclamaciones.html', valores=valores)
+
+
+@app.route('/libro-de-reclamaciones/constancia/<token>')
+def constancia_reclamacion(token):
+    """Copia para el consumidor. Solo accesible con el token del envio."""
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT * FROM reclamaciones WHERE token=%s", (token,))
+    r = cur.fetchone()
+    cur.close()
+    if not r:
+        flash('No se encontró la hoja de reclamación solicitada.', 'danger')
+        return redirect('/libro-de-reclamaciones')
+    return render_template('reclamacion_constancia.html', r=r,
+                           dias=_dias_para_limite(r['fecha_limite']))
+
+
+@app.route('/reclamaciones')
+def reclamaciones():
+    """Bandeja de reclamaciones para el administrador."""
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+
+    estado = request.args.get('estado', '').strip()
+    buscar = request.args.get('buscar', '').strip()
+    page = int(request.args.get('page', 1))
+    cur = mysql.connection.cursor()
+
+    where, params = ["1=1"], []
+    if buscar:
+        where.append("(codigo LIKE %s OR consumidor_nombre LIKE %s OR consumidor_documento LIKE %s)")
+        like = f'%{buscar}%'
+        params.extend([like, like, like])
+    if estado == 'pendiente':
+        where.append("estado='pendiente' AND fecha_limite >= NOW()")
+    elif estado == 'vencido':
+        where.append("estado='pendiente' AND fecha_limite < NOW()")
+    elif estado == 'respondido':
+        where.append("estado='respondido'")
+    where_sql = ' AND '.join(where)
+
+    sql_count = f"SELECT COUNT(*) AS total FROM reclamaciones WHERE {where_sql}"
+    sql_data = f"SELECT * FROM reclamaciones WHERE {where_sql} ORDER BY fecha DESC"
+    items, total, page, total_pages = paginate_query(
+        cur, sql_count, sql_data, tuple(params), page)
+
+    for r in items:
+        r['dias_restantes'] = _dias_para_limite(r['fecha_limite'])
+        r['vencido'] = r['estado'] == 'pendiente' and (r['dias_restantes'] or 0) < 0
+
+    cur.execute("SELECT COUNT(*) AS n FROM reclamaciones")
+    total_general = cur.fetchone()['n'] or 0
+    cur.execute("SELECT COUNT(*) AS n FROM reclamaciones WHERE estado='pendiente' AND fecha_limite >= NOW()")
+    pendientes = cur.fetchone()['n'] or 0
+    cur.execute("SELECT COUNT(*) AS n FROM reclamaciones WHERE estado='pendiente' AND fecha_limite < NOW()")
+    vencidas = cur.fetchone()['n'] or 0
+    cur.execute("SELECT COUNT(*) AS n FROM reclamaciones WHERE estado='respondido'")
+    respondidas = cur.fetchone()['n'] or 0
+    cur.close()
+
+    return render_template('reclamaciones.html', reclamaciones=items,
+                           estado=estado, buscar=buscar,
+                           page=page, total_pages=total_pages, total=total,
+                           total_general=total_general, pendientes=pendientes,
+                           vencidas=vencidas, respondidas=respondidas)
+
+
+@app.route('/reclamaciones/<int:id>')
+def detalle_reclamacion(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT * FROM reclamaciones WHERE id=%s", (id,))
+    r = cur.fetchone()
+    cur.close()
+    if not r:
+        flash('Reclamación no encontrada.', 'danger')
+        return redirect('/reclamaciones')
+    return render_template('reclamacion_detalle.html', r=r,
+                           dias=_dias_para_limite(r['fecha_limite']))
+
+
+@app.route('/reclamaciones/<int:id>/responder', methods=['POST'])
+def responder_reclamacion(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect(f'/reclamaciones/{id}')
+
+    respuesta = (request.form.get('respuesta') or '').strip()
+    responsable = ' '.join((request.form.get('respondido_por') or '').split())
+    if len(respuesta) < 10:
+        flash('La respuesta debe explicar las acciones adoptadas (mínimo 10 caracteres).', 'danger')
+        return redirect(f'/reclamaciones/{id}')
+    if not responsable:
+        flash('Indica el nombre del responsable que responde.', 'danger')
+        return redirect(f'/reclamaciones/{id}')
+
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id FROM reclamaciones WHERE id=%s", (id,))
+    if not cur.fetchone():
+        cur.close()
+        flash('Reclamación no encontrada.', 'danger')
+        return redirect('/reclamaciones')
+    cur.execute("""
+        UPDATE reclamaciones
+        SET respuesta=%s, respondido_por=%s, fecha_respuesta=NOW(), estado='respondido'
+        WHERE id=%s
+    """, (respuesta, responsable, id))
+    mysql.connection.commit()
+    cur.close()
+    flash('Respuesta registrada. El plazo de atención queda cerrado.', 'success')
+    return redirect(f'/reclamaciones/{id}')
+
+
+@app.route('/reclamaciones/<int:id>/imprimir')
+def imprimir_reclamacion(id):
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT * FROM reclamaciones WHERE id=%s", (id,))
+    r = cur.fetchone()
+    cur.close()
+    if not r:
+        flash('Reclamación no encontrada.', 'danger')
+        return redirect('/reclamaciones')
+    return render_template('reclamacion_imprimir.html', r=r,
+                           dias=_dias_para_limite(r['fecha_limite']))
 
 # ─────────────────────────────────────────────
 # PRODUCTOS PARA PEDIR
@@ -4219,6 +4757,10 @@ def detalle_producto(id):
     cur = mysql.connection.cursor()
     cur.execute(f"SELECT {COLS_PRODUCTO} FROM {ALMACEN_DB}.productos WHERE id=%s AND estado='activo'", (id,))
     producto = cur.fetchone()
+    if producto:
+        extras = _imagenes_extra(cur, [id]).get(id, [])
+        imagenes = ([producto['imagen']] if producto['imagen'] else []) + extras
+        imagenes = imagenes[:MAX_IMAGENES_PRODUCTO]
     cur.close()
     if not producto:
         flash('Producto no encontrado.', 'danger')
@@ -4226,7 +4768,7 @@ def detalle_producto(id):
     # KPI: si venia buscando algo, esta visita a un producto es lo que hizo
     # que esa busqueda valiera.
     kpi_reg.marcar_producto_visto(id)
-    return render_template('producto_detalle.html', producto=producto)
+    return render_template('producto_detalle.html', producto=producto, imagenes=imagenes)
 
 # ─────────────────────────────────────────────
 # PRO17-18: DIRECCIONES DEL CLIENTE
@@ -5162,6 +5704,14 @@ def _servir_imagen_desde_db(filename):
             (filename,),
         )
         fila = cur.fetchone()
+        if not fila or not fila['imagen_datos']:
+            # Galeria: imagenes adicionales del producto (hasta 4 por producto).
+            cur.execute(
+                f"SELECT imagen_datos, imagen_mime FROM {ALMACEN_DB}.productos_imagenes "
+                f"WHERE imagen=%s AND imagen_datos IS NOT NULL LIMIT 1",
+                (filename,),
+            )
+            fila = cur.fetchone()
         cur.close()
     except Exception:
         return None

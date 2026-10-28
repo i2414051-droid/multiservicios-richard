@@ -78,23 +78,55 @@
           </select>
         </div>
 
-        <!-- IMAGEN ACTUAL -->
+        <!-- GALERÍA DE IMÁGENES -->
         <div class="mb-3">
-          <label class="form-label"><strong>Imagen actual</strong></label><br>
-          {% if producto.imagen %}
-            <img src="{{ url_for('static', filename=producto.imagen) }}"
-                 width="150" class="rounded shadow">
-          {% else %}
-            <span class="text-muted">Sin imagen</span>
-          {% endif %}
+          <label class="form-label"><strong>Imágenes del producto</strong>
+            <span class="text-muted small">(máx. {{ max_imagenes }})</span>
+          </label>
+          <div class="d-flex flex-wrap gap-3">
+            {% if producto.imagen %}
+            <div class="text-center border rounded p-2" style="width:165px">
+              <img src="{{ url_for('static', filename=producto.imagen) }}"
+                   class="rounded" style="width:145px;height:110px;object-fit:cover">
+              <div class="small fw-bold mt-1">Principal</div>
+              <div class="form-check d-flex justify-content-center mb-0">
+                <input class="form-check-input" type="checkbox" name="eliminar_principal" value="1" id="elimPrincipal">
+                <label class="form-check-label small ms-1" for="elimPrincipal">Eliminar</label>
+              </div>
+            </div>
+            {% endif %}
+            {% for img in extras %}
+            <div class="text-center border rounded p-2" style="width:165px">
+              <img src="{{ url_for('static', filename=img.imagen) }}"
+                   class="rounded" style="width:145px;height:110px;object-fit:cover">
+              <div class="small text-muted mt-1">Imagen {{ loop.index + 1 }}</div>
+              <div class="form-check d-flex justify-content-center mb-0">
+                <input class="form-check-input" type="checkbox" name="eliminar_imagen" value="{{ img.id }}" id="elimExtra{{ img.id }}">
+                <label class="form-check-label small ms-1" for="elimExtra{{ img.id }}">Eliminar</label>
+              </div>
+            </div>
+            {% endfor %}
+            {% if not producto.imagen and not extras %}
+            <span class="text-muted">Sin imágenes</span>
+            {% endif %}
+          </div>
+          <div class="form-text">
+            Marca "Eliminar" y guarda para quitar una imagen. Si borras la principal,
+            la siguiente imagen pasa a serlo.
+          </div>
         </div>
 
-        <!-- CAMBIAR IMAGEN -->
-        <div class="mb-4">
-          <label class="form-label"><strong>Cambiar imagen</strong></label>
-          <input type="file" name="imagen"
-                 class="form-control"
-                 accept="image/*">
+        <!-- AGREGAR / REEMPLAZAR IMÁGENES -->
+        <div class="row g-2 mb-4">
+          <div class="col-md-6">
+            <label class="form-label"><strong>Reemplazar imagen principal</strong></label>
+            <input type="file" name="imagen" class="form-control" accept="image/*">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label"><strong>Agregar imágenes a la galería</strong></label>
+            <input type="file" name="imagenes" class="form-control" accept="image/*" multiple>
+            <div class="form-text">Si el producto no tiene imagen principal, la primera que subas lo será.</div>
+          </div>
         </div>
 
         <!-- BOTONES -->

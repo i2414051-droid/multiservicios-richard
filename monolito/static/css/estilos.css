@@ -396,6 +396,90 @@ height:230px;
 width:100%;
 object-fit:cover;
 }
+/* Galeria en la tarjeta del inicio: flechas al pasar el cursor */
+.producto-img-wrap{
+position:relative;
+overflow:hidden;
+}
+.producto-img-wrap .producto-img{
+display:block;
+transition:opacity .18s ease;
+}
+.img-nav{
+position:absolute;
+top:50%;
+transform:translateY(-50%);
+z-index:20;
+border:none;
+background:rgba(0,0,0,.6);
+color:#fff;
+width:34px;
+height:34px;
+border-radius:50%;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:16px;
+line-height:1;
+opacity:0;
+pointer-events:none;
+transition:opacity .2s ease, background .2s ease;
+cursor:pointer;
+}
+.img-nav.prev{left:8px;}
+.img-nav.next{right:8px;}
+.producto-card:hover .img-nav{
+opacity:1;
+pointer-events:auto;
+}
+.img-nav:hover{
+background:#f39c12;
+color:#000;
+}
+.img-contador{
+position:absolute;
+right:8px;
+bottom:8px;
+z-index:20;
+background:rgba(0,0,0,.65);
+color:#fff;
+font-size:11px;
+padding:1px 8px;
+border-radius:10px;
+opacity:0;
+transition:opacity .2s ease;
+}
+.producto-card:hover .img-contador{
+opacity:1;
+}
+/* Galeria detalle producto */
+.galeria-detalle{ align-items:flex-start; }
+.galeria-thumbs{ max-height:560px; overflow-y:auto; padding:2px; flex:0 0 auto; }
+.galeria-thumbs::-webkit-scrollbar{ width:6px; }
+.galeria-thumbs::-webkit-scrollbar-thumb{ background:rgba(243,156,18,.5); border-radius:6px; }
+.galeria-principal{ min-width:0; }
+/* Miniaturas del detalle de producto */
+.btn-miniatura img{
+width:92px;
+height:74px;
+object-fit:cover;
+border-radius:10px;
+border:2px solid rgba(243,156,18,.35);
+transition:border-color .12s ease, transform .12s ease;
+}
+.btn-miniatura:hover img{
+transform:scale(1.03);
+}
+.btn-miniatura.activa img{
+border-color:#f39c12;
+box-shadow:0 0 0 2px rgba(243,156,18,.35);
+}
+@media (max-width: 991px){
+  .galeria-detalle{ flex-direction:column-reverse; }
+  .galeria-thumbs{ flex-direction:row !important; max-height:none; overflow-x:auto; overflow-y:hidden; width:100%; }
+  .galeria-thumbs::-webkit-scrollbar{ height:6px; width:auto; }
+  .galeria-principal{ width:100%; }
+}
 .stock-box{
 position:absolute;
 top:15px;

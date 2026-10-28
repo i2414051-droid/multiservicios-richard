@@ -121,9 +121,32 @@ Productos destacados
 
 {% if p.imagen %}
 
+{% set ns = namespace(srcs=[url_for('static', filename=(p.imagen|thumb))]) %}
+{% for extra in (p.imagenes_extra or []) %}
+{% set ns.srcs = ns.srcs + [url_for('static', filename=(extra|thumb))] %}
+{% endfor %}
+
+<div class="producto-img-wrap" data-srcs='{{ ns.srcs|tojson }}'>
+
 <img loading="lazy" decoding="async"
 src="{{ url_for('static',filename=(p.imagen|thumb)) }}"
-class="producto-img">
+class="producto-img" data-idx="0" alt="{{ p.nombre }}">
+
+{% if ns.srcs|length > 1 %}
+<button type="button" class="img-nav prev" aria-label="Imagen anterior"
+onclick="moverImagen(this, -1, event)">
+<i class="bi bi-chevron-left"></i>
+</button>
+
+<button type="button" class="img-nav next" aria-label="Imagen siguiente"
+onclick="moverImagen(this, 1, event)">
+<i class="bi bi-chevron-right"></i>
+</button>
+
+<span class="img-contador">1 / {{ ns.srcs|length }}</span>
+{% endif %}
+
+</div>
 
 {% endif %}
 
@@ -187,4 +210,36 @@ No disponible
 
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+function moverImagen(boton, paso, evento) {
+  if (evento) { evento.preventDefault(); evento.stopPropagation(); }
+  var wrap = boton.closest('.producto-img-wrap');
+  if (!wrap) return;
+  var img = wrap.querySelector('.producto-img');
+  var srcs = JSON.parse(wrap.dataset.srcs || '[]');
+  if (!img || !srcs.length) return;
+  var idx = (parseInt(img.dataset.idx || '0', 10) + paso + srcs.length) % srcs.length;
+  img.dataset.idx = idx;
+  img.src = srcs[idx];
+  var contador = wrap.querySelector('.img-contador');
+  if (contador) contador.textContent = (idx + 1) + ' / ' + srcs.length;
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('.producto-img-wrap').forEach(function (wrap) {
+    wrap.addEventListener('mouseleave', function () {
+      var img = wrap.querySelector('.producto-img');
+      var srcs = JSON.parse(wrap.dataset.srcs || '[]');
+      if (!img || !srcs.length) return;
+      img.dataset.idx = '0';
+      img.src = srcs[0];
+      var contador = wrap.querySelector('.img-contador');
+      if (contador) contador.textContent = '1 / ' + srcs.length;
+    });
+  });
+});
+</script>
 {% endblock %}

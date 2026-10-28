@@ -1,0 +1,167 @@
+{% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/reclamaciones.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="lr-admin">
+
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+    <div>
+      <h2 class="mb-1" style="color:var(--text-primary);font-weight:800">
+        <i class="bi bi-journal-text me-2 text-warning"></i>Libro de Reclamaciones
+      </h2>
+      <p class="mb-0" style="color:var(--text-muted);font-size:13.5px">
+        Reclamos y quejas registrados por los consumidores.
+        Plazo máximo de respuesta: <strong>{{ dias_respuesta_reclamo }} días calendario</strong>.
+      </p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="/libro-de-reclamaciones" target="_blank" class="btn lr-btn-sec">
+        <i class="bi bi-box-arrow-up-right me-1"></i> Formulario público
+      </a>
+      <a href="/dashboard" class="btn lr-btn-sec">
+        <i class="bi bi-arrow-left me-1"></i> Dashboard
+      </a>
+    </div>
+  </div>
+
+  <!-- RESUMEN -->
+  <div class="lr-stats">
+    <div class="lr-stat lr-stat--total">
+      <i class="bi bi-collection"></i>
+      <div><h3>{{ total_general }}</h3><small>Total registrados</small></div>
+    </div>
+    <div class="lr-stat lr-stat--pendiente">
+      <i class="bi bi-hourglass-split"></i>
+      <div><h3>{{ pendientes }}</h3><small>Pendientes en plazo</small></div>
+    </div>
+    <div class="lr-stat lr-stat--vencido">
+      <i class="bi bi-exclamation-octagon"></i>
+      <div><h3>{{ vencidas }}</h3><small>Vencidas sin respuesta</small></div>
+    </div>
+    <div class="lr-stat lr-stat--respondido">
+      <i class="bi bi-check2-circle"></i>
+      <div><h3>{{ respondidas }}</h3><small>Respondidas</small></div>
+    </div>
+  </div>
+
+  <!-- FILTROS -->
+  <form method="GET" action="{{ url_for('reclamaciones') }}" class="lr-filtros">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-6">
+        <label class="form-label" style="color:var(--text-muted);font-size:12px">Buscar</label>
+        <input type="search" name="buscar" value="{{ buscar }}" class="form-control"
+               placeholder="Código, nombre o documento del consumidor">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" style="color:var(--text-muted);font-size:12px">Estado</label>
+        <select name="estado" class="form-select">
+          <option value="" {% if not estado %}selected{% endif %}>Todos</option>
+          <option value="pendiente" {% if estado == 'pendiente' %}selected{% endif %}>Pendientes en plazo</option>
+          <option value="vencido" {% if estado == 'vencido' %}selected{% endif %}>Vencidas</option>
+          <option value="respondido" {% if estado == 'respondido' %}selected{% endif %}>Respondidas</option>
+        </select>
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button type="submit" class="btn lr-btn-principal flex-grow-1" style="padding:9px 16px;font-size:13.5px">
+          <i class="bi bi-search me-1"></i> Filtrar
+        </button>
+        {% if estado or buscar %}
+        <a href="{{ url_for('reclamaciones') }}" class="btn lr-btn-sec" title="Limpiar filtros">
+          <i class="bi bi-eraser"></i>
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </form>
+
+  <!-- TABLA -->
+  <div class="lr-tabla-card">
+    {% if reclamaciones %}
+    <div class="table-responsive">
+      <table class="lr-tabla">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Fecha</th>
+            <th>Consumidor</th>
+            <th>Tipo</th>
+            <th>Producto</th>
+            <th>Estado</th>
+            <th>Plazo</th>
+            <th class="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in reclamaciones %}
+          <tr>
+            <td class="lr-codigo">{{ r.codigo }}</td>
+            <td>{{ r.fecha|fecha }}<span class="lr-small">{{ r.fecha|fechahora }}</span></td>
+            <td>
+              <span class="lr-nombre">{{ r.consumidor_nombre }}</span>
+              <span class="lr-small">{{ r.consumidor_documento_tipo }} {{ r.consumidor_documento }}</span>
+            </td>
+            <td>
+              <span class="lr-badge lr-badge--{{ r.tipo }}">
+                {{ 'Queja' if r.tipo == 'queja' else 'Reclamo' }}
+              </span>
+            </td>
+            <td>
+              {{ (r.bien_descripcion or '—')[:48] }}{% if r.bien_descripcion and r.bien_descripcion|length > 48 %}…{% endif %}
+              <span class="lr-small">{% if r.bien_monto is not none and r.bien_monto != '' %}S/ {{ '%.2f'|format(r.bien_monto|float) }}{% else %}Precio no indicado{% endif %}</span>
+            </td>
+            <td>
+              {% if r.estado == 'respondido' %}
+                <span class="lr-badge lr-badge--respondido"><i class="bi bi-check2"></i> Respondido</span>
+              {% elif r.vencido %}
+                <span class="lr-badge lr-badge--vencido"><i class="bi bi-exclamation-triangle"></i> Vencido</span>
+              {% else %}
+                <span class="lr-badge lr-badge--pendiente"><i class="bi bi-hourglass"></i> Pendiente</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="lr-plazo {% if r.estado == 'respondido' %}lr-plazo--ok{% elif r.vencido %}lr-plazo--mal{% elif r.dias_restantes is not none and r.dias_restantes <= 3 %}lr-plazo--warn{% else %}lr-plazo--ok{% endif %}">
+                {% if r.estado == 'respondido' %}
+                  <i class="bi bi-reply"></i> {{ r.fecha_respuesta|fecha }}
+                {% elif r.dias_restantes is not none and r.dias_restantes < 0 %}
+                  <i class="bi bi-alarm"></i> Venció hace {{ (r.dias_restantes * -1) }} día(s)
+                {% elif r.dias_restantes == 0 %}
+                  <i class="bi bi-alarm"></i> Vence hoy
+                {% else %}
+                  <i class="bi bi-calendar-check"></i> {{ r.fecha_limite|fecha }}
+                  <span class="lr-small">{{ r.dias_restantes }} día(s)</span>
+                {% endif %}
+              </span>
+            </td>
+            <td class="text-end">
+              <a href="{{ url_for('detalle_reclamacion', id=r.id) }}" class="btn btn-sm lr-btn-sec" title="Ver detalle y responder">
+                <i class="bi bi-eye"></i>
+              </a>
+              <a href="{{ url_for('imprimir_reclamacion', id=r.id) }}" target="_blank" class="btn btn-sm lr-btn-sec" title="Imprimir hoja">
+                <i class="bi bi-printer"></i>
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="px-3 pb-3">
+      {{ paginacion(page, total_pages, total, '/reclamaciones?', {'estado': estado, 'buscar': buscar}) }}
+    </div>
+    {% else %}
+    <div class="text-center py-5" style="color:var(--text-muted)">
+      <i class="bi bi-journal-x display-4 d-block mb-3"></i>
+      <p class="mb-1">No hay reclamaciones{% if estado or buscar %} con los filtros aplicados{% endif %}.</p>
+      {% if estado or buscar %}
+      <a href="{{ url_for('reclamaciones') }}" class="btn lr-btn-sec mt-2">Ver todas</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,143 @@
+{% set mostrar_respuesta = mostrar_respuesta|default(true) %}
+{% set copia = copia|default('consumidor') %}
+<div class="lr-sheet" id="hojaReclamacion">
+
+  <!-- ENCABEZADO -->
+  <div class="lr-sheet__top">
+    <div class="lr-sheet__empresa">
+      <div class="lr-sheet__marca">Libro de Reclamaciones</div>
+      <h1>{{ empresa_info.nombre }}</h1>
+      <p><strong>RUC:</strong> {{ empresa_info.ruc }}</p>
+      <p><strong>Domicilio:</strong> {{ empresa_info.domicilio }}</p>
+      {% if empresa_info.correo %}<p><strong>Correo:</strong> {{ empresa_info.correo }}</p>{% endif %}
+    </div>
+    <div class="lr-sheet__nro">
+      <span>Hoja de Reclamación</span>
+      <strong>{{ r.codigo or '—' }}</strong>
+      <em>{{ r.fecha|fechahora }}</em>
+      <em>Copia: {% if copia == 'empresa' %}Proveedor{% else %}Consumidor{% endif %}</em>
+    </div>
+  </div>
+
+  <div class="lr-sheet__titulo">Hoja de Reclamación</div>
+
+  <!-- AVISO LEGAL -->
+  <div class="lr-sheet__aviso">
+    Conforme al Código de Protección y Defensa del Consumidor (Ley N° 29571) y su
+    Reglamento del Libro de Reclamaciones (D.S. N° 011-2011-PCM). El proveedor deberá
+    atender esta hoja en un plazo máximo de
+    <strong>{{ dias_respuesta_reclamo }} días calendario</strong>, contados desde el día
+    siguiente de su presentación. <strong>Fecha límite de respuesta:
+    {{ r.fecha_limite|fecha }}</strong>.
+    La formulación del reclamo no impide acudir a otras vías de solución de controversias
+    ni es requisito previo para interponer una denuncia ante el INDECOPI.
+  </div>
+
+  <!-- 1. CONSUMIDOR -->
+  <div class="lr-sheet__seccion">
+    <h2>1. Identificación del consumidor</h2>
+    <div class="lr-sheet__grid">
+      <div class="lr-sheet__cell lr-sheet__cell--2">
+        <small>Nombre completo</small>
+        <span class="lr-valor">{{ r.consumidor_nombre }}</span>
+      </div>
+      <div class="lr-sheet__cell">
+        <small>Documento</small>
+        <span class="lr-valor">{{ r.consumidor_documento_tipo or 'DNI' }}</span>
+      </div>
+      <div class="lr-sheet__cell">
+        <small>Número de documento</small>
+        <span class="lr-valor">{{ r.consumidor_documento or '—' }}</span>
+      </div>
+      <div class="lr-sheet__cell lr-sheet__cell--full">
+        <small>Domicilio</small>
+        <span class="lr-valor">{{ r.consumidor_domicilio or '—' }}</span>
+      </div>
+      <div class="lr-sheet__cell lr-sheet__cell--2">
+        <small>Teléfono</small>
+        <span class="lr-valor">{{ r.consumidor_telefono or '—' }}</span>
+      </div>
+      <div class="lr-sheet__cell lr-sheet__cell--2">
+        <small>Correo electrónico</small>
+        <span class="lr-valor">{{ r.consumidor_correo or '—' }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. PRODUCTO COMPRADO -->
+  <div class="lr-sheet__seccion">
+    <h2>2. Identificación del producto comprado</h2>
+    <div class="lr-sheet__grid">
+      <div class="lr-sheet__cell lr-sheet__cell--3">
+        <small>Producto comprado</small>
+        <span class="lr-valor">{{ r.bien_descripcion or '—' }}</span>
+      </div>
+      <div class="lr-sheet__cell">
+        <small>Precio (S/)</small>
+        <span class="lr-valor">
+          {%- if r.bien_monto is not none and r.bien_monto != '' -%}
+            S/ {{ '%.2f'|format(r.bien_monto|float) }}
+          {%- else -%}
+            No indicado
+          {%- endif -%}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. DETALLE -->
+  <div class="lr-sheet__seccion">
+    <h2>3. Detalle de la reclamación y pedido del consumidor</h2>
+    <div class="lr-sheet__grid">
+      <div class="lr-sheet__cell lr-sheet__cell--full">
+        <small>Tipo de caso</small>
+        <span class="lr-valor">
+          {% if r.tipo == 'queja' %}Queja — malestar respecto a la atención o al trato recibido{% else %}Reclamo — disconformidad con el producto comprado{% endif %}
+        </span>
+      </div>
+      <div class="lr-sheet__cell lr-sheet__cell--full lr-sheet__cell--detalle">
+        <small>Detalle de lo ocurrido</small>
+        <span class="lr-valor">{{ r.detalle or '—' }}</span>
+      </div>
+      <div class="lr-sheet__cell lr-sheet__cell--full lr-sheet__cell--pedido">
+        <small>Pedido o solución esperada</small>
+        <span class="lr-valor">{{ r.pedido or '—' }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. RESPUESTA DEL PROVEEDOR -->
+  {% if mostrar_respuesta and r.estado == 'respondido' %}
+  <div class="lr-sheet__respuesta">
+    <h2>4. Respuesta del proveedor</h2>
+    <div class="lr-cuerpo">{{ r.respuesta }}</div>
+    <div class="lr-meta">
+      <span><strong>Responsable:</strong> {{ r.respondido_por or '—' }}</span>
+      <span><strong>Fecha de respuesta:</strong> {{ r.fecha_respuesta|fechahora }}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- FIRMAS -->
+  <div class="lr-sheet__firmas">
+    <div class="lr-sheet__firma">
+      <strong>Firma del consumidor</strong>
+      Nombre: {{ r.consumidor_nombre }}
+    </div>
+    <div class="lr-sheet__firma">
+      <strong>Firma y sello del proveedor</strong>
+      {{ empresa_info.nombre }}
+    </div>
+  </div>
+
+  <!-- PIE LEGAL -->
+  <div class="lr-sheet__pie">
+    Esta hoja de reclamación es registrada y conservada por {{ empresa_info.nombre }}.
+    El proveedor debe informar al consumidor el resultado de su reclamo o queja dentro del
+    plazo señalado. La formulación del reclamo no impide acudir a otras vías de solución de
+    controversias ni es requisito previo para interponer una denuncia ante el INDECOPI.
+    Los datos personales proporcionados serán tratados conforme a la Ley N° 29733 — Ley de
+    Protección de Datos Personales, y utilizados únicamente para atender esta reclamación.
+  </div>
+
+</div>

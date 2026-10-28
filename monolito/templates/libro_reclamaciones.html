@@ -1,0 +1,258 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/reclamaciones.css') }}">
+{% endblock %}
+
+{% block content %}
+{% set tipo_doc = valores.get('consumidor_documento_tipo', 'DNI') %}
+{% set tipo_caso = valores.get('tipo', 'reclamo') %}
+
+<div class="lr-page">
+
+  <div class="lr-hero">
+    <div class="lr-hero__icon"><i class="bi bi-journal-text"></i></div>
+    <div>
+      <h1>Libro de Reclamaciones</h1>
+      <p>
+        <i class="bi bi-shop me-1"></i>{{ empresa_info.nombre }}
+        &middot; RUC {{ empresa_info.ruc }}
+        &middot; {{ empresa_info.domicilio }}
+      </p>
+    </div>
+    <span class="lr-hero__badge"><i class="bi bi-shield-check"></i> Ley N° 29571</span>
+  </div>
+
+  <div class="lr-aviso">
+    <strong>Antes de empezar:</strong> este libro es para dejar constancia de un
+    <strong>reclamo</strong> (disconformidad con un producto comprado) o una
+    <strong>queja</strong> (malestar por la atención o el trato recibido).
+    <ul>
+      <li>Responderemos en un plazo máximo de <strong>{{ dias_respuesta_reclamo }} días calendario</strong>.</li>
+      <li>Presentar este reclamo no impide acudir a otras vías de solución ni es requisito para denunciar ante el INDECOPI.</li>
+      <li>Al enviar el formulario recibirás un <strong>código</strong> y un <strong>enlace único</strong> para ver e imprimir tu constancia.</li>
+    </ul>
+  </div>
+
+  <form method="POST" action="{{ url_for('libro_reclamaciones') }}" onsubmit="return lrValidarContacto();">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <!-- 1. CONSUMIDOR -->
+    <div class="lr-card">
+      <div class="lr-card__head">
+        <span class="lr-num">1</span> Identificación del consumidor
+      </div>
+      <div class="lr-card__body">
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label" for="consumidor_nombre">Nombre completo <span class="req">*</span></label>
+            <input type="text" class="form-control" id="consumidor_nombre" name="consumidor_nombre"
+                   value="{{ valores.get('consumidor_nombre', '') }}"
+                   required minlength="4" maxlength="200"
+                   pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{4,}"
+                   placeholder="Nombres y apellidos"
+                   oninput="lrSoloLetras(this)">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="consumidor_documento_tipo">Tipo de documento <span class="req">*</span></label>
+            <select class="form-select" id="consumidor_documento_tipo" name="consumidor_documento_tipo"
+                    onchange="lrCambiarDocumento(false)" required>
+              <option value="DNI" {% if tipo_doc == 'DNI' %}selected{% endif %}>DNI</option>
+              <option value="CE" {% if tipo_doc == 'CE' %}selected{% endif %}>Carné de extranjería</option>
+              <option value="PASAPORTE" {% if tipo_doc == 'PASAPORTE' %}selected{% endif %}>Pasaporte</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="consumidor_documento">Número de documento <span class="req">*</span></label>
+            <input type="text" class="form-control" id="consumidor_documento" name="consumidor_documento"
+                   value="{{ valores.get('consumidor_documento', '') }}"
+                   required inputmode="numeric" maxlength="{{ 8 if tipo_doc == 'DNI' else 12 }}"
+                   pattern="{{ '\\d{8}' if tipo_doc == 'DNI' else '[A-Za-z0-9]{6,12}' }}"
+                   placeholder="{{ '12345678' if tipo_doc == 'DNI' else 'Número de documento' }}"
+                   oninput="lrDocumentoInput(this)">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label" for="consumidor_domicilio">Domicilio <span class="req">*</span></label>
+            <input type="text" class="form-control" id="consumidor_domicilio" name="consumidor_domicilio"
+                   value="{{ valores.get('consumidor_domicilio', '') }}"
+                   required minlength="5" maxlength="300"
+                   placeholder="Calle, número, distrito, provincia y departamento">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="consumidor_telefono">Teléfono / celular</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-telephone"></i></span>
+              <input type="tel" class="form-control" id="consumidor_telefono" name="consumidor_telefono"
+                     value="{{ valores.get('consumidor_telefono', '') }}"
+                     inputmode="numeric" maxlength="15" pattern="\d{6,15}"
+                     placeholder="999888777"
+                     oninput="lrSoloDigitos(this, 15)">
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="consumidor_correo">Correo electrónico</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+              <input type="email" class="form-control" id="consumidor_correo" name="consumidor_correo"
+                     value="{{ valores.get('consumidor_correo', '') }}"
+                     maxlength="200" placeholder="tucorreo@ejemplo.com">
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="form-text" style="font-size:12px">
+              <i class="bi bi-info-circle me-1"></i>
+              Es obligatorio dejar al menos un medio de contacto: teléfono o correo electrónico.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. PRODUCTO COMPRADO -->
+    <div class="lr-card">
+      <div class="lr-card__head">
+        <span class="lr-num">2</span> Producto comprado
+      </div>
+      <div class="lr-card__body">
+        <div class="row g-3">
+          <div class="col-md-8">
+            <label class="form-label" for="bien_descripcion">¿Qué producto compraste? <span class="req">*</span></label>
+            <input type="text" class="form-control" id="bien_descripcion" name="bien_descripcion"
+                   value="{{ valores.get('bien_descripcion', '') }}"
+                   required minlength="3" maxlength="255">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="bien_monto">Precio (S/)</label>
+            <input type="number" class="form-control" id="bien_monto" name="bien_monto"
+                   value="{{ valores.get('bien_monto', '') }}"
+                   min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. DETALLE -->
+    <div class="lr-card">
+      <div class="lr-card__head">
+        <span class="lr-num">3</span> Detalle de la reclamación y pedido
+      </div>
+      <div class="lr-card__body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label d-block">Tipo de caso <span class="req">*</span></label>
+            <div class="lr-tipo-opciones">
+              <label class="lr-tipo-card">
+                <input type="radio" name="tipo" value="reclamo" required
+                       {% if tipo_caso != 'queja' %}checked{% endif %}>
+                <strong>Reclamo</strong>
+                <small>Disconformidad relacionada con el producto comprado.</small>
+              </label>
+              <label class="lr-tipo-card">
+                <input type="radio" name="tipo" value="queja" required
+                       {% if tipo_caso == 'queja' %}checked{% endif %}>
+                <strong>Queja</strong>
+                <small>Malestar respecto a la atención al público o al trato recibido.</small>
+              </label>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="detalle">¿Qué ocurrió? <span class="req">*</span></label>
+            <textarea class="form-control" id="detalle" name="detalle" rows="5"
+                      required minlength="15" maxlength="3000"
+                      placeholder="Describe los hechos: fechas, personas involucradas, lo que esperabas y lo que recibiste.">{{ valores.get('detalle', '') }}</textarea>
+            <div class="form-text">Mínimo 15 caracteres. Mientras más detalle, mejor podremos atenderte.</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="pedido">¿Qué solución esperas? <span class="req">*</span></label>
+            <textarea class="form-control" id="pedido" name="pedido" rows="3"
+                      required minlength="5" maxlength="2000"
+                      placeholder="Ej: cambio del producto, devolución del monto, reparación sin costo, disculpa formal.">{{ valores.get('pedido', '') }}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DECLARACIÓN Y ENVÍO -->
+    <div class="lr-card">
+      <div class="lr-card__body">
+        <label class="lr-declaracion">
+          <input type="checkbox" name="declaracion" required>
+          <span>
+            Declaro que la información proporcionada es veraz y autorizo el uso de mis datos
+            personales únicamente para la atención de esta reclamación, conforme a la
+            Ley N° 29733 — Ley de Protección de Datos Personales.
+          </span>
+        </label>
+
+        <div class="lr-acciones" style="margin-bottom:0;margin-top:18px">
+          <button type="submit" class="btn lr-btn-principal" data-carga-texto="Enviando...">
+            <i class="bi bi-send me-1"></i> Enviar reclamo
+          </button>
+          <a href="/" class="btn lr-btn-sec">
+            <i class="bi bi-arrow-left me-1"></i> Volver al inicio
+          </a>
+          <span class="form-text ms-auto d-none d-md-inline">
+            <i class="bi bi-lock me-1"></i> Tus datos están protegidos
+          </span>
+        </div>
+      </div>
+    </div>
+  </form>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function lrSoloLetras(el) {
+  el.value = el.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g, '');
+}
+
+function lrSoloDigitos(el, max) {
+  el.value = el.value.replace(/\D/g, '').slice(0, max);
+}
+
+function lrDocumentoInput(el) {
+  const tipo = document.getElementById('consumidor_documento_tipo').value;
+  if (tipo === 'DNI') {
+    el.value = el.value.replace(/\D/g, '').slice(0, 8);
+  } else {
+    el.value = el.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12);
+  }
+}
+
+function lrCambiarDocumento(limpiar) {
+  const tipo = document.getElementById('consumidor_documento_tipo').value;
+  const doc  = document.getElementById('consumidor_documento');
+  if (!doc) return;
+
+  if (tipo === 'DNI') {
+    doc.setAttribute('maxlength', '8');
+    doc.setAttribute('pattern', '\\d{8}');
+    doc.setAttribute('inputmode', 'numeric');
+    doc.setAttribute('placeholder', '12345678');
+  } else {
+    doc.setAttribute('maxlength', '12');
+    doc.setAttribute('pattern', '[A-Za-z0-9]{6,12}');
+    doc.setAttribute('inputmode', 'text');
+    doc.setAttribute('placeholder', 'Número de documento');
+  }
+  if (limpiar) doc.value = '';
+}
+
+function lrValidarContacto() {
+  const tel = document.getElementById('consumidor_telefono');
+  const correo = document.getElementById('consumidor_correo');
+  if (tel && correo && !tel.value.trim() && !correo.value.trim()) {
+    alert('Ingresa al menos un medio de contacto: teléfono o correo electrónico.');
+    tel.focus();
+    return false;
+  }
+  return true;
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  lrCambiarDocumento(false);
+});
+</script>
+{% endblock %}

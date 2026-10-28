@@ -1,10 +1,11 @@
 {% extends 'base.html' %}
+{% from 'macros/pagination.html' import paginacion %}
 {% block content %}
 <div class="container mt-4">
 
   <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
     <h2 class="mb-0">
-      <i class="bi bi-truck me-2 text-info"></i>Gestión de Proveedores
+      <i class="bi bi-person me-2 text-info"></i>Gestión de Proveedores
     </h2>
     <a href="/admin" class="btn btn-outline-secondary">
       <i class="bi bi-arrow-left me-1"></i> Volver al Panel
@@ -26,7 +27,13 @@
           <div class="col-md-6">
             <label class="form-label text-white">Nombre completo *</label>
             <input name="nombre" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.nombre if editar else '' }}" required placeholder="Nombre del proveedor">
+                   value="{{ editar.nombre if editar else '' }}" required
+                   minlength="4" maxlength="120"
+                   pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{4,}"
+                   title="Solo letras y espacios, mínimo 4 letras"
+                   oninput="soloLetras(this)"
+                   placeholder="Nombre del proveedor">
+            <div class="form-text text-muted">Solo letras y espacios (mínimo 4 letras).</div>
           </div>
           <div class="col-md-6">
             <label class="form-label text-white">Celular / WhatsApp</label>
@@ -35,23 +42,31 @@
                 <i class="bi bi-whatsapp"></i>
               </span>
               <input name="celular" class="form-control bg-dark text-white border-secondary"
-                     value="{{ editar.celular if editar else '' }}" placeholder="Ej: 999888777">
+                     value="{{ editar.celular if editar else '' }}" placeholder="Ej: 999888777"
+                     inputmode="numeric" pattern="\d{9}" minlength="9" maxlength="9"
+                     title="Exactamente 9 números" oninput="soloDigitos(this, 9)">
             </div>
+            <div class="form-text text-muted">Exactamente 9 números.</div>
           </div>
           <div class="col-md-6">
             <label class="form-label text-white">Correo electrónico</label>
             <input type="email" name="correo" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.correo if editar else '' }}" placeholder="proveedor@email.com">
+                   value="{{ editar.correo if editar else '' }}" placeholder="proveedor@email.com"
+                   maxlength="200" title="Debe incluir @ y un dominio válido">
           </div>
           <div class="col-md-3">
             <label class="form-label text-white">DNI</label>
             <input name="dni" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.dni if editar else '' }}" placeholder="12345678" maxlength="8">
+                   value="{{ editar.dni if editar else '' }}" placeholder="12345678"
+                   inputmode="numeric" pattern="\d{8}" minlength="8" maxlength="8"
+                   title="Exactamente 8 números" oninput="soloDigitos(this, 8)">
           </div>
           <div class="col-md-3">
             <label class="form-label text-white">RUC</label>
             <input name="ruc" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.ruc if editar else '' }}" placeholder="20123456789" maxlength="11">
+                   value="{{ editar.ruc if editar else '' }}" placeholder="20123456789"
+                   inputmode="numeric" pattern="\d{11}" minlength="11" maxlength="11"
+                   title="Exactamente 11 números" oninput="soloDigitos(this, 11)">
           </div>
           <div class="col-md-6">
             <label class="form-label text-white">Dirección</label>
@@ -120,7 +135,7 @@
     <div class="card-header tc-admin-header">
       <span class="text-white fw-bold">
         <i class="bi bi-people me-2"></i>Proveedores registrados
-        <span class="badge bg-info ms-2">{{ proveedores|length }}</span>
+        <span class="badge bg-info ms-2">{{ total }}</span>
       </span>
     </div>
     <div class="card-body p-0">
@@ -182,13 +197,29 @@
       </div>
       {% else %}
       <div class="text-center py-5 text-muted">
-        <i class="bi bi-truck display-4 mb-3"></i>
+        <i class="bi bi-person display-4 mb-3"></i>
         <p>No hay proveedores registrados{% if buscar %} para "{{ buscar }}"{% endif %}.</p>
       </div>
       {% endif %}
     </div>
   </div>
+  {% if proveedores %}
+  <div class="px-3 pb-3">
+    {{ paginacion(page, total_pages, total, '/proveedores?', {'buscar': buscar, 'categoria': cat_filtro}) }}
+  </div>
+  {% endif %}
   {% endif %}
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function soloLetras(el) {
+  el.value = el.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g, '');
+}
+function soloDigitos(el, max) {
+  el.value = el.value.replace(/\D/g, '').slice(0, max);
+}
+</script>
 {% endblock %}

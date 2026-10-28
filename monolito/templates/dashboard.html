@@ -16,6 +16,7 @@
 .icon-pedidos{background:rgba(255,165,0,.15);color:#ffa500}
 .icon-proveedores{background:rgba(26,188,156,.15);color:#1abc9c}
 .icon-pendientes{background:rgba(241,196,15,.15);color:#f1c40f}
+.icon-reclamaciones{background:rgba(231,76,60,.15);color:#e74c3c}
 
 .quick-links{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin-bottom:35px}
 .quick-link{display:flex;flex-direction:column;align-items:center;gap:10px;padding:22px 15px;background:var(--bg-card);border:1px solid var(--border-card);border-radius:16px;text-decoration:none;color:var(--text-primary);transition:background .3s,border-color .3s,transform .3s}
@@ -84,12 +85,16 @@
             <div class="info"><h3>{{ pedidos_pendientes }}</h3><p>Pedidos Pendientes</p></div>
         </div>
         <div class="dash-card">
-            <div class="icon-box icon-proveedores"><i class="bi bi-truck"></i></div>
+            <div class="icon-box icon-proveedores"><i class="bi bi-person"></i></div>
             <div class="info"><h3>{{ total_proveedores }}</h3><p>Proveedores</p></div>
         </div>
         <div class="dash-card">
             <div class="icon-box icon-pendientes"><i class="bi bi-clock-history"></i></div>
             <div class="info"><h3>{{ ventas_pendientes }}</h3><p>Ventas en Espera</p></div>
+        </div>
+        <div class="dash-card">
+            <div class="icon-box icon-reclamaciones"><i class="bi bi-journal-text"></i></div>
+            <div class="info"><h3>{{ reclamaciones_pendientes }}</h3><p>Reclamaciones Pendientes</p></div>
         </div>
     </div>
 
@@ -126,7 +131,7 @@
             <i class="bi bi-calendar-check"></i><span>Informe Día</span>
         </a>
         <a href="/proveedores" class="quick-link">
-            <i class="bi bi-truck"></i><span>Proveedores</span>
+            <i class="bi bi-person"></i><span>Proveedores</span>
         </a>
         <a href="{{ url_for('kpi_biz.panel_completo') }}" class="quick-link">
             <i class="bi bi-graph-up-arrow"></i><span>KPIs</span>
@@ -136,6 +141,9 @@
         </a>
         <a href="/clientes" class="quick-link">
             <i class="bi bi-people"></i><span>Clientes</span>
+        </a>
+        <a href="/reclamaciones" class="quick-link">
+            <i class="bi bi-journal-text"></i><span>Reclamaciones</span>
         </a>
     </div>
 

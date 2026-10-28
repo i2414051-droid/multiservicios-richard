@@ -1,0 +1,142 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/reclamaciones.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="lr-admin">
+
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4 lr-no-print">
+    <div>
+      <h2 class="mb-1" style="color:var(--text-primary);font-weight:800">
+        <i class="bi bi-journal-check me-2 text-warning"></i>Reclamación {{ r.codigo }}
+      </h2>
+      <p class="mb-0" style="color:var(--text-muted);font-size:13.5px">
+        Registrada el {{ r.fecha|fechahora }} ·
+        {% if r.tipo == 'queja' %}Queja{% else %}Reclamo{% endif %} ·
+        Producto comprado
+      </p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('reclamaciones') }}" class="btn lr-btn-sec">
+        <i class="bi bi-arrow-left me-1"></i> Volver a la bandeja
+      </a>
+      <a href="{{ url_for('imprimir_reclamacion', id=r.id) }}" target="_blank" class="btn lr-btn-principal">
+        <i class="bi bi-printer me-1"></i> Imprimir hoja
+      </a>
+    </div>
+  </div>
+
+  <div class="lr-detalle-grid">
+
+    <!-- HOJA -->
+    <div>
+      {% with copia = 'empresa' %}
+        {% include '_hoja_reclamacion.html' %}
+      {% endwith %}
+    </div>
+
+    <!-- PANEL LATERAL -->
+    <aside class="lr-lateral lr-no-print">
+      <h5><i class="bi bi-info-circle me-2 text-warning"></i>Estado del caso</h5>
+
+      <div class="mb-3">
+        {% if r.estado == 'respondido' %}
+          <span class="lr-badge lr-badge--respondido"><i class="bi bi-check2"></i> Respondido</span>
+        {% elif dias is not none and dias < 0 %}
+          <span class="lr-badge lr-badge--vencido"><i class="bi bi-exclamation-triangle"></i> Vencido sin respuesta</span>
+        {% else %}
+          <span class="lr-badge lr-badge--pendiente"><i class="bi bi-hourglass"></i> Pendiente</span>
+        {% endif %}
+      </div>
+
+      <div class="lr-dato">
+        <span>Fecha límite</span>
+        <strong>{{ r.fecha_limite|fecha }}</strong>
+      </div>
+      <div class="lr-dato">
+        <span>Plazo</span>
+        <strong>
+          {% if r.estado == 'respondido' %}
+            Cerrado
+          {% elif dias is not none and dias < 0 %}
+            <span style="color:#ff6b6b">Vencido hace {{ dias * -1 }} día(s)</span>
+          {% elif dias == 0 %}
+            <span style="color:#f39c12">Vence hoy</span>
+          {% else %}
+            <span style="color:#f39c12">{{ dias }} día(s)</span>
+          {% endif %}
+        </strong>
+      </div>
+      <div class="lr-dato">
+        <span>Documento</span>
+        <strong>{{ r.consumidor_documento_tipo }} {{ r.consumidor_documento }}</strong>
+      </div>
+      <div class="lr-dato">
+        <span>Teléfono</span>
+        <strong>{{ r.consumidor_telefono or '—' }}</strong>
+      </div>
+      <div class="lr-dato">
+        <span>Correo</span>
+        <strong style="word-break:break-all">{{ r.consumidor_correo or '—' }}</strong>
+      </div>
+
+      {% if r.consumidor_telefono or r.consumidor_correo %}
+      <div class="d-flex gap-2 mt-3 mb-4">
+        {% if r.consumidor_telefono %}
+        <a href="tel:{{ r.consumidor_telefono }}" class="btn btn-sm lr-btn-sec flex-grow-1">
+          <i class="bi bi-telephone me-1"></i> Llamar
+        </a>
+        {% endif %}
+        {% if r.consumidor_correo %}
+        <a href="mailto:{{ r.consumidor_correo }}" class="btn btn-sm lr-btn-sec flex-grow-1">
+          <i class="bi bi-envelope me-1"></i> Correo
+        </a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if r.estado == 'respondido' %}
+      <div class="mb-3 p-3" style="background:rgba(46,204,113,.1);border:1px solid rgba(46,204,113,.35);border-radius:12px">
+        <strong style="color:#2ecc71;font-size:13px"><i class="bi bi-check2-circle me-1"></i>Respuesta registrada</strong>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+          {{ r.fecha_respuesta|fechahora }} · {{ r.respondido_por }}
+        </div>
+      </div>
+      {% endif %}
+
+      <hr style="border-color:var(--border-card)">
+
+      <h5>
+        <i class="bi bi-reply-all me-2 text-warning"></i>
+        {% if r.estado == 'respondido' %}Actualizar respuesta{% else %}Responder al consumidor{% endif %}
+      </h5>
+      <form method="POST" action="{{ url_for('responder_reclamacion', id=r.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+        <label class="form-label" for="respondido_por" style="font-size:12.5px">Responsable</label>
+        <input type="text" class="form-control mb-2" id="respondido_por" name="respondido_por"
+               value="{{ r.respondido_por or session.get('nombre') or '' }}"
+               required maxlength="150" placeholder="Nombre de quien responde">
+
+        <label class="form-label" for="respuesta" style="font-size:12.5px">Respuesta</label>
+        <textarea class="form-control mb-2" id="respuesta" name="respuesta" rows="6"
+                  required minlength="10" maxlength="4000"
+                  placeholder="Describe la decisión adoptada y las acciones realizadas para atender el reclamo.">{{ r.respuesta or '' }}</textarea>
+
+        <div class="form-text mb-3" style="font-size:11.5px;color:var(--text-muted)">
+          Mínimo 10 caracteres. La respuesta quedará visible en la constancia del consumidor.
+        </div>
+
+        <button type="submit" class="btn lr-btn-principal w-100" style="padding:10px;font-size:13.5px"
+                data-carga-texto="Guardando...">
+          <i class="bi bi-send-check me-1"></i>
+          {% if r.estado == 'respondido' %}Actualizar respuesta{% else %}Registrar respuesta{% endif %}
+        </button>
+      </form>
+    </aside>
+
+  </div>
+</div>
+{% endblock %}
