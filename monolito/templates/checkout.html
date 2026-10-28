@@ -5,7 +5,7 @@
 
   <form method="POST" action="/procesar_compra" id="checkoutForm" enctype="multipart/form-data">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="metodo_pago" id="metodoPagoHidden" value="yape">
+    <input type="hidden" name="metodo_pago" id="metodoPagoHidden" value="tarjeta">
     <input type="hidden" name="culqi_token" id="culqiToken" value="">
     <input type="hidden" name="culqi_email" id="culqiEmail" value="{{ usuario.correo or '' }}">
 
@@ -142,32 +142,18 @@
           <div class="card-body">
             <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-wallet2 me-2"></i>Método de pago</h5>
             <div class="row g-2 mt-3">
-              <div class="col-md-6">
-                <label class="metodo-pago active" data-metodo="yape">
-                  <input type="radio" name="metodo_radio" value="yape" checked class="d-none" onchange="cambiarMetodo('yape')">
-                  <i class="bi bi-phone" style="font-size:24px;color:#9b59b6"></i>
-                  <div><strong style="color:var(--text-primary)">Yape</strong><br><small style="color:var(--text-muted)">Transferencia instantánea</small></div>
-                </label>
-              </div>
-              <div class="col-md-6">
-                <label class="metodo-pago" data-metodo="plin">
-                  <input type="radio" name="metodo_radio" value="plin" class="d-none" onchange="cambiarMetodo('plin')">
-                  <i class="bi bi-phone" style="font-size:24px;color:#3498db"></i>
-                  <div><strong style="color:var(--text-primary)">Plin</strong><br><small style="color:var(--text-muted)">Transferencia instantánea</small></div>
-                </label>
-              </div>
               <div class="col-12">
+                <label class="metodo-pago active" data-metodo="tarjeta">
+                  <input type="radio" name="metodo_radio" value="tarjeta" checked class="d-none" onchange="cambiarMetodo('tarjeta')">
+                  <i class="bi bi-credit-card" style="font-size:24px;color:#e74c3c"></i>
+                  <div><strong style="color:var(--text-primary)">Pagar con Culqi</strong><br><small style="color:var(--text-muted)">Tarjeta, Yape, Billeteras y más</small></div>
+                </label>
+              </div>
+              <div class="col-md-6">
                 <label class="metodo-pago" data-metodo="transferencia">
                   <input type="radio" name="metodo_radio" value="transferencia" class="d-none" onchange="cambiarMetodo('transferencia')">
                   <i class="bi bi-bank" style="font-size:24px;color:#f39c12"></i>
                   <div><strong style="color:var(--text-primary)">Transferencia bancaria</strong><br><small style="color:var(--text-muted)">Depósito o transferencia</small></div>
-                </label>
-              </div>
-              <div class="col-12">
-                <label class="metodo-pago" data-metodo="tarjeta">
-                  <input type="radio" name="metodo_radio" value="tarjeta" class="d-none" onchange="cambiarMetodo('tarjeta')">
-                  <i class="bi bi-credit-card" style="font-size:24px;color:#e74c3c"></i>
-                  <div><strong style="color:var(--text-primary)">Tarjeta (Culqi)</strong><br><small style="color:var(--text-muted)">Débito o crédito</small></div>
                 </label>
               </div>
             </div>
@@ -334,7 +320,7 @@ function enviarCompraAjax(){
 var radios=document.querySelectorAll('[name="direccion_envio_select"]');
 radios.forEach(function(r){ r.addEventListener('change',function(){ document.getElementById('direccionEnvio').value=this.value; }); });
 if(radios.length>0 && !document.getElementById('direccionEnvio').value){ document.getElementById('direccionEnvio').value=radios[0].value; }
-cambiarMetodo('yape');
+cambiarMetodo('tarjeta');
 </script>
 <script src="https://checkout.culqi.com/js/v4"></script>
 <script>
@@ -351,7 +337,7 @@ if(window.Culqi){
   Culqi.options({
     lang:'es',
     installments:false,
-    paymentMethods:{tarjeta:true,yape:false,bancaMovil:false,agente:false,billetera:false,cuotealo:false},
+    paymentMethods:{tarjeta:true,yape:true,bancaMovil:true,agente:true,billetera:true,cuotealo:true},
     style:{logo:'https://static.culqi.com/v2/v2/static/img/logo.png',bannerColor:'#f39c12',buttonBackground:'#f39c12',buttonText:'Pagar',buttonTextColor:'#000000',priceColor:'#27ae60'}
   });
 }
