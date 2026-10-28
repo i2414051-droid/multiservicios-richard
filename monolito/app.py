@@ -566,6 +566,12 @@ app.config['MAIL_TIMEOUT'] = int(os.environ.get('MAIL_TIMEOUT', 10))
 mail = Mail(app)
 
 TOKEN = os.environ.get('APIPERU_TOKEN', '')
+# Culqi
+CULQI_PUBLIC_KEY = os.environ.get('CULQI_PUBLIC_KEY', '')
+CULQI_SECRET_KEY = os.environ.get('CULQI_SECRET_KEY', '')
+CULQI_RSA_ID = os.environ.get('CULQI_RSA_ID', '')
+CULQI_RSA_PUBLIC_KEY = os.environ.get('CULQI_RSA_PUBLIC_KEY', '')
+CULQI_CURRENCY = os.environ.get('CULQI_CURRENCY', 'PEN')
 
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
@@ -4886,11 +4892,13 @@ def checkout():
     cur.execute("SELECT correo, nombre, apellido, telefono, documento_tipo, documento_numero FROM usuarios WHERE id=%s", (user_id,))
     usuario = cur.fetchone()
     cur.close()
-    # KPI: paso 2 del recorrido. Aqui se sabe que el cliente llego al
-    # formulario; si no llega a comprar, se quedo aqui.
     kpi_reg.sesion_compra(kpi_reg.PASO_CHECKOUT)
     return render_template('checkout.html', items=items, total=total,
-                           direcciones=direcciones, usuario=usuario)
+                           direcciones=direcciones, usuario=usuario,
+                           culqi_public_key=CULQI_PUBLIC_KEY,
+                           culqi_rsa_id=CULQI_RSA_ID,
+                           culqi_rsa_public_key=CULQI_RSA_PUBLIC_KEY,
+                           culqi_currency=CULQI_CURRENCY)
 
 @app.route('/procesar_compra', methods=['POST'])
 def procesar_compra():
