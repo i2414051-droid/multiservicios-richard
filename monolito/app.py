@@ -138,7 +138,7 @@ _LIMITES = {
     'registro': (10, 60),
     'recuperar_password': (5, 60),
     'restablecer_password': (5, 60),
-    'api_validar_documento': (30, 60),
+    'api_consultar_documento': (30, 60),
 }
 _LIMITE_POST_GENERAL = (120, 60)
 
@@ -571,6 +571,12 @@ app.config['MAIL_TIMEOUT'] = int(os.environ.get('MAIL_TIMEOUT', 10))
 mail = Mail(app)
 
 TOKEN = os.environ.get('APIPERU_TOKEN', '')
+# Consulta DNI/RUC (APIsPERU). El token se usa SOLO en el servidor: nunca se
+# manda al navegador ni se renderiza en las plantillas.
+APIPERU_URL = os.environ.get('APIPERU_URL',
+                             'https://dniruc.apisperu.com/api/v1').rstrip('/')
+APIPERU_TIMEOUT = float(os.environ.get('APIPERU_TIMEOUT', '9'))
+APIPERU_CACHE_TTL = int(os.environ.get('APIPERU_CACHE_TTL', str(24 * 60 * 60)))
 # Culqi
 CULQI_PUBLIC_KEY = os.environ.get('CULQI_PUBLIC_KEY', '')
 CULQI_SECRET_KEY = os.environ.get('CULQI_SECRET_KEY', '')
@@ -2444,7 +2450,7 @@ def consultar(tipo, numero):
         return jsonify({'error': 'Tipo inválido'})
     url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
     try:
-        data = requests.get(url).json()
+        data = requests.get(url, timeout=APIPERU_TIMEOUT).json()
         if 'error' in data:
             return jsonify(data)
         cur = mysql.connection.cursor()
@@ -2460,62 +2466,140 @@ def consultar(tipo, numero):
         return jsonify({'error': str(e)})
 
 # ─────────────────────────────────────────────
-# VALIDAR DOCUMENTO (para checkout - clientes)
+# CONSULTA DNI/RUC PARA EL CHECKOUT (APIsPERU)
 # ─────────────────────────────────────────────
-@app.route('/api/validar-documento', methods=['POST'])
-def api_validar_documento():
-    if 'user_id' not in session:
-        return jsonify({'error': 'No autenticado'}), 401
-    data = request.get_json(silent=True) or {}
-    tipo = data.get('tipo', '')
-    numero = data.get('numero', '')
-    nombres = data.get('nombres', '').strip()
-    apellidos = data.get('apellidos', '').strip()
-    if tipo not in ['dni', 'ruc']:
-        return jsonify({'error': 'Tipo inválido', 'valido': False})
-    if not numero or not nombres or not apellidos:
-        return jsonify({'error': 'Campos incompletos', 'valido': False})
-    if tipo == 'dni' and len(numero) != 8:
-        return jsonify({'error': 'DNI debe tener 8 dígitos', 'valido': False})
-    if tipo == 'ruc' and len(numero) != 11:
-        return jsonify({'error': 'RUC debe tener 11 dígitos', 'valido': False})
+# Caché en memoria: un DNI/RUC no cambia de un día para otro. Evita pagar dos
+# veces la misma consulta y hace instantáneo el autocompletado al reintentar.
+_CONSULTA_CACHE = {}
+_CONSULTA_CACHE_MAX = 500
+_CONSULTA_LOCK = threading.Lock()
+
+
+def _texto_api(valor, maximo):
+    """Normaliza un texto devuelto por APIsPERU (sin saltos ni espacios dobles)."""
+    texto = ' '.join(str(valor or '').split())
+    return texto[:maximo].upper()
+
+
+def _consultar_documento_api(tipo, numero):
+    """Consulta DNI/RUC en APIsPERU.
+
+    Devuelve (datos, error). `datos` ya viene normalizado para el checkout y
+    `error` es un mensaje listo para mostrar al cliente. El token de APIsPERU
+    no sale nunca de esta función.
+    """
     if not TOKEN:
-        return jsonify({'error': 'API no configurada', 'valido': False})
-    url = f"https://dniruc.apisperu.com/api/v1/{tipo}/{numero}?token={TOKEN}"
+        return None, ('La consulta automática de DNI/RUC no está configurada. '
+                      'Puedes escribir tus datos a mano.')
+
+    clave = (tipo, numero)
+    ahora = time.time()
+    with _CONSULTA_LOCK:
+        guardado = _CONSULTA_CACHE.get(clave)
+        if guardado and ahora - guardado[0] < APIPERU_CACHE_TTL:
+            return dict(guardado[1]), None
+
     try:
-        resp = requests.get(url, timeout=10)
-        api_data = resp.json()
-        if 'error' in api_data:
-            return jsonify({'error': 'Documento no encontrado en registros', 'valido': False})
-        if tipo == 'dni':
-            api_nombre = f"{api_data.get('nombres', '')} {api_data.get('apellidoPaterno', '')} {api_data.get('apellidoMaterno', '')}".strip()
-            api_estado = api_data.get('estado', '')
-            if api_estado and api_estado.upper() != 'ACTIVO':
-                return jsonify({'error': f'Estado del DNI: {api_estado}', 'valido': False})
-        else:
-            api_nombre = api_data.get('razonSocial', '')
-            api_estado = api_data.get('estado', '')
-            api_condicion = api_data.get('condicion', '')
-            if api_estado and api_estado.upper() != 'ACTIVO':
-                return jsonify({'error': f'Estado del RUC: {api_estado}', 'valido': False})
-            if api_condicion and 'HABIDO' not in api_condicion.upper():
-                return jsonify({'error': f'Condición: {api_condicion}', 'valido': False})
-        usuario_nombre = f"{nombres} {apellidos}".strip().upper()
-        api_nombre_upper = api_nombre.upper()
-        if usuario_nombre not in api_nombre_upper and api_nombre_upper not in usuario_nombre:
-            similitud = sum(1 for a, b in zip(usuario_nombre.split(), api_nombre_upper.split()) if a == b)
-            total_palabras = max(len(usuario_nombre.split()), len(api_nombre_upper.split()))
-            if total_palabras > 0 and similitud / total_palabras < 0.5:
-                return jsonify({
-                    'error': f'Los datos no coinciden. Registrado: {api_nombre}',
-                    'valido': False,
-                    'api_nombre': api_nombre
-                })
-        return jsonify({'valido': True, 'api_nombre': api_nombre})
+        resp = requests.get(f'{APIPERU_URL}/{tipo}/{numero}',
+                            params={'token': TOKEN}, timeout=APIPERU_TIMEOUT)
     except requests.exceptions.Timeout:
-        return jsonify({'error': 'Servicio temporalmente no disponible. Intenta de nuevo.', 'valido': False})
-    except Exception as e:
-        return jsonify({'error': 'Error al validar documento', 'valido': False})
+        return None, ('El servicio de consulta tardó demasiado. '
+                      'Puedes escribir tus datos a mano.')
+    except requests.exceptions.RequestException:
+        return None, ('No se pudo conectar con el servicio de consulta. '
+                      'Puedes escribir tus datos a mano.')
+
+    if resp.status_code in (401, 403):
+        # Token vencido o inválido. No se filtra el detalle del proveedor.
+        print('[consultar_documento] APIsPERU rechazó el token (%s)'
+              % resp.status_code)
+        return None, ('La consulta automática no está disponible ahora. '
+                      'Puedes escribir tus datos a mano.')
+    if resp.status_code == 404:
+        return None, ('El %s no existe o no está disponible. Revisa el número.'
+                      % tipo.upper())
+    if resp.status_code != 200:
+        return None, ('El servicio de consulta no respondió bien. '
+                      'Puedes escribir tus datos a mano.')
+
+    try:
+        api = resp.json()
+    except ValueError:
+        return None, ('El servicio de consulta devolvió una respuesta inválida. '
+                      'Puedes escribir tus datos a mano.')
+    if not isinstance(api, dict):
+        return None, ('El servicio de consulta devolvió una respuesta inválida. '
+                      'Puedes escribir tus datos a mano.')
+
+    mensaje_api = str(api.get('message') or api.get('error') or '').strip()
+    if api.get('success') is False or api.get('error'):
+        return None, mensaje_api or ('No se encontró el documento. '
+                                     'Revisa el número.')
+
+    if tipo == 'dni':
+        datos = {
+            'nombres': _texto_api(api.get('nombres'), 100),
+            'apellido_paterno': _texto_api(api.get('apellidoPaterno'), 50),
+            'apellido_materno': _texto_api(api.get('apellidoMaterno'), 50),
+            'estado': _texto_api(api.get('estado'), 30),
+        }
+        if not datos['nombres'] or not datos['apellido_paterno']:
+            return None, (mensaje_api or 'El DNI no devolvió nombres. '
+                          'Revisa el número o escribe tus datos a mano.')
+    else:
+        datos = {
+            'razon_social': _texto_api(api.get('razonSocial'), 150),
+            'direccion': _texto_api(api.get('direccion'), 200),
+            'estado': _texto_api(api.get('estado'), 30),
+            'condicion': _texto_api(api.get('condicion'), 30),
+        }
+        if not datos['razon_social']:
+            return None, (mensaje_api or 'El RUC no devolvió la razón social. '
+                          'Revisa el número o escribe tus datos a mano.')
+
+    # Solo se guardan las consultas exitosas: un fallo temporal no debe quedar
+    # cacheado durante 24 horas.
+    with _CONSULTA_LOCK:
+        if len(_CONSULTA_CACHE) >= _CONSULTA_CACHE_MAX:
+            vencidos = [k for k, (t, _) in _CONSULTA_CACHE.items()
+                        if ahora - t >= APIPERU_CACHE_TTL]
+            for k in vencidos:
+                _CONSULTA_CACHE.pop(k, None)
+            if len(_CONSULTA_CACHE) >= _CONSULTA_CACHE_MAX:
+                _CONSULTA_CACHE.pop(next(iter(_CONSULTA_CACHE)))
+        _CONSULTA_CACHE[clave] = (ahora, datos)
+    return dict(datos), None
+
+
+@app.route('/api/consultar-documento', methods=['POST'])
+def api_consultar_documento():
+    """Autocompleta el checkout con los datos de RENIEC/SUNAT."""
+    if 'user_id' not in session:
+        return jsonify({'ok': False,
+                        'error': 'Inicia sesión para consultar el documento.'}), 401
+
+    data = request.get_json(silent=True) or {}
+    tipo = str(data.get('tipo', '')).strip().lower()
+    numero = re.sub(r'\D', '', str(data.get('numero', '')))
+    if tipo not in ('dni', 'ruc'):
+        return jsonify({'ok': False,
+                        'error': 'Tipo de documento inválido.'}), 400
+    esperado = 8 if tipo == 'dni' else 11
+    if len(numero) != esperado:
+        return jsonify({'ok': False,
+                        'error': 'El %s debe tener %d dígitos.'
+                                 % (tipo.upper(), esperado)}), 400
+
+    # Límite por usuario además del límite por IP: protege la cuota del plan.
+    if not _rate_permitido('doc:%s' % session['user_id'], 20, 60):
+        return jsonify({'ok': False,
+                        'error': 'Hiciste muchas consultas seguidas. '
+                                 'Espera un minuto e intenta de nuevo.'}), 429
+
+    datos, error = _consultar_documento_api(tipo, numero)
+    if error:
+        return jsonify({'ok': False, 'error': error})
+    return jsonify({'ok': True, 'tipo': tipo, 'numero': numero, **datos})
 
 # ─────────────────────────────────────────────
 # TIENDA / CARRITO
@@ -5146,6 +5230,9 @@ def procesar_compra():
 
     nombres = request.form.get('nombres', '').strip()
     apellidos = request.form.get('apellidos', '').strip()
+    apellido_paterno = request.form.get('apellido_paterno', '').strip()
+    apellido_materno = request.form.get('apellido_materno', '').strip()
+    razon_social = request.form.get('razon_social', '').strip()
     doc_tipo = request.form.get('doc_tipo', 'dni')
     doc_numero = request.form.get('doc_numero', '').strip()
     telefono = request.form.get('telefono', '').strip()
@@ -5154,7 +5241,7 @@ def procesar_compra():
     direccion_envio = request.form.get('direccion_envio', '')
     notas_entrega = request.form.get('notas_entrega', '').strip()
 
-    if not all([nombres, apellidos, doc_numero, telefono, direccion_envio]):
+    if not doc_numero or not telefono or not direccion_envio:
         return _chk_error('Todos los campos son obligatorios.')
     if doc_tipo not in ('dni', 'ruc'):
         return _chk_error('Tipo de documento inválido.')
@@ -5168,17 +5255,37 @@ def procesar_compra():
         return _chk_error('El celular solo puede contener dígitos.')
     if len(telefono) != 9:
         return _chk_error('El celular debe tener exactamente 9 dígitos.')
-    # Nombres y apellidos: se normalizan a mayusculas y luego se validan
-    # (no se rechazan por estar en minuscula: asi no se bloquea a quien ya
-    #  tiene el nombre guardado asi en la base)
-    nombres = ' '.join(nombres.upper().split())
-    apellidos = ' '.join(apellidos.upper().split())
-    solo_letras = r"^[A-ZÁÉÍÓÚÑÜ\s'.-]+$"
-    for campo, valor in (('nombre', nombres), ('apellido', apellidos)):
-        if re.search(r'\d', valor):
-            return _chk_error(f'El {campo} no puede contener números.')
-        if not re.match(solo_letras, valor):
-            return _chk_error(f'El {campo} solo puede contener letras.')
+
+    # ── Nombre según el tipo de documento ──
+    # DNI: nombres + apellido paterno + apellido materno (el checkout los pide
+    # separados). RUC: una sola razón social.
+    if doc_tipo == 'dni':
+        # Se normalizan a mayúsculas y se validan (no se rechazan por estar en
+        # minúscula: así no se bloquea a quien ya tiene el nombre guardado así).
+        nombres = ' '.join(nombres.upper().split())
+        apellido_paterno = ' '.join(apellido_paterno.upper().split())
+        apellido_materno = ' '.join(apellido_materno.upper().split())
+        if not (nombres and apellido_paterno and apellido_materno):
+            return _chk_error('Completa nombres, apellido paterno y '
+                              'apellido materno.')
+        solo_letras = r"^[A-ZÁÉÍÓÚÑÜ\s'.-]+$"
+        for campo, valor in (('nombre', nombres),
+                             ('apellido paterno', apellido_paterno),
+                             ('apellido materno', apellido_materno)):
+            if re.search(r'\d', valor):
+                return _chk_error(f'El {campo} no puede contener números.')
+            if not re.match(solo_letras, valor):
+                return _chk_error(f'El {campo} solo puede contener letras.')
+        apellidos = f'{apellido_paterno} {apellido_materno}'.strip()
+    else:
+        razon_social = ' '.join(razon_social.upper().split())
+        if len(razon_social) < 3:
+            return _chk_error('Completa la razón social.')
+        if re.search(r'[\x00-\x1f\x7f<>]', razon_social):
+            return _chk_error('La razón social contiene caracteres inválidos.')
+        # La venta guarda la razón social en `nombre`; `apellido` queda vacío.
+        nombres = razon_social
+        apellidos = ''
 
     # ── Pago: token de Culqi y validaciones previas ──
     culqi_token = request.form.get('culqi_token', '').strip()
@@ -5290,18 +5397,20 @@ def procesar_compra():
         if metodo_pago in ('tarjeta', 'yape'):
             antifraude = {
                 'first_name': nombres.title(),
-                'last_name': apellidos.title(),
                 'email': culqi_email,
                 'address': direccion_envio[:100],
                 'address_city': 'Lima',
                 'country_code': 'PE',
                 'phone_number': telefono,
             }
+            # Con RUC no hay apellido: Culqi lo acepta si no se envía.
+            if apellidos:
+                antifraude['last_name'] = apellidos.title()
             if culqi_device_id:
                 antifraude['device_finger_print_id'] = culqi_device_id
             aprobado, cargo, mensaje = _culqi_crear_cargo(
                 total_centimos, culqi_email, culqi_token,
-                f'Pedido Multiservicios Richard - {nombres} {apellidos}',
+                f'Pedido Multiservicios Richard - {nombres} {apellidos}'.strip(),
                 antifraude=antifraude,
                 metadata={'cliente_id': str(user_id),
                           'documento': doc_numero,

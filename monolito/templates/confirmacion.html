@@ -13,7 +13,7 @@
       <h5 style="color:#f39c12;font-weight:700;margin-bottom:12px"><i class="bi bi-person me-2"></i>Datos del cliente</h5>
       <div class="row" style="font-size:14px">
         <div class="col-md-6">
-          <p style="margin:4px 0"><span style="color:var(--text-muted)">Nombre:</span> <strong>{{ venta.nombre or '-' }} {{ venta.apellido or '' }}</strong></p>
+          <p style="margin:4px 0"><span style="color:var(--text-muted)">{% if venta.doc_tipo == 'ruc' %}Razón social:{% else %}Nombre:{% endif %}</span> <strong>{{ venta.nombre or '-' }} {{ venta.apellido or '' }}</strong></p>
           <p style="margin:4px 0"><span style="color:var(--text-muted)">{% if venta.doc_tipo %}{{ venta.doc_tipo|upper }}{% elif venta.documento and venta.documento|length == 11 %}RUC{% else %}DNI{% endif %}:</span> <strong>{{ venta.documento or '-' }}</strong></p>
         </div>
         <div class="col-md-6">

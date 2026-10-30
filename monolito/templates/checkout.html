@@ -50,40 +50,59 @@
               <div class="col-md-8">
                 <label class="form-label" id="lblDocNumero">N&middot; de DNI <span class="campo-obligatorio">*</span></label>
                 <input type="text" name="doc_numero" id="docNumero" class="form-control"
-                       value="{{ usuario.documento_numero or '' }}" required
+                       value="" required
                        maxlength="11" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-                       oninput="soloDigitos(this)"
+                       oninput="onDocNumeroInput(this)"
                        onpaste="pegarSoloDigitos(event, this)"
                        onblur="validarDocumento(this)">
-                <div class="form-text" id="ayudaDocNumero">
-                  <i class="bi bi-exclamation-circle me-1"></i>Obligatorio. Solo n&uacute;meros. DNI: 8 d&iacute;gitos.
-                </div>
+                <div class="form-text" id="ayudaDocNumero"></div>
+                <div class="form-text" id="estadoDocumento" aria-live="polite" style="display:none"></div>
               </div>
-              <div class="col-md-6">
+              <div class="col-12" id="grupoNombres">
                 <label class="form-label">Nombres <span class="campo-obligatorio">*</span></label>
                 <input type="text" name="nombres" id="nombres" class="form-control"
-                       value="{{ usuario.nombre or '' }}" required
+                       value="" required
                        inputmode="text" autocomplete="off"
                        style="text-transform:uppercase"
                        onkeyup="this.value=this.value.toUpperCase()"
                        pattern="[A-ZÁÉÍÓÚÑÜ ]+"
-                       title="Solo letras, sin números"
-                       oninput="sinDigitos(this)"
+                       oninput="sinDigitos(this); invalidarResumen()"
                        onblur="validarNombre(this)">
-                <div class="form-text"><i class="bi bi-exclamation-circle me-1"></i>Obligatorio. Solo letras.</div>
+                <div class="form-text"></div>
               </div>
-              <div class="col-md-6">
-                <label class="form-label">Apellidos <span class="campo-obligatorio">*</span></label>
-                <input type="text" name="apellidos" id="apellidos" class="form-control"
-                       value="{{ usuario.apellido or '' }}" required
+              <div class="col-md-6" id="grupoApellidoPaterno">
+                <label class="form-label">Apellido paterno <span class="campo-obligatorio">*</span></label>
+                <input type="text" name="apellido_paterno" id="apellidoPaterno" class="form-control"
+                       value="" required
                        inputmode="text" autocomplete="off"
                        style="text-transform:uppercase"
                        onkeyup="this.value=this.value.toUpperCase()"
                        pattern="[A-ZÁÉÍÓÚÑÜ ]+"
-                       title="Solo letras, sin números"
-                       oninput="sinDigitos(this)"
+                       oninput="sinDigitos(this); invalidarResumen()"
                        onblur="validarNombre(this)">
-                <div class="form-text"><i class="bi bi-exclamation-circle me-1"></i>Obligatorio. Solo letras.</div>
+                <div class="form-text"></div>
+              </div>
+              <div class="col-md-6" id="grupoApellidoMaterno">
+                <label class="form-label">Apellido materno <span class="campo-obligatorio">*</span></label>
+                <input type="text" name="apellido_materno" id="apellidoMaterno" class="form-control"
+                       value="" required
+                       inputmode="text" autocomplete="off"
+                       style="text-transform:uppercase"
+                       onkeyup="this.value=this.value.toUpperCase()"
+                       pattern="[A-ZÁÉÍÓÚÑÜ ]+"
+                       oninput="sinDigitos(this); invalidarResumen()"
+                       onblur="validarNombre(this)">
+                <div class="form-text"></div>
+              </div>
+              <div class="col-12" id="grupoRazonSocial" style="display:none">
+                <label class="form-label">Razón social <span class="campo-obligatorio">*</span></label>
+                <input type="text" name="razon_social" id="razonSocial" class="form-control"
+                       value="" disabled maxlength="150"
+                       inputmode="text" autocomplete="off"
+                       style="text-transform:uppercase"
+                       onkeyup="this.value=this.value.toUpperCase()"
+                       oninput="invalidarResumen()">
+                <div class="form-text"></div>
               </div>
               <div class="col-md-4">
                 <label class="form-label">Celular <span class="campo-obligatorio">*</span></label>
@@ -93,14 +112,14 @@
                        oninput="soloDigitos(this)"
                        onpaste="pegarSoloDigitos(event, this)"
                        onblur="validarTelefono(this)">
-                <div class="form-text"><i class="bi bi-exclamation-circle me-1"></i>Obligatorio. 9 d&iacute;gitos, sin letras.</div>
+                <div class="form-text"></div>
               </div>
               <div class="col-md-8">
                 <label class="form-label">Correo electr&oacute;nico</label>
                 <input type="email" name="correo" class="form-control"
                        value="{{ usuario.correo or '' }}" readonly
                        style="background:var(--bg-body-3);opacity:0.7">
-                <div class="form-text"><i class="bi bi-lock me-1"></i>Tomado de tu cuenta (no editable).</div>
+                <div class="form-text"></div>
               </div>
             </div>
             <div class="alert alert-danger mt-3 mb-0" id="avisoCheckout" style="display:none" role="alert"></div>
@@ -132,7 +151,7 @@
             <div class="mt-3">
               <label class="form-label">Dirección de entrega <span class="campo-obligatorio">*</span></label>
               <input type="text" class="form-control" name="direccion_envio" id="direccionEnvio" required>
-              <div class="form-text"><i class="bi bi-exclamation-circle me-1"></i>Obligatorio.</div>
+              <div class="form-text"></div>
             </div>
             <div class="mt-2">
               <button type="button" class="btn btn-sm btn-outline-warning" onclick="obtenerUbicacion()">
@@ -208,7 +227,7 @@
             <div class="card-body">
               <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-clipboard-check me-2"></i>Resumen de tu pedido</h5>
               <div class="mt-3" style="font-size:14px">
-                <p style="margin:4px 0"><span style="color:var(--text-muted)">Nombre:</span> <strong id="resNombre"></strong></p>
+                <p style="margin:4px 0"><span style="color:var(--text-muted)" id="lblResNombre">Nombre:</span> <strong id="resNombre"></strong></p>
                 <p style="margin:4px 0"><span style="color:var(--text-muted)">Documento:</span> <strong id="resDoc"></strong></p>
                 <p style="margin:4px 0"><span style="color:var(--text-muted)">Celular:</span> <strong id="resTel"></strong></p>
                 <p style="margin:4px 0"><span style="color:var(--text-muted)">Correo:</span> <strong id="resCorreo"></strong></p>
@@ -241,36 +260,221 @@
   .checkout-address-option:hover { border-color:rgba(243,156,18,.3); }
   #avisoCheckout { border-radius: 12px; font-weight: 600; }
   .campo-obligatorio { color:#e74c3c;font-weight:700; }
+  #estadoDocumento { font-weight:600; }
+  .campo-bloqueado { background:var(--bg-body-3) !important; opacity:.9; cursor:not-allowed; }
 </style>
 
 <script>
 function marcar(el, ok){ el.classList.toggle('is-valid', ok); el.classList.toggle('is-invalid', !ok); return ok; }
 function soloDigitos(el){ el.value = el.value.replace(/\D/g,''); }
-function pegarSoloDigitos(e, el){ e.preventDefault(); var t=(e.clipboardData||window.clipboardData).getData('text'); el.value = t.replace(/\D/g,''); }
+function pegarSoloDigitos(e, el){ e.preventDefault(); var t=(e.clipboardData||window.clipboardData).getData('text'); el.value = t.replace(/\D/g,''); onDocNumeroInput(el); }
 function largoDoc(){ return document.getElementById('docTipo').value === 'ruc' ? 11 : 8; }
-function validarDocumento(el){ var l=largoDoc(); el.value=el.value.replace(/\D/g,'').slice(0,l); if(!el.value){ el.setCustomValidity(''); return marcar(el,false);} el.setCustomValidity(el.value.length===l?'':'Longitud inválida'); return marcar(el, el.value.length===l); }
+function docTipoActual(){ return document.getElementById('docTipo').value; }
 function sinDigitos(el){ var limpio = el.value.replace(/[0-9]/g, '').toUpperCase(); if (limpio !== el.value) el.value = limpio; }
 function validarNombre(el){ el.value = el.value.toUpperCase(); var valor = el.value.trim(); if (valor === '') return true; if (/[0-9]/.test(valor)) { el.setCustomValidity('No puede contener números.'); return marcar(el,false);} if (!/^[A-ZÁÉÍÓÚÑÜ\s'.-]+$/.test(valor)) { el.setCustomValidity('Solo se permiten letras.'); return marcar(el,false);} el.setCustomValidity(''); return marcar(el,true); }
 function validarTelefono(el){ el.value=el.value.replace(/\D/g,'').slice(0,9); if(el.value.length===9){el.setCustomValidity('');marcar(el,true);} else if(el.value.length===0){el.setCustomValidity('');marcar(el,false);} else {el.setCustomValidity('Debe tener 9 dígitos');marcar(el,false);} }
 function avisarCheckout(mensaje, campo){ var box=document.getElementById('avisoCheckout'); if(!box)return; box.textContent=mensaje; box.style.display='block'; if(campo)campo.focus(); }
-function onDocTipoChange(){ var esRuc=document.getElementById('docTipo').value==='ruc'; var input=document.getElementById('docNumero'); var lbl=document.getElementById('lblDocNumero'); var ayuda=document.getElementById('ayudaDocNumero'); input.maxLength=esRuc?11:8; lbl.innerHTML=esRuc?'N&middot; de RUC':'N&middot; de DNI'; ayuda.innerHTML=esRuc?'Solo 11 dígitos, sin letras.':'Solo 8 dígitos, sin letras.'; if(input.value.length>input.maxLength) input.value=input.value.slice(0,input.maxLength); if(input.value) validarDocumento(input); }
+
+// ── Autocompletado de DNI/RUC ──────────────────────────────────────────────
+// El servidor consulta APIsPERU (el token nunca llega al navegador). Si la
+// consulta falla, los campos quedan editables para no bloquear la venta.
+var consultaDocSeq = 0;
+var consultaDocTimer = null;
+var ultimaConsultaDoc = '';
+
+function estadoDocumento(texto, tipo){
+  var el=document.getElementById('estadoDocumento');
+  if(!el) return;
+  el.textContent=texto||'';
+  el.style.display=texto?'block':'none';
+  el.style.color=tipo==='ok'?'#27ae60':(tipo==='error'?'#e74c3c':'var(--text-muted)');
+}
+function limpiarNombresCheckout(){
+  ['nombres','apellidoPaterno','apellidoMaterno','razonSocial'].forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    el.value=''; el.readOnly=false;
+    el.classList.remove('is-valid','is-invalid','campo-bloqueado');
+  });
+}
+function bloquearNombresCheckout(bloquear){
+  ['nombres','apellidoPaterno','apellidoMaterno','razonSocial'].forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    el.readOnly=!!bloquear;
+    el.classList.toggle('campo-bloqueado', !!bloquear);
+  });
+}
+function datosNombreCheckout(){
+  var texto;
+  if(docTipoActual()==='ruc'){
+    texto=document.getElementById('razonSocial').value||'';
+  }else{
+    texto=[document.getElementById('nombres').value,
+           document.getElementById('apellidoPaterno').value,
+           document.getElementById('apellidoMaterno').value].join(' ');
+  }
+  return texto.replace(/\s+/g,' ').trim().toUpperCase();
+}
+function invalidarResumen(){
+  var card=document.getElementById('resumenCard');
+  if(!card || card.style.display!=='block') return;
+  card.style.display='none';
+  document.getElementById('btnComprar').style.display='none';
+  document.getElementById('btnConfirmar').style.display='block';
+  document.getElementById('btnComprar').disabled=true;
+  var chk=document.getElementById('confirmarDatos'); if(chk) chk.checked=false;
+}
+function consultarDocumento(){
+  var tipo=docTipoActual();
+  var input=document.getElementById('docNumero');
+  var numero=(input.value||'').replace(/\D/g,'');
+  var esperado=(tipo==='ruc')?11:8;
+  if(numero.length!==esperado) return;
+  var clave=tipo+':'+numero;
+  if(clave===ultimaConsultaDoc) return;
+  ultimaConsultaDoc=clave;
+  var seq=++consultaDocSeq;
+  estadoDocumento('','info');
+  fetch('/api/consultar-documento',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body:JSON.stringify({tipo:tipo, numero:numero})
+  })
+  .then(function(r){
+    return r.json().catch(function(){
+      return {ok:false, error:'Respuesta inválida del servidor.'};
+    });
+  })
+  .then(function(data){
+    if(seq!==consultaDocSeq) return; // llegó una respuesta vieja
+    if(docTipoActual()!==tipo ||
+       document.getElementById('docNumero').value.replace(/\D/g,'')!==numero) return;
+    if(!data || !data.ok){
+      ultimaConsultaDoc=''; // permite reintentar al salir del campo
+      bloquearNombresCheckout(false);
+      estadoDocumento((data&&data.error)||'No se pudo consultar el documento. Escribe tus datos a mano.','error');
+      return;
+    }
+    if(tipo==='dni'){
+      document.getElementById('nombres').value=data.nombres||'';
+      document.getElementById('apellidoPaterno').value=data.apellido_paterno||'';
+      document.getElementById('apellidoMaterno').value=data.apellido_materno||'';
+    }else{
+      document.getElementById('razonSocial').value=data.razon_social||'';
+    }
+    bloquearNombresCheckout(true);
+    ['nombres','apellidoPaterno','apellidoMaterno','razonSocial'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el && !el.disabled) marcar(el,true);
+    });
+    var extra='';
+    if(data.estado && data.estado!=='ACTIVO') extra+=' Estado: '+data.estado+'.';
+    if(data.condicion && data.condicion.indexOf('HABIDO')===-1) extra+=' Condición: '+data.condicion+'.';
+    // Solo mostramos el estado si hay algún problema (no activo u habido)
+    if(extra) estadoDocumento(' '+extra,'ok');
+    if(document.getElementById('resumenCard').style.display==='block'){
+      document.getElementById('resNombre').textContent=datosNombreCheckout();
+      document.getElementById('resDoc').textContent=tipo.toUpperCase()+': '+numero;
+    }
+  })
+  .catch(function(){
+    if(seq!==consultaDocSeq) return;
+    ultimaConsultaDoc='';
+    bloquearNombresCheckout(false);
+    estadoDocumento('No se pudo conectar con el servicio de consulta. Escribe tus datos a mano.','error');
+  });
+}
+function programarConsultaDocumento(){
+  if(consultaDocTimer) clearTimeout(consultaDocTimer);
+  consultaDocTimer=setTimeout(consultarDocumento, 450);
+}
+function onDocNumeroInput(el){
+  var esperado=largoDoc();
+  el.value=(el.value||'').replace(/\D/g,'').slice(0,esperado);
+  // Al cambiar el documento anterior deja de ser válido: se limpian los datos.
+  limpiarNombresCheckout();
+  bloquearNombresCheckout(false);
+  ultimaConsultaDoc='';
+  consultaDocSeq++;
+  if(consultaDocTimer) clearTimeout(consultaDocTimer);
+  estadoDocumento('','info');
+  invalidarResumen();
+  el.setCustomValidity(el.value && el.value.length!==esperado?'Longitud inválida':'');
+  marcar(el, el.value.length===esperado);
+  if(el.value.length===esperado) programarConsultaDocumento();
+}
+function validarDocumento(el){
+  var l=largoDoc();
+  el.value=(el.value||'').replace(/\D/g,'').slice(0,l);
+  if(!el.value){ el.setCustomValidity(''); return marcar(el,false); }
+  el.setCustomValidity(el.value.length===l?'':'Longitud inválida');
+  marcar(el, el.value.length===l);
+  if(el.value.length===l) consultarDocumento();
+  return el.value.length===l;
+}
+function onDocTipoChange(){
+  var esRuc=docTipoActual()==='ruc';
+  var input=document.getElementById('docNumero');
+  var lbl=document.getElementById('lblDocNumero');
+  var ayuda=document.getElementById('ayudaDocNumero');
+  input.maxLength=esRuc?11:8;
+  lbl.innerHTML=esRuc?'N&middot; de RUC':'N&middot; de DNI';
+  ayuda.innerHTML='';
+  input.value='';
+  input.classList.remove('is-valid','is-invalid');
+  input.setCustomValidity('');
+  limpiarNombresCheckout();
+  bloquearNombresCheckout(false);
+  ultimaConsultaDoc='';
+  consultaDocSeq++;
+  if(consultaDocTimer) clearTimeout(consultaDocTimer);
+  estadoDocumento('','info');
+  invalidarResumen();
+  ['grupoNombres','grupoApellidoPaterno','grupoApellidoMaterno'].forEach(function(id){
+    var g=document.getElementById(id); if(g) g.style.display=esRuc?'none':'';
+  });
+  document.getElementById('grupoRazonSocial').style.display=esRuc?'':'none';
+  ['nombres','apellidoPaterno','apellidoMaterno'].forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    el.disabled=esRuc;
+    el.required=!esRuc;
+  });
+  var rs=document.getElementById('razonSocial');
+  rs.disabled=!esRuc;
+  rs.required=esRuc;
+}
 function cambiarMetodo(metodo){ document.getElementById('metodoPagoHidden').value=metodo; document.querySelectorAll('.metodo-pago').forEach(function(m){m.classList.remove('active');}); var el=document.querySelector('[data-metodo="'+metodo+'"]'); if(el) el.classList.add('active'); }
 function seleccionarDireccion(label, valor){ document.getElementById('direccionEnvio').value=valor; }
 function mostrarResumen(){
-  var nombres=document.getElementById('nombres'), apellidos=document.getElementById('apellidos'), docTipo=document.getElementById('docTipo').value, docNum=document.getElementById('docNumero'), tel=document.getElementById('telefono'), dir=document.getElementById('direccionEnvio');
-  if(!nombres.value.trim()||!apellidos.value.trim()||!docNum.value.trim()||!tel.value.trim()||!dir.value.trim()){ var vacio=null; if(!nombres.value.trim())vacio=nombres; else if(!apellidos.value.trim())vacio=apellidos; else if(!docNum.value.trim())vacio=docNum; else if(!tel.value.trim())vacio=tel; else if(!dir.value.trim())vacio=dir; avisarCheckout('Por favor completa todos los campos obligatorios.',vacio); return; }
+  var tipo=docTipoActual(), docNum=document.getElementById('docNumero'), tel=document.getElementById('telefono'), dir=document.getElementById('direccionEnvio');
+  var vacio=null;
+  if(tipo==='ruc'){
+    if(!document.getElementById('razonSocial').value.trim()) vacio=document.getElementById('razonSocial');
+  }else{
+    if(!document.getElementById('nombres').value.trim()) vacio=document.getElementById('nombres');
+    else if(!document.getElementById('apellidoPaterno').value.trim()) vacio=document.getElementById('apellidoPaterno');
+    else if(!document.getElementById('apellidoMaterno').value.trim()) vacio=document.getElementById('apellidoMaterno');
+  }
+  if(!vacio && !docNum.value.trim()) vacio=docNum;
+  if(!vacio && !tel.value.trim()) vacio=tel;
+  if(!vacio && !dir.value.trim()) vacio=dir;
+  if(vacio){ avisarCheckout('Por favor completa todos los campos obligatorios.',vacio); return; }
   docNum.value=docNum.value.replace(/\D/g,'');
-  if(docNum.value.length!==largoDoc()){ avisarCheckout(docTipo==='ruc'?'El RUC debe tener 11 dígitos.':'El DNI debe tener 8 dígitos.',docNum); return; }
+  if(docNum.value.length!==largoDoc()){ avisarCheckout(tipo==='ruc'?'El RUC debe tener 11 dígitos.':'El DNI debe tener 8 dígitos.',docNum); return; }
   tel.value=tel.value.replace(/\D/g,'');
   if(tel.value.length!==9){ avisarCheckout('El celular debe tener 9 dígitos.',tel); return; }
-  nombres.value=nombres.value.toUpperCase(); apellidos.value=apellidos.value.toUpperCase();
-  var patron=/^[A-ZÁÉÍÓÚÑÜ\s'.-]+$/;
-  if(/[0-9]/.test(nombres.value)||/[0-9]/.test(apellidos.value)){ avisarCheckout('Los nombres y apellidos no pueden contener números.',nombres); return; }
-  if(!patron.test(nombres.value.trim())){ avisarCheckout('El nombre solo puede contener letras.',nombres); return; }
-  if(!patron.test(apellidos.value.trim())){ avisarCheckout('El apellido solo puede contener letras.',apellidos); return; }
+  if(tipo==='dni'){
+    var patron=/^[A-ZÁÉÍÓÚÑÜ\s'.-]+$/;
+    var campos=[['nombres','El nombre'],['apellidoPaterno','El apellido paterno'],['apellidoMaterno','El apellido materno']];
+    for(var i=0;i<campos.length;i++){
+      var el=document.getElementById(campos[i][0]);
+      el.value=el.value.toUpperCase();
+      if(!patron.test(el.value.trim())){ avisarCheckout(campos[i][1]+' solo puede contener letras.',el); return; }
+    }
+  }
   document.getElementById('avisoCheckout').style.display='none';
-  document.getElementById('resNombre').textContent=nombres.value.trim()+' '+apellidos.value.trim();
-  document.getElementById('resDoc').textContent=docTipo.toUpperCase()+': '+docNum.value;
+  document.getElementById('lblResNombre').textContent=(tipo==='ruc')?'Razón social:':'Nombre:';
+  document.getElementById('resNombre').textContent=datosNombreCheckout();
+  document.getElementById('resDoc').textContent=tipo.toUpperCase()+': '+docNum.value;
   document.getElementById('resTel').textContent=tel.value;
   document.getElementById('resCorreo').textContent=document.querySelector('input[name="correo"]').value;
   document.getElementById('resDireccion').textContent=dir.value.trim();
@@ -535,6 +739,9 @@ var radios=document.querySelectorAll('[name="direccion_envio_select"]');
 radios.forEach(function(r){ r.addEventListener('change',function(){ document.getElementById('direccionEnvio').value=this.value; }); });
 if(radios.length>0 && !document.getElementById('direccionEnvio').value){ document.getElementById('direccionEnvio').value=radios[0].value; }
 cambiarMetodo('tarjeta');
+// Deja el formulario coherente con el tipo de documento preseleccionado
+// (DNI: nombres + 2 apellidos / RUC: razón social) y sin datos precargados.
+onDocTipoChange();
 </script>
 <script>
 window.initCulqi3DS=function(){
@@ -560,7 +767,7 @@ window.initCulqi3DS=function(){
 };
 </script>
 <script src="https://3ds.culqi.com" onload="window.initCulqi3DS()" onerror="console.error('No se pudo cargar 3ds.culqi.com');"></script>
-<script src="https://checkout.culqi.com/js/v4" onload="initCulqiCheckout()" onerror="console.error('No se pudo cargar checkout.culqi.com/js/v4'); alert('No se pudo cargar Culqi Checkout. Verifica tu conexión o bloqueadores de scripts.');"></script>
+<script src="https://checkout.culqi.com/js/v4" onload="window.initCulqiCheckout&&initCulqiCheckout()" onerror="console.error('No se pudo cargar checkout.culqi.com/js/v4'); alert('No se pudo cargar Culqi Checkout. Verifica tu conexión o bloqueadores de scripts.');"></script>
 <script>
 var culqiInitIntentos = 0;
 function initCulqiCheckout(){
