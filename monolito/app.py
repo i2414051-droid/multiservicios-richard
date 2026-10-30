@@ -21,7 +21,7 @@ try:
 except ImportError:  # python-dotenv no instalado: se usan las variables del sistema
     pass
 
-import os, uuid, io, csv, threading, secrets, time, re, logging, traceback
+import os, uuid, io, csv, json, threading, secrets, time, re, logging, traceback
 from datetime import datetime, timedelta
 from functools import wraps
 from urllib.parse import quote, urlencode
@@ -241,9 +241,14 @@ def _cabeceras_seguridad(resp):
                             'geolocation=(), microphone=(), camera=()')
     # CSP minima: no toca scripts ni estilos (la app usa mucho inline), pero
     # impide enmarcar el sitio (clickjacking) y secuestrar la base del documento.
+    # form-action debe permitir los dominios que usa Culqi3DS: la libreria envia
+    # formularios a Cardinal (device data collection y challenge 3DS). Sin esto
+    # el navegador bloquea el 3DS y el pago con tarjeta 3DS nunca termina.
     resp.headers.setdefault(
         'Content-Security-Policy',
-        "frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
+        "frame-ancestors 'self'; base-uri 'self'; "
+        "form-action 'self' https://*.culqi.com "
+        "https://*.cardinalcommerce.com https://*.cardinaltrusted.com")
     if request.is_secure:
         resp.headers.setdefault('Strict-Transport-Security',
                                 'max-age=31536000; includeSubDomains')
@@ -572,6 +577,17 @@ CULQI_SECRET_KEY = os.environ.get('CULQI_SECRET_KEY', '')
 CULQI_RSA_ID = os.environ.get('CULQI_RSA_ID', '')
 CULQI_RSA_PUBLIC_KEY = os.environ.get('CULQI_RSA_PUBLIC_KEY', '')
 CULQI_CURRENCY = os.environ.get('CULQI_CURRENCY', 'PEN')
+# API de cargos de Culqi. Separado en variable para poder apuntar a un entorno
+# de pruebas propio sin tocar el codigo.
+CULQI_API_BASE = os.environ.get('CULQI_API_BASE', 'https://api.culqi.com/v2').rstrip('/')
+CULQI_TIMEOUT = float(os.environ.get('CULQI_TIMEOUT', '20'))
+# Culqi no acepta cargos por debajo de S/ 3.00 (300 centimos).
+CULQI_MONTO_MINIMO = int(os.environ.get('CULQI_MONTO_MINIMO', '300'))
+# El Checkout de Culqi acepta Yape hasta S/ 2,000 por transaccion.
+CULQI_YAPE_MONTO_MAXIMO = int(os.environ.get('CULQI_YAPE_MONTO_MAXIMO', '200000'))
+# Si el checkout pidio un token y el banco exige 3DS, Culqi responde con un
+# error de autenticacion. Se muestra un mensaje claro en vez del generico.
+CULQI_MODO_PRUEBA = CULQI_PUBLIC_KEY.startswith('pk_test_')
 
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
@@ -837,6 +853,15 @@ def _init_db_inner():
                 fecha      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # ¿La columna de pago ya existía? Si es la primera vez que se crea,
+        # las ventas historicas quedan como pagadas (el flujo antiguo las daba
+        # por cobradas). En arranques posteriores NO se toca nada, para no
+        # marcar como pagadas las transferencias pendientes.
+        cur.execute("""SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+                       WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ventas'
+                       AND COLUMN_NAME='estado_pago'""")
+        _fila_pago = cur.fetchone()
+        _tenia_estado_pago = bool(_fila_pago and _fila_pago['n'])
         for sql in (
             "ALTER TABLE ventas ADD COLUMN documento VARCHAR(20)",
             "ALTER TABLE ventas ADD COLUMN nombre VARCHAR(200)",
@@ -851,9 +876,28 @@ def _init_db_inner():
             "ALTER TABLE ventas ADD COLUMN doc_tipo VARCHAR(10)",
             # 1 = oculta en paneles admin (no borra de BD). 0 = visible.
             "ALTER TABLE ventas ADD COLUMN oculta TINYINT DEFAULT 0",
+            # Pago con Culqi: trazabilidad del cobro. `estado_pago` es distinto
+            # de `estado` (que sigue el ciclo de entrega: en espera/entregado).
+            "ALTER TABLE ventas ADD COLUMN estado_pago VARCHAR(20) DEFAULT 'pendiente'",
+            "ALTER TABLE ventas ADD COLUMN culqi_charge_id VARCHAR(64)",
+            "ALTER TABLE ventas ADD COLUMN culqi_token VARCHAR(64)",
+            "ALTER TABLE ventas ADD COLUMN culqi_respuesta TEXT",
+            "ALTER TABLE ventas ADD COLUMN pagado_en DATETIME NULL",
+            # Un token y un cargo de Culqi no pueden asociarse a dos ventas.
+            # Evita cobros/ventas duplicadas por doble clic o reintentos.
+            "ALTER TABLE ventas ADD UNIQUE INDEX ux_ventas_culqi_token (culqi_token)",
+            "ALTER TABLE ventas ADD UNIQUE INDEX ux_ventas_culqi_charge (culqi_charge_id)",
         ):
             try:
                 cur.execute(sql)
+            except Exception:
+                pass
+
+        if not _tenia_estado_pago:
+            try:
+                cur.execute("""UPDATE ventas SET estado_pago='pagado',
+                               pagado_en=COALESCE(pagado_en, fecha)
+                               WHERE estado_pago IS NULL OR estado_pago='pendiente'""")
             except Exception:
                 pass
 
@@ -4865,6 +4909,185 @@ def eliminar_direccion(id):
 # ─────────────────────────────────────────────
 # PRO19+PRO21: CHECKOUT (Dirección → Pago → Resumen)
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# CULQI: COBRO REAL CON LA API v2 DE CARGOS
+# ─────────────────────────────────────────────
+# El Checkout v4 solo tokeniza la tarjeta en el navegador: NO cobra. El dinero
+# se mueve cuando el servidor llama a POST /v2/charges con la llave secreta.
+# Antes de este bloque la app guardaba la venta y descontaba stock sin cobrar.
+
+_CULQI_DECLINE_MSG = {
+    'expired_card': 'Tu tarjeta está vencida o la fecha ingresada es incorrecta.',
+    'stolen_card': 'El banco reportó la tarjeta como robada. Usa otro medio de pago.',
+    'lost_card': 'El banco reportó la tarjeta como perdida. Usa otro medio de pago.',
+    'insufficient_funds': 'Tu tarjeta no tiene fondos suficientes. Prueba con otra tarjeta.',
+    'contact_issuer': 'El banco rechazó la operación. Contacta a tu banco para autorizarla.',
+    'invalid_cvv': 'El código de seguridad (CVV) es inválido.',
+    'incorrect_cvv': 'El código de seguridad (CVV) es incorrecto.',
+    'too_many_attempts_cvv': 'Demasiados intentos con el CVV. Espera unos minutos o usa otra tarjeta.',
+    'issuer_not_available': 'El banco no respondió. Intenta el pago nuevamente.',
+    'issuer_decline_operation': 'El banco rechazó la operación. Prueba con otra tarjeta.',
+    'invalid_card': 'La tarjeta no permite este tipo de compra. Contacta a tu banco.',
+    'processing_error': 'Culqi no pudo procesar el pago. Intenta nuevamente en unos minutos.',
+    'fraudulent': 'El banco marcó la operación como sospechosa. Usa otro medio de pago.',
+    'culqi_card': 'Estás usando una tarjeta de prueba de Culqi en modo producción.',
+}
+
+
+def culqi_configurado():
+    """True si el servidor tiene lo mínimo para cobrar con tarjeta."""
+    return bool(CULQI_SECRET_KEY and CULQI_PUBLIC_KEY)
+
+
+def _culqi_headers():
+    return {'Authorization': 'Bearer %s' % CULQI_SECRET_KEY,
+            'Content-Type': 'application/json'}
+
+
+def _culqi_cargo_aprobado(data):
+    if not data or not data.get('id'):
+        return False
+    if (data.get('state') or '').strip().lower() == 'exitosa':
+        return True
+    if (data.get('response_code') or '').strip().lower() == 'venta_exitosa':
+        return True
+    if data.get('paid') is True:
+        return True
+    outcome = data.get('outcome') or {}
+    return (outcome.get('type') or '').strip().lower() == 'venta_exitosa'
+
+
+def _culqi_requiere_3ds(data):
+    """El banco pidió autenticación 3DS: el cargo NO se cobró todavía.
+
+    Culqi responde HTTP 200 con `outcome.decline_code=authentication_required`
+    (a veces `DNGE0116`). En ese caso hay que autenticar en el navegador con
+    la librería Culqi3DS y volver a crear el cargo con `authentication_3DS`.
+    """
+    if not isinstance(data, dict):
+        return False
+    # Respuesta típica de Culqi cuando pide 3DS (sin objeto charge):
+    # {"user_message":"El usuario necesita autenticarse","action_code":"REVIEW"}
+    if (data.get('action_code') or '').strip().upper() in (
+            'REVIEW', 'AUTHENTICATE', 'AUTHENTICATION_REQUIRED'):
+        return True
+    outcome = data.get('outcome') or {}
+    if (outcome.get('decline_code') or '').strip().lower() == 'authentication_required':
+        return True
+    if (outcome.get('code') or '').strip().upper() in ('DNGE0116',):
+        return True
+    return data.get('authentication_required') is True
+
+
+def _culqi_mensaje_error(data, status):
+    """Convierte el error de Culqi en algo que el cliente pueda entender."""
+    data = data if isinstance(data, dict) else {}
+    decline = (data.get('decline_code') or '').strip().lower()
+    if decline in _CULQI_DECLINE_MSG:
+        return _CULQI_DECLINE_MSG[decline]
+    tipo = (data.get('type') or '').strip().lower()
+    outcome = ((data.get('outcome') or {}).get('type') or '').strip().lower()
+    if tipo == 'authentication_required' or outcome in ('review', 'revision'):
+        return ('Tu banco pidió una verificación adicional (3DS). '
+                'Vuelve a intentar el pago y completa la validación.')
+    mensaje = (data.get('user_message') or data.get('merchant_message')
+               or data.get('message') or '').strip()
+    if mensaje:
+        return mensaje
+    if status == 401:
+        return 'La configuración de Culqi no es válida (llave secreta rechazada).'
+    if status == 429:
+        return 'Demasiados intentos de pago. Espera un momento y vuelve a probar.'
+    return 'Culqi rechazó el cobro (código HTTP %s).' % status
+
+
+def _culqi_crear_cargo(amount_centimos, email, source_id, descripcion,
+                       antifraude=None, metadata=None, auth_3ds=None):
+    """Cobra en Culqi. Devuelve (aprobado, datos, mensaje).
+
+    `datos` es la respuesta cruda (se guarda para auditoría). Nunca lanza
+    excepción: cualquier falla se traduce a un mensaje, de modo que el
+    checkout nunca se quede cargando.
+
+    `auth_3ds` son los parámetros que devuelve la librería Culqi3DS tras el
+    challenge del banco. Se mandan en el segundo intento del cargo, con el
+    mismo token y el mismo device fingerprint.
+    """
+    if not CULQI_SECRET_KEY:
+        return False, None, ('El pago con tarjeta no está disponible: '
+                             'falta configurar CULQI_SECRET_KEY en el servidor.')
+    payload = {
+        'amount': int(amount_centimos),
+        'currency_code': CULQI_CURRENCY,
+        'email': email,
+        'source_id': source_id,
+        'description': descripcion[:80],
+        'capture': True,
+    }
+    if antifraude:
+        payload['antifraud_details'] = antifraude
+    if metadata:
+        payload['metadata'] = metadata
+    if auth_3ds:
+        payload['authentication_3DS'] = auth_3ds
+    try:
+        resp = requests.post('%s/charges' % CULQI_API_BASE, json=payload,
+                             headers=_culqi_headers(), timeout=CULQI_TIMEOUT)
+    except requests.Timeout:
+        return False, None, ('Culqi no respondió a tiempo. No vuelvas a pagar '
+                             'todavía: revisa tu correo o el panel de Culqi en '
+                             'unos minutos antes de reintentar.')
+    except requests.RequestException as exc:
+        print(f"[culqi] error de red al crear cargo: {exc}")
+        return False, None, ('No se pudo conectar con Culqi. Revisa tu conexión '
+                             'e intenta nuevamente. No se realizó ningún cobro.')
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if resp.status_code in (200, 201) and _culqi_cargo_aprobado(data):
+        return True, data, ''
+    mensaje = _culqi_mensaje_error(data, resp.status_code)
+    print(f"[culqi] cargo rechazado HTTP {resp.status_code}: "
+          f"{(data or {}).get('code')} / {(data or {}).get('decline_code')}")
+    return False, data, mensaje
+
+
+def _culqi_reembolsar(charge_id, amount_centimos, motivo='solicitud_comprador'):
+    """Devuelve el dinero si el cargo se aprobó pero la venta no pudo guardarse."""
+    if not (CULQI_SECRET_KEY and charge_id):
+        return False
+    try:
+        resp = requests.post('%s/refunds' % CULQI_API_BASE,
+                             json={'amount': int(amount_centimos),
+                                   'charge_id': charge_id,
+                                   'reason': motivo},
+                             headers=_culqi_headers(), timeout=CULQI_TIMEOUT)
+        if resp.status_code in (200, 201):
+            print(f"[culqi] devolución solicitada para {charge_id}")
+            return True
+        print(f"[culqi] no se pudo devolver {charge_id}: HTTP "
+              f"{resp.status_code} {resp.text[:300]}")
+    except requests.RequestException as exc:
+        print(f"[culqi] error de red al reembolsar {charge_id}: {exc}")
+    return False
+
+
+def _venta_por_token(culqi_token):
+    """Venta ya registrada con este token (para reintentos y carreras)."""
+    if not culqi_token:
+        return None
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT id FROM ventas WHERE culqi_token=%s "
+                    "ORDER BY id DESC LIMIT 1", (culqi_token,))
+        fila = cur.fetchone()
+        cur.close()
+        return fila
+    except Exception:
+        return None
+
+
 @app.route('/checkout')
 def checkout():
     if 'user_id' not in session:
@@ -4927,7 +5150,7 @@ def procesar_compra():
     doc_numero = request.form.get('doc_numero', '').strip()
     telefono = request.form.get('telefono', '').strip()
     correo = request.form.get('correo', '').strip()
-    metodo_pago = request.form.get('metodo_pago', 'yape')
+    metodo_pago = request.form.get('metodo_pago', 'tarjeta')
     direccion_envio = request.form.get('direccion_envio', '')
     notas_entrega = request.form.get('notas_entrega', '').strip()
 
@@ -4957,10 +5180,65 @@ def procesar_compra():
         if not re.match(solo_letras, valor):
             return _chk_error(f'El {campo} solo puede contener letras.')
 
-    comprobante_filename = None  # Se guardará tras integración con Culqi
+    # ── Pago: token de Culqi y validaciones previas ──
+    culqi_token = request.form.get('culqi_token', '').strip()
+    culqi_email = (request.form.get('culqi_email') or correo).strip()
+    # Device fingerprint que genera Culqi3DS en el navegador. Mejora el
+    # antifraude y es obligatorio para el flujo con autenticación 3DS.
+    culqi_device_id = request.form.get('culqi_device_id', '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_\-]{8,120}', culqi_device_id or ''):
+        culqi_device_id = ''
+    # Parámetros que devuelve Culqi3DS tras el challenge del banco. Solo se
+    # aceptan si vienen completos; Culqi los valida igual contra el emisor.
+    culqi_3ds = None
+    _raw_3ds = request.form.get('culqi_3ds', '').strip()
+    if _raw_3ds:
+        try:
+            _p3 = json.loads(_raw_3ds)
+        except (ValueError, TypeError):
+            _p3 = None
+        if isinstance(_p3, dict) and all(_p3.get(k) for k in ('eci', 'xid', 'cavv')):
+            culqi_3ds = {k: str(_p3[k])[:512]
+                         for k in ('eci', 'xid', 'cavv', 'protocolVersion',
+                                   'directoryServerTransactionId')
+                         if _p3.get(k)}
+    if metodo_pago not in ('tarjeta', 'yape', 'transferencia'):
+        metodo_pago = 'tarjeta'
+    # El Checkout de Culqi devuelve un token distinto para cada medio:
+    # tkn_... (tarjeta) o ype_... (Yape). El metodo real se deduce del token,
+    # no de lo que diga el formulario.
+    if metodo_pago != 'transferencia' and culqi_token:
+        metodo_pago = 'yape' if culqi_token.startswith('ype_') else 'tarjeta'
+    if metodo_pago in ('tarjeta', 'yape'):
+        if not culqi_configurado():
+            return _chk_error('El pago con tarjeta o Yape no está disponible en '
+                              'este momento. Usa transferencia bancaria o '
+                              'intenta más tarde.')
+        if not culqi_token:
+            return _chk_error('No se recibió la autorización de Culqi. '
+                              'Vuelve a intentar el pago.')
+        if not re.fullmatch(r'[A-Za-z0-9_\-]{6,80}', culqi_token):
+            return _chk_error('El token de pago no es válido. Vuelve a intentarlo.')
+        if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', culqi_email):
+            return _chk_error('Ingresa un correo electrónico válido para el pago.')
 
     cur = mysql.connection.cursor()
+    charge_id = None
+    total_centimos = 0
+    cargo = None
     try:
+        # Un token de Culqi solo puede originar una venta: si el cliente
+        # reintenta (doble clic o recarga), se devuelve la venta ya creada.
+        if metodo_pago in ('tarjeta', 'yape'):
+            cur.execute("SELECT id FROM ventas WHERE culqi_token=%s "
+                        "ORDER BY id DESC LIMIT 1", (culqi_token,))
+            venta_token = cur.fetchone()
+            if venta_token:
+                if es_ajax:
+                    return jsonify({'ok': True,
+                                    'redirect': f'/confirmacion/{venta_token["id"]}'})
+                return redirect(f'/confirmacion/{venta_token["id"]}')
+
         cur.execute("SELECT id FROM ventas WHERE cliente_id=%s AND fecha > NOW() - INTERVAL 30 SECOND ORDER BY id DESC LIMIT 1", (user_id,))
         venta_reciente = cur.fetchone()
         if venta_reciente:
@@ -4995,10 +5273,71 @@ def procesar_compra():
                 return _chk_error(f'Stock insuficiente para: {item["nombre"]}. Solo quedan {stock} unidad(es).', '/carrito')
             total += item['precio'] * item['cantidad']
 
+        total_centimos = int(round(float(total) * 100))
+
+        if metodo_pago in ('tarjeta', 'yape') and total_centimos < CULQI_MONTO_MINIMO:
+            return _chk_error('El monto mínimo para pagar con tarjeta o Yape '
+                              'es S/ %.2f. Agrega más productos al carrito.'
+                              % (CULQI_MONTO_MINIMO / 100.0))
+        if metodo_pago == 'yape' and total_centimos > CULQI_YAPE_MONTO_MAXIMO:
+            return _chk_error('El monto máximo para pagar con Yape es S/ %.2f. '
+                              'Divide tu compra o usa tarjeta.'
+                              % (CULQI_YAPE_MONTO_MAXIMO / 100.0))
+
+        # 1) Cobrar PRIMERO. Si Culqi rechaza, no se escribe nada en la BD y
+        #    el stock queda intacto.
+        estado_pago = 'pendiente'
+        if metodo_pago in ('tarjeta', 'yape'):
+            antifraude = {
+                'first_name': nombres.title(),
+                'last_name': apellidos.title(),
+                'email': culqi_email,
+                'address': direccion_envio[:100],
+                'address_city': 'Lima',
+                'country_code': 'PE',
+                'phone_number': telefono,
+            }
+            if culqi_device_id:
+                antifraude['device_finger_print_id'] = culqi_device_id
+            aprobado, cargo, mensaje = _culqi_crear_cargo(
+                total_centimos, culqi_email, culqi_token,
+                f'Pedido Multiservicios Richard - {nombres} {apellidos}',
+                antifraude=antifraude,
+                metadata={'cliente_id': str(user_id),
+                          'documento': doc_numero,
+                          'metodo': metodo_pago},
+                # Yape no usa 3DS: solo las tarjetas pasan por el challenge.
+                auth_3ds=culqi_3ds if metodo_pago == 'tarjeta' else None)
+            if not aprobado:
+                # El banco pide 3DS: todavía no se cobró nada y no se guarda
+                # la venta. El navegador debe autenticar y reintentar.
+                if (metodo_pago == 'tarjeta' and _culqi_requiere_3ds(cargo)
+                        and not culqi_3ds):
+                    if es_ajax:
+                        return jsonify({'ok': False, 'requiere_3ds': True,
+                                        'token_id': culqi_token,
+                                        'monto': total_centimos,
+                                        'email': culqi_email,
+                                        'error': 'Tu banco pidió una verificación adicional.'})
+                    return _chk_error('Tu banco pidió una verificación adicional '
+                                      '(3DS). Vuelve a intentar el pago desde un '
+                                      'navegador actualizado.')
+                return _chk_error(mensaje)
+            charge_id = (cargo or {}).get('id')
+            estado_pago = 'pagado'
+
+        # 2) Con el cobro aprobado (o con transferencia pendiente) se registra
+        #    la venta. Todo va en la misma transacción.
         cur.execute("""INSERT INTO ventas
-            (cliente_id, total, metodo_pago, direccion_envio, documento, doc_tipo, nombre, apellido, telefono, correo, notas_entrega)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo, nombres, apellidos, telefono, correo, notas_entrega))
+            (cliente_id, total, metodo_pago, direccion_envio, documento, doc_tipo,
+             nombre, apellido, telefono, correo, notas_entrega, estado_pago,
+             culqi_charge_id, culqi_token, culqi_respuesta, pagado_en)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo,
+             nombres, apellidos, telefono, correo, notas_entrega, estado_pago,
+             charge_id, culqi_token or None,
+             json.dumps(cargo, ensure_ascii=False) if cargo else None,
+             datetime.now() if estado_pago == 'pagado' else None))
         venta_id = cur.lastrowid
         # Toda venta nace con seguimiento para que /entregas y el KPI de la
         # seccion 1 lean exactamente la misma fuente desde el primer minuto.
@@ -5050,15 +5389,43 @@ def procesar_compra():
                             'redirect': f'/confirmacion/{venta_id}'})
         return redirect(f'/confirmacion/{venta_id}')
     except _SinStock as exc:
-        # Otro cliente se quedo con las unidades: no se guarda nada.
+        # Otro cliente se quedó con las unidades: no se guarda nada. Si el
+        # cargo ya se había aprobado, se devuelve el dinero automáticamente.
         mysql.connection.rollback()
+        ya = _venta_por_token(culqi_token) if metodo_pago in ('tarjeta', 'yape') else None
+        if ya:
+            if es_ajax:
+                return jsonify({'ok': True,
+                                'redirect': f'/confirmacion/{ya["id"]}'})
+            return redirect(f'/confirmacion/{ya["id"]}')
+        if charge_id and not (cargo or {}).get('duplicated'):
+            _culqi_reembolsar(charge_id, total_centimos)
         return _chk_error(str(exc), '/carrito')
     except Exception as e:
         mysql.connection.rollback()
         print(f"[procesar_compra] {e}")
+        # Doble envío en paralelo: la otra petición ya guardó este token.
+        ya = _venta_por_token(culqi_token) if metodo_pago in ('tarjeta', 'yape') else None
+        if ya:
+            if es_ajax:
+                return jsonify({'ok': True,
+                                'redirect': f'/confirmacion/{ya["id"]}'})
+            return redirect(f'/confirmacion/{ya["id"]}')
+        if charge_id and (cargo or {}).get('duplicated'):
+            # El cargo ya existía (mismo token). No se reembolsa: pertenece a
+            # la venta que la otra petición está terminando de guardar.
+            error = ('Tu pago ya fue procesado. Revisa tu historial en unos '
+                     'segundos para ver la confirmación.')
+        elif charge_id:
+            _culqi_reembolsar(charge_id, total_centimos)
+            error = ('El cobro se realizó pero no pudimos registrar tu pedido. '
+                     'Iniciamos la devolución del dinero; contáctanos si no la '
+                     'ves reflejada en 48 horas.')
+        else:
+            error = 'Error al procesar la compra. Intenta nuevamente.'
         if es_ajax:
-            return jsonify({'ok': False, 'error': 'Error al procesar la compra. Intenta nuevamente.'})
-        flash('Error al procesar la compra.', 'danger')
+            return jsonify({'ok': False, 'error': error})
+        flash(error, 'danger')
         return redirect('/carrito')
     finally:
         cur.close()

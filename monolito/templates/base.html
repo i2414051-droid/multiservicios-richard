@@ -276,6 +276,16 @@ function bloquearBotones(){
   // llamada nueva se olvida de incluirlo y el servidor puede exigirlo siempre.
   var TOKEN = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
 
+  // El token CSRF SOLO debe viajar a nuestro propio servidor. Si se agrega a
+  // peticiones externas (Culqi, Cardinal, etc.) el navegador rechaza el
+  // preflight CORS y el pago/3DS falla.
+  function mismoOrigen(url){
+    try {
+      var u = new URL(url, window.location.href);
+      return u.origin === window.location.origin;
+    } catch (e) { return false; }
+  }
+
   function conToken(init, metodo){
     if (!TOKEN || metodo === 'GET' || metodo === 'HEAD') return init;
     init = init || {};
@@ -293,7 +303,8 @@ function bloquearBotones(){
       try {
         var metodo = String((init && init.method) ||
                             (input && input.method) || 'GET').toUpperCase();
-        if (metodo !== 'GET' && metodo !== 'HEAD' && typeof input === 'string') {
+        var url = typeof input === 'string' ? input : (input && input.url);
+        if (metodo !== 'GET' && metodo !== 'HEAD' && url && mismoOrigen(url)) {
           init = conToken(init, metodo);
         }
       } catch (e) {}
@@ -304,15 +315,17 @@ function bloquearBotones(){
   }
 
   var _open = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(metodo){
+  XMLHttpRequest.prototype.open = function(metodo, url){
     this.__csrfMetodo = String(metodo || 'GET').toUpperCase();
+    this.__csrfUrl = url;
     return _open.apply(this, arguments);
   };
 
   var _send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function(){
     try {
-      if (TOKEN && this.__csrfMetodo && this.__csrfMetodo !== 'GET' && this.__csrfMetodo !== 'HEAD') {
+      if (TOKEN && this.__csrfMetodo && this.__csrfMetodo !== 'GET' && this.__csrfMetodo !== 'HEAD'
+          && this.__csrfUrl && mismoOrigen(this.__csrfUrl)) {
         this.setRequestHeader('X-CSRF-Token', TOKEN);
       }
     } catch (e) {}

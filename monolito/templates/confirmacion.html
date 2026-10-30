@@ -55,6 +55,11 @@
       {% if venta.metodo_pago %}
       <div class="mt-3" style="color:var(--text-muted);font-size:13px">
         <i class="bi bi-wallet2 me-1" style="color:#f39c12"></i> Método de pago: <strong style="color:var(--text-secondary)">{{ venta.metodo_pago|capitalize }}</strong>
+        {% if venta.estado_pago == 'pagado' %}
+        <span class="badge bg-success ms-2">Pagado</span>
+        {% elif venta.estado_pago == 'pendiente' %}
+        <span class="badge bg-warning text-dark ms-2">Pendiente de confirmación</span>
+        {% endif %}
       </div>
       {% endif %}
 

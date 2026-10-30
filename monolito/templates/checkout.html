@@ -3,11 +3,20 @@
 <div class="container mt-4" style="max-width:1100px">
   <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-credit-card"></i> Checkout</h2>
 
+  {% if not culqi_public_key %}
+  <div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-1"></i>
+    El pago con tarjeta aún no está configurado. Puedes usar <strong>transferencia bancaria</strong>.
+  </div>
+  {% endif %}
+
   <form method="POST" action="/procesar_compra" id="checkoutForm" enctype="multipart/form-data">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="metodo_pago" id="metodoPagoHidden" value="tarjeta">
     <input type="hidden" name="culqi_token" id="culqiToken" value="">
     <input type="hidden" name="culqi_email" id="culqiEmail" value="{{ usuario.correo or '' }}">
+    <input type="hidden" name="culqi_device_id" id="culqiDeviceId" value="">
+    <input type="hidden" name="culqi_3ds" id="culqi3ds" value="">
 
     <!-- OVERLAY PROCESANDO COMPRA -->
     <div id="overlayProcesando"
@@ -146,7 +155,7 @@
                 <label class="metodo-pago active" data-metodo="tarjeta">
                   <input type="radio" name="metodo_radio" value="tarjeta" checked class="d-none" onchange="cambiarMetodo('tarjeta')">
                   <i class="bi bi-credit-card" style="font-size:24px;color:#e74c3c"></i>
-                  <div><strong style="color:var(--text-primary)">Pagar con Culqi</strong><br><small style="color:var(--text-muted)">Tarjeta, Yape, Billeteras y más</small></div>
+                  <div><strong style="color:var(--text-primary)">Pagar con Culqi</strong><br><small style="color:var(--text-muted)">Tarjeta de crédito/débito o Yape</small></div>
                 </label>
               </div>
               <div class="col-md-6">
@@ -267,7 +276,7 @@ function mostrarResumen(){
   document.getElementById('resDireccion').textContent=dir.value.trim();
   document.getElementById('resNotas').textContent=document.querySelector('[name="notas_entrega"]').value||'Sin notas';
   var mp=document.getElementById('metodoPagoHidden').value;
-  document.getElementById('resPago').textContent=mp.charAt(0).toUpperCase()+mp.slice(1);
+  document.getElementById('resPago').textContent=(mp==='tarjeta')?'Culqi (tarjeta o Yape)':(mp.charAt(0).toUpperCase()+mp.slice(1));
   document.getElementById('resTotal').textContent='S/ {{ "%.2f"|format(total) }}';
   document.getElementById('resumenCard').style.display='block';
   document.getElementById('btnConfirmar').style.display='none';
@@ -285,15 +294,86 @@ function obtenerUbicacion(){
       .catch(function(){ document.getElementById('direccionEnvio').value=pos.coords.latitude.toFixed(6)+', '+pos.coords.longitude.toFixed(6); });
   }, function(){ alert('No se pudo obtener tu ubicación.'); });
 }
+var culqiTimer = null;
+var culqiCancelado = false;
+var compraEnviando = false;
+function setOverlay(visible, texto){
+  var o=document.getElementById('overlayProcesando');
+  if(!o) return;
+  if(texto){ var h=o.querySelector('h4'); if(h) h.textContent=texto; }
+  o.style.display=visible?'flex':'none';
+}
+function cerrarOverlayPago(){ setOverlay(false,'Procesando compra...'); }
+function detenerTemporizadorCulqi(){ if(culqiTimer){ clearTimeout(culqiTimer); culqiTimer=null; } }
+function iniciarTemporizadorCulqi(){
+  detenerTemporizadorCulqi();
+  // Si Culqi no responde, el overlay NO puede quedarse girando para siempre.
+  culqiTimer=setTimeout(function(){
+    culqiCancelado=true;
+    detenerVigiaCulqi();
+    try{ if(window.Culqi && typeof Culqi.close==='function') Culqi.close(); }catch(e){}
+    detenerTemporizadorCulqi();
+    cerrarOverlayPago();
+    var btn=document.getElementById('btnComprar'); if(btn) btn.disabled=false;
+    alert('El formulario de pago tardó demasiado en responder. No se realizó ningún cobro. Revisa tu conexión e intenta de nuevo.');
+  }, 90000);
+}
+// ── Cierre del panel de Culqi ──────────────────────────────────────────────
+// Al pulsar la X, la librería de Culqi NO llama a window.culqi(): solo cierra
+// el iframe e invoca window.closeCheckout(). Sin ese handler el overlay se
+// quedaba en "Abriendo formulario de pago..." para siempre.
+var culqiVigia=null;
+var culqiPanelVisto=false;
+function detenerVigiaCulqi(){ if(culqiVigia){ culqiVigia.disconnect(); culqiVigia=null; } }
+function culqiTieneToken(){
+  var campo=document.getElementById('culqiToken');
+  if(campo && campo.value) return true;
+  return !!(window.Culqi && Culqi.token && Culqi.token.id);
+}
+function cancelarPagoCulqi(){
+  // Cerrar el panel no es un error: se apaga el overlay sin alertas.
+  culqiCancelado=true;
+  culqiPanelVisto=false;
+  detenerVigiaCulqi();
+  detenerTemporizadorCulqi();
+  resetCompraUI();
+}
+window.closeCheckout=function(){
+  // Si ya hay un cobro en curso o ya se recibió el token, no se debe tocar la UI.
+  if(compraEnviando || culqiTieneToken()){
+    detenerVigiaCulqi();
+    return;
+  }
+  cancelarPagoCulqi();
+};
+function vigilarCierreCulqi(){
+  // Red de seguridad: si el iframe desaparece sin token ni cobro, se cerró.
+  detenerVigiaCulqi();
+  culqiPanelVisto=false;
+  if(!window.MutationObserver) return;
+  culqiVigia=new MutationObserver(function(){
+    if(document.querySelector('iframe.culqi_checkout')){ culqiPanelVisto=true; return; }
+    if(!culqiPanelVisto) return; // todavía no se había abierto
+    if(compraEnviando || culqiTieneToken()){ detenerVigiaCulqi(); return; }
+    cancelarPagoCulqi();
+  });
+  culqiVigia.observe(document.body,{childList:true,subtree:true});
+}
 window.culqi=function(){
-  if(window.Culqi && Culqi.token){
+  if(culqiCancelado){ culqiCancelado=false; return; }
+  if(window.Culqi && Culqi.token && Culqi.token.id){
+    detenerTemporizadorCulqi();
+    detenerVigiaCulqi();
     document.getElementById('culqiToken').value=Culqi.token.id;
-    if(typeof Culqi.close==='function') Culqi.close();
-    enviarCompraAjax();
+    document.getElementById('culqi3ds').value='';
+    try{ if(typeof Culqi.close==='function') Culqi.close(); }catch(e){}
+    // El antifraude de Culqi usa el device id: se genera antes de cobrar.
+    asegurarDevice3DS().then(function(){ enviarCompraAjax(); });
   }else if(window.Culqi && Culqi.error){
-    document.getElementById('overlayProcesando').style.display='none';
-    var btn=document.getElementById('btnComprar');
-    if(btn) btn.disabled=false;
+    detenerTemporizadorCulqi();
+    detenerVigiaCulqi();
+    cerrarOverlayPago();
+    var btn=document.getElementById('btnComprar'); if(btn) btn.disabled=false;
     var msg = (Culqi.error && (Culqi.error.user_message || Culqi.error.merchant_message)) || 'Pago rechazado';
     console.error('CULQI ERROR', Culqi.error);
     alert('Error en Culqi: '+msg);
@@ -303,37 +383,183 @@ window.confirmarCompra=function(){
   if(!document.getElementById('confirmarDatos').checked){ alert('Debes confirmar que todos los datos son correctos.'); return; }
   var metodo=document.getElementById('metodoPagoHidden').value;
   if(metodo==='tarjeta'){
-    if(!window.Culqi || typeof Culqi.open!=='function'){
-      alert('Culqi aún no está listo. Espera un segundo e intenta de nuevo. Si persiste, revisa la consola del navegador.');
+    var pk='{{ culqi_public_key or "" }}';
+    if(!pk){
+      alert('El pago con tarjeta no está disponible en este momento (Culqi no está configurado). Usa transferencia bancaria o contacta a la tienda.');
       return;
     }
-    var overlay=document.getElementById('overlayProcesando');
-    overlay.style.display='flex';
-    overlay.querySelector('h4').textContent='Abriendo formulario de pago...';
-    setTimeout(function(){ if(overlay.style.display==='flex'){ overlay.style.display='none'; overlay.querySelector('h4').textContent='Procesando compra...'; } }, 1500);
+    if(!window.Culqi || typeof Culqi.open!=='function'){
+      alert('Culqi aún no está listo. Espera un segundo e intenta de nuevo. Si persiste, recarga la página.');
+      return;
+    }
+    culqiCancelado=false;
+    setOverlay(true,'Abriendo formulario de pago...');
+    iniciarTemporizadorCulqi();
+    vigilarCierreCulqi();
     try{ Culqi.open(); }catch(e){
       console.error('CULQI OPEN ERROR', e);
-      document.getElementById('overlayProcesando').style.display='none';
+      detenerTemporizadorCulqi();
+      detenerVigiaCulqi();
+      cerrarOverlayPago();
       alert('No se pudo abrir el checkout de Culqi. Revisa la consola (F12) para más detalles.');
     }
     return;
   }
   enviarCompraAjax();
 };
+var culqiDeviceId='';
+var culqiDevicePromise=null;
+function asegurarDevice3DS(){
+  if(culqiDeviceId) return Promise.resolve(culqiDeviceId);
+  if(culqiDevicePromise) return culqiDevicePromise;
+  if(!window.Culqi3DS || typeof Culqi3DS.generateDevice!=='function'){
+    return Promise.resolve('');
+  }
+  culqiDevicePromise = Culqi3DS.generateDevice().then(function(id){
+    if(id){
+      culqiDeviceId=id;
+      var campo=document.getElementById('culqiDeviceId');
+      if(campo) campo.value=id;
+    }
+    return culqiDeviceId;
+  }).catch(function(e){
+    console.warn('No se pudo generar el device fingerprint de Culqi3DS', e);
+    return '';
+  }).then(function(id){
+    culqiDevicePromise=null;
+    return id;
+  });
+  return culqiDevicePromise;
+}
+
+var culqi3dsResolver=null;
+var culqi3dsError=null;
+window.addEventListener('message', function(event){
+  var origen=event.origin||'';
+  // La librería puede responder desde su propio iframe o desde la página.
+  if(origen!==window.location.origin && origen.indexOf('culqi.com')===-1) return;
+  var resp=event.data;
+  if(!resp || typeof resp!=='object') return;
+  if(resp.loading){ setOverlay(true,'Verificando con tu banco...'); return; }
+  if(resp.parameters3DS){
+    if(culqi3dsResolver) culqi3dsResolver(resp.parameters3DS);
+  }else if(resp.error){
+    culqi3dsError=resp.error;
+    if(culqi3dsResolver) culqi3dsResolver(null);
+  }
+}, false);
+
+function iniciar3DS(data){
+  // El primer intento NO cobró: el banco pide autenticar antes de reintentar.
+  compraEnviando=false;
+  if(!window.Culqi3DS || typeof Culqi3DS.initAuthentication!=='function'){
+    resetCompraUI();
+    alert('Tu banco pidió una verificación 3DS y el módulo de seguridad no está disponible. Recarga la página e intenta de nuevo.');
+    return;
+  }
+  setOverlay(true,'Verificando con tu banco...');
+  var terminado=false, temporizador=null;
+  culqi3dsError=null;
+  function finalizar(params, err){
+    if(terminado) return;
+    terminado=true; culqi3dsResolver=null;
+    if(temporizador) clearTimeout(temporizador);
+    if(!params){
+      resetCompraUI();
+      alert('No se pudo completar la verificación 3DS: '+(err||'operación cancelada')+'. No se realizó ningún cobro.');
+      return;
+    }
+    document.getElementById('culqi3ds').value=JSON.stringify(params);
+    // Segundo cargo: mismos datos + authentication_3DS.
+    enviarCompraAjax();
+  }
+  culqi3dsResolver=function(params){
+    finalizar(params, params?null:(culqi3dsError||'cancelado por el banco'));
+  };
+  temporizador=setTimeout(function(){ finalizar(null,'tiempo de espera agotado'); }, 300000);
+  try{
+    Culqi3DS.settings={
+      charge:{ totalAmount:data.monto, returnUrl:window.location.href,
+               currency:'{{ culqi_currency or "PEN" }}' },
+      card:{ email:data.email }
+    };
+    // El modal 3DS de Culqi trae su propio overlay: se oculta el nuestro
+    // para que el banco no quede tapado por un z-index mayor.
+    cerrarOverlayPago();
+    var p=Culqi3DS.initAuthentication(data.token_id);
+    if(p && typeof p.catch==='function'){
+      p.catch(function(e){ finalizar(null,(e&&e.message)||'error de autenticación'); });
+    }
+  }catch(e){
+    finalizar(null,(e&&e.message)||'error al abrir la verificación');
+  }
+}
+
+function resetCompraUI(){
+  compraEnviando=false;
+  detenerVigiaCulqi();
+  var btn=document.getElementById('btnComprar'); if(btn) btn.disabled=false;
+  cerrarOverlayPago();
+}
 function enviarCompraAjax(){
-  var btn=document.getElementById('btnComprar'); if(!document.getElementById('confirmarDatos').checked){ alert('Debes confirmar que todos los datos son correctos.'); return; }
-  btn.disabled=true; var overlay=document.getElementById('overlayProcesando'); overlay.style.display='flex'; overlay.querySelector('h4').textContent='Procesando compra...';
+  if(compraEnviando) return;
+  var btn=document.getElementById('btnComprar');
+  if(!document.getElementById('confirmarDatos').checked){ alert('Debes confirmar que todos los datos son correctos.'); return; }
+  compraEnviando=true;
+  if(btn) btn.disabled=true;
+  setOverlay(true,'Procesando compra...');
   var fd=new FormData(document.getElementById('checkoutForm'));
-  fetch(document.getElementById('checkoutForm').action,{method:'POST',body:fd,headers:{'X-Requested-With':'XMLHttpRequest'}})
+  var controlador=window.AbortController?new AbortController():null;
+  var temporizador=controlador?setTimeout(function(){ controlador.abort(); }, 60000):null;
+  fetch(document.getElementById('checkoutForm').action,{
+      method:'POST', body:fd,
+      headers:{'X-Requested-With':'XMLHttpRequest'},
+      signal: controlador?controlador.signal:undefined
+    })
     .then(function(r){return r.json();})
-    .then(function(data){ if(data&&data.ok&&data.redirect){ window.location.href=data.redirect; }else{ overlay.style.display='none'; btn.disabled=false; alert((data&&data.error)||'Error al procesar la compra.'); }})
-    .catch(function(){ overlay.style.display='none'; btn.disabled=false; alert('Error de conexión.'); });
+    .then(function(data){
+      if(data&&data.ok&&data.redirect){ window.location.href=data.redirect; return; }
+      if(data&&data.requiere_3ds){ iniciar3DS(data); return; }
+      resetCompraUI();
+      alert((data&&data.error)||'Error al procesar la compra.');
+    })
+    .catch(function(err){
+      resetCompraUI();
+      alert(err&&err.name==='AbortError'
+        ? 'La confirmación tardó demasiado. Revisa tu historial antes de volver a pagar.'
+        : 'Error de conexión. No se pudo confirmar la compra.');
+    })
+    .finally(function(){ if(temporizador) clearTimeout(temporizador); });
 }
 var radios=document.querySelectorAll('[name="direccion_envio_select"]');
 radios.forEach(function(r){ r.addEventListener('change',function(){ document.getElementById('direccionEnvio').value=this.value; }); });
 if(radios.length>0 && !document.getElementById('direccionEnvio').value){ document.getElementById('direccionEnvio').value=radios[0].value; }
 cambiarMetodo('tarjeta');
 </script>
+<script>
+window.initCulqi3DS=function(){
+  if(!window.Culqi3DS){
+    window.__culqi3dsIntentos=(window.__culqi3dsIntentos||0)+1;
+    if(window.__culqi3dsIntentos<20) setTimeout(window.initCulqi3DS,250);
+    return;
+  }
+  try{
+    Culqi3DS.publicKey='{{ culqi_public_key or "" }}';
+    Culqi3DS.options={
+      showModal:true,
+      showLoading:true,
+      showIcon:true,
+      style:{btnColor:'#f39c12', btnTextColor:'#000000'}
+    };
+    // Se puede generar desde ya: se reutiliza en el cobro.
+    asegurarDevice3DS();
+    console.log('Culqi3DS inicializado correctamente');
+  }catch(e){
+    console.error('Error al inicializar Culqi3DS', e);
+  }
+};
+</script>
+<script src="https://3ds.culqi.com" onload="window.initCulqi3DS()" onerror="console.error('No se pudo cargar 3ds.culqi.com');"></script>
 <script src="https://checkout.culqi.com/js/v4" onload="initCulqiCheckout()" onerror="console.error('No se pudo cargar checkout.culqi.com/js/v4'); alert('No se pudo cargar Culqi Checkout. Verifica tu conexión o bloqueadores de scripts.');"></script>
 <script>
 var culqiInitIntentos = 0;
@@ -348,12 +574,19 @@ function initCulqiCheckout(){
     }
     return;
   }
+  var pk='{{ culqi_public_key or "" }}';
+  if(!pk){
+    // Sin llave pública el iframe de Culqi se queda cargando indefinidamente.
+    // Mejor no inicializar y avisar en consola; el botón muestra un error claro.
+    console.error('CULQI_PUBLIC_KEY vacía: el pago con tarjeta está deshabilitado.');
+    return;
+  }
   try{
-    Culqi.publicKey='{{ culqi_public_key or "" }}';
+    Culqi.publicKey=pk;
     Culqi.settings({
       title:'Multiservicios Richard',
       currency:'{{ culqi_currency or "PEN" }}',
-      amount:Math.round(parseFloat({{ total|float }})*100),
+      amount:Math.round(parseFloat('{{ "%.2f"|format(total|float) }}')*100),
       order:'',
       xculqirsaid:'{{ culqi_rsa_id or "" }}',
       rsapublickey:'{{ culqi_rsa_public_key or "" }}'
@@ -361,7 +594,10 @@ function initCulqiCheckout(){
     Culqi.options({
       lang:'es',
       installments:false,
-      paymentMethods:{tarjeta:true,yape:true,bancaMovil:true,agente:true,billetera:true,cuotealo:true},
+      // Tarjeta y Yape: ambos devuelven un token (tkn_ / ype_) que el backend
+      // cobra con /v2/charges. Las billeteras con QR usan el flujo de Órdenes
+      // y quedan deshabilitadas por ahora.
+      paymentMethods:{tarjeta:true,yape:true,bancaMovil:false,agente:false,billetera:false,cuotealo:false},
       style:{logo:'https://static.culqi.com/v2/v2/static/img/logo.png',bannerColor:'#f39c12',buttonBackground:'#f39c12',buttonText:'Pagar',buttonTextColor:'#000000',priceColor:'#27ae60'}
     });
     console.log('Culqi inicializado correctamente');
