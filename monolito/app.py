@@ -1219,18 +1219,25 @@ def _init_db_inner():
             )
         """)
 
+        # Un proveedor puede ser persona (DNI) o empresa (RUC). En vez de tener
+        # dos columnas donde una siempre queda vacia, se guarda el tipo y el
+        # numero. `nombre` se mantiene como nombre completo ya armado: lo usan
+        # el buscador, el orden alfabetico, los ingresos y los mensajes de
+        # WhatsApp, y asi no hay que concatenar en cada consulta.
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.proveedores (
-                id           INT AUTO_INCREMENT PRIMARY KEY,
-                nombre       VARCHAR(200) NOT NULL,
-                celular      VARCHAR(30),
-                correo       VARCHAR(200),
-                dni          VARCHAR(20),
-                ruc          VARCHAR(20),
-                direccion    VARCHAR(300),
-                categoria    VARCHAR(100),
-                notas        TEXT,
-                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id                INT AUTO_INCREMENT PRIMARY KEY,
+                nombre            VARCHAR(200) NOT NULL,
+                tipo_documento    VARCHAR(3) NOT NULL DEFAULT 'DNI',
+                numero_documento  VARCHAR(11),
+                nombres           VARCHAR(120),
+                apellido_paterno  VARCHAR(60),
+                apellido_materno  VARCHAR(60),
+                celular           VARCHAR(30),
+                direccion         VARCHAR(300),
+                categoria         VARCHAR(100),
+                notas             TEXT,
+                created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         cur.execute(f"""
@@ -1436,34 +1443,8 @@ def enviar_boleta_cliente(correo_cliente, venta_id):
         print(f"[email_boleta] {e}")
         return False
 
-def enviar_email_proveedor(proveedor, productos_lista):
-    """Envía email al proveedor con la lista de productos a pedir."""
-    try:
-        if not proveedor.get('correo'):
-            return False
-        lineas = "\n".join([
-            f"- {p['nombre']} (Categoría: {p.get('categoria','')}, Qty pedido: {p.get('cantidad_pedido',1)})"
-            for p in productos_lista
-        ])
-        msg = Message(
-            subject='Pedido de reabastecimiento - Multiservicios Richard',
-            recipients=[proveedor['correo']],
-            body=(
-                f"Estimado/a {proveedor['nombre']},\n\n"
-                f"Le informamos que los siguientes productos necesitan reabastecimiento:\n\n"
-                f"{lineas}\n\n"
-                f"Por favor contáctenos para coordinar la entrega.\n\n"
-                f"Multiservicios Richard"
-            )
-        )
-        mail.send(msg)
-        return True
-    except Exception as e:
-        print(f"[email_proveedor] {e}")
-        return False
-
 def verificar_stock_bajo(cur, producto_id):
-    """Si stock <= 1 auto-agrega a productos_para_pedir y notifica al proveedor.
+    """Si stock <= 1 auto-agrega a productos_para_pedir.
        Si stock <= 0 oculta el producto (estado='inactivo')."""
     try:
         cur.execute(f"SELECT nombre, stock, categoria FROM {ALMACEN_DB}.productos WHERE id=%s", (producto_id,))
@@ -1483,7 +1464,7 @@ def verificar_stock_bajo(cur, producto_id):
             return
         # Proveedor por categoría
         cur.execute(f"""
-            SELECT id, nombre, celular, correo
+            SELECT id, nombre, celular
             FROM {ALMACEN_DB}.proveedores WHERE categoria=%s LIMIT 1
         """, (p['categoria'],))
         proveedor = cur.fetchone()
@@ -1493,19 +1474,6 @@ def verificar_stock_bajo(cur, producto_id):
             INSERT INTO {ALMACEN_DB}.productos_para_pedir (producto_id, cantidad_pedido, proveedor_id)
             VALUES (%s, 1, %s)
         """, (producto_id, proveedor_id))
-
-        # Email al proveedor (en segundo plano para no bloquear la compra)
-        if proveedor and proveedor.get('correo'):
-            proveedor_copy = dict(proveedor)
-            productos_info = [{
-                'nombre': p['nombre'],
-                'categoria': p['categoria'],
-                'cantidad_pedido': 1
-            }]
-            def _enviar_proveedor():
-                with app.app_context():
-                    enviar_email_proveedor(proveedor_copy, productos_info)
-            threading.Thread(target=_enviar_proveedor, daemon=True).start()
     except Exception as e:
         print(f"[stock_bajo] {e}")
 
@@ -3644,47 +3612,82 @@ def historial_estado_cliente(user_id):
 # ─────────────────────────────────────────────
 # VALIDACION DE PROVEEDORES
 # ─────────────────────────────────────────────
-# Solo letras (con tildes/ñ) y espacios simples en el nombre; documento,
-# celular y RUC solo digitos. La validacion del navegador ayuda, pero estas
-# comprobaciones son la autoridad: nadie puede saltarselas con un POST manual.
+# Solo letras (con tildes/ñ) y espacios simples en nombres y apellidos;
+# documento y celular solo digitos. La razon social de una empresa si admite
+# digitos y signos (S.A.C., E.I.R.L., &), por eso tiene su propia regla.
+# La validacion del navegador ayuda, pero estas comprobaciones son la
+# autoridad: nadie puede saltarselas con un POST manual.
 _RE_NOMBRE_PERSONA = re.compile(
     r'^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:\s+[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*$'
 )
+_RE_RAZON_SOCIAL = re.compile(
+    r"^[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ&.\-'’,() ]+$"
+)
+# Tambien la usa la validacion del Libro de Reclamaciones.
 _RE_CORREO = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+_TIPOS_DOCUMENTO = {'dni': 8, 'ruc': 11}
 
 
 def _validar_proveedor(form):
-    """Valida y normaliza los datos del proveedor. Devuelve (datos, error)."""
-    nombre    = ' '.join((form.get('nombre') or '').split())
-    celular   = (form.get('celular') or '').strip()
-    correo    = (form.get('correo') or '').strip()
-    dni       = (form.get('dni') or '').strip()
-    ruc       = (form.get('ruc') or '').strip()
+    """Valida y normaliza los datos del proveedor. Devuelve (datos, error).
 
-    if not nombre:
-        return None, 'El nombre del proveedor es obligatorio.'
-    if not _RE_NOMBRE_PERSONA.match(nombre) or sum(c.isalpha() for c in nombre) < 4:
-        return None, ('El nombre debe tener al menos 4 letras y solo puede contener '
-                      'letras y espacios (sin números ni signos).')
+    DNI -> nombres + apellido paterno + apellido materno (los tres obligatorios).
+    RUC -> razon social (una empresa no tiene apellidos).
+    En ambos casos se guarda `nombre` ya armado, que es lo que muestra el resto
+    de la aplicacion.
+    """
+    tipo      = (form.get('tipo_documento') or 'dni').strip().lower()
+    numero    = re.sub(r'\D', '', form.get('numero_documento') or '')
+    celular   = (form.get('celular') or '').strip()
+    direccion = (form.get('direccion') or '').strip()
+    categoria = (form.get('categoria') or '').strip()
+    notas     = (form.get('notas') or '').strip()
+
+    if tipo not in _TIPOS_DOCUMENTO:
+        return None, 'Selecciona un tipo de documento válido (DNI o RUC).'
+    esperado = _TIPOS_DOCUMENTO[tipo]
+    if len(numero) != esperado:
+        return None, f'El {tipo.upper()} debe tener exactamente {esperado} números.'
+
+    if tipo == 'dni':
+        nombres   = ' '.join((form.get('nombres') or '').split())
+        ap_paterno = ' '.join((form.get('apellido_paterno') or '').split())
+        ap_materno = ' '.join((form.get('apellido_materno') or '').split())
+        for etiqueta, valor in (('nombres', nombres),
+                                ('apellido paterno', ap_paterno),
+                                ('apellido materno', ap_materno)):
+            if not valor:
+                return None, f'El campo {etiqueta} es obligatorio.'
+            if not _RE_NOMBRE_PERSONA.match(valor) or sum(c.isalpha() for c in valor) < 2:
+                return None, (f'El campo {etiqueta} solo puede contener letras y '
+                              'espacios (sin números ni signos).')
+        nombre = f'{nombres} {ap_paterno} {ap_materno}'[:200]
+    else:
+        nombres    = ' '.join((form.get('razon_social') or '').split())
+        ap_paterno = ''
+        ap_materno = ''
+        if not nombres:
+            return None, 'La razón social es obligatoria.'
+        if not _RE_RAZON_SOCIAL.match(nombres) or sum(c.isalpha() for c in nombres) < 3:
+            return None, ('La razón social solo puede contener letras, números y '
+                          'los signos . & - \' , ( ).')
+        nombres = nombres[:120]
+        nombre  = nombres[:200]
+
     if celular and not re.fullmatch(r'\d{9}', celular):
         return None, 'El celular debe tener exactamente 9 números (solo dígitos).'
-    if correo and not _RE_CORREO.match(correo):
-        return None, ('El correo electrónico debe incluir @ y un dominio válido '
-                      '(ejemplo@correo.com).')
-    if dni and not re.fullmatch(r'\d{8}', dni):
-        return None, 'El DNI debe tener exactamente 8 números.'
-    if ruc and not re.fullmatch(r'\d{11}', ruc):
-        return None, 'El RUC debe tener exactamente 11 números.'
 
     return {
+        'tipo_documento': tipo.upper(),
+        'numero_documento': numero,
+        'nombres': nombres,
+        'apellido_paterno': ap_paterno,
+        'apellido_materno': ap_materno,
         'nombre': nombre,
         'celular': celular,
-        'correo': correo,
-        'dni': dni,
-        'ruc': ruc,
-        'direccion': (form.get('direccion') or '').strip(),
-        'categoria': (form.get('categoria') or '').strip(),
-        'notas': (form.get('notas') or '').strip(),
+        'direccion': direccion,
+        'categoria': categoria,
+        'notas': notas,
     }, None
 
 
@@ -3702,10 +3705,14 @@ def proveedores():
             flash(error, 'danger')
             return redirect('/proveedores')
         cur.execute(f"""
-            INSERT INTO {ALMACEN_DB}.proveedores (nombre, celular, correo, dni, ruc, direccion, categoria, notas)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (datos['nombre'], datos['celular'], datos['correo'], datos['dni'],
-              datos['ruc'], datos['direccion'], datos['categoria'], datos['notas']))
+            INSERT INTO {ALMACEN_DB}.proveedores
+                (nombre, tipo_documento, numero_documento, nombres,
+                 apellido_paterno, apellido_materno, celular, direccion,
+                 categoria, notas)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (datos['nombre'], datos['tipo_documento'], datos['numero_documento'],
+              datos['nombres'], datos['apellido_paterno'], datos['apellido_materno'],
+              datos['celular'], datos['direccion'], datos['categoria'], datos['notas']))
         mysql.connection.commit()
         flash(f'Proveedor "{datos["nombre"]}" agregado correctamente.', 'success')
         return redirect('/proveedores')
@@ -3720,7 +3727,9 @@ def proveedores():
         vals.append(cat_filtro)
     sql_count = f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.proveedores {where}"
     sql_data = f"SELECT * FROM {ALMACEN_DB}.proveedores {where} ORDER BY nombre ASC"
-    items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(vals), page)
+    # 10 por pagina solo en proveedores; el resto del panel sigue en PER_PAGE.
+    items, total, page, total_pages = paginate_query(
+        cur, sql_count, sql_data, tuple(vals), page, per_page=10)
     cur.close()
     return render_template('proveedores.html', proveedores=items,
                            categorias=CATEGORIAS, buscar=buscar, cat_filtro=cat_filtro,
@@ -3741,10 +3750,14 @@ def editar_proveedor(id):
             flash(error, 'danger')
             return redirect(f'/proveedores/editar/{id}')
         cur.execute(f"""
-            UPDATE {ALMACEN_DB}.proveedores SET nombre=%s, celular=%s, correo=%s, dni=%s,
-            ruc=%s, direccion=%s, categoria=%s, notas=%s WHERE id=%s
-        """, (datos['nombre'], datos['celular'], datos['correo'], datos['dni'],
-              datos['ruc'], datos['direccion'], datos['categoria'], datos['notas'], id))
+            UPDATE {ALMACEN_DB}.proveedores SET
+                nombre=%s, tipo_documento=%s, numero_documento=%s, nombres=%s,
+                apellido_paterno=%s, apellido_materno=%s, celular=%s,
+                direccion=%s, categoria=%s, notas=%s
+            WHERE id=%s
+        """, (datos['nombre'], datos['tipo_documento'], datos['numero_documento'],
+              datos['nombres'], datos['apellido_paterno'], datos['apellido_materno'],
+              datos['celular'], datos['direccion'], datos['categoria'], datos['notas'], id))
         mysql.connection.commit()
         flash('Proveedor actualizado.', 'success')
         return redirect('/proveedores')
@@ -4033,7 +4046,7 @@ def productos_para_pedir():
                p.nombre AS producto_nombre, p.stock AS stock_actual,
                p.categoria,
                pr.id AS proveedor_id, pr.nombre AS proveedor_nombre,
-               pr.celular AS proveedor_celular, pr.correo AS proveedor_correo
+               pr.celular AS proveedor_celular
         FROM {ALMACEN_DB}.productos_para_pedir pp
         JOIN {ALMACEN_DB}.productos p ON pp.producto_id=p.id
         LEFT JOIN {ALMACEN_DB}.proveedores pr ON pp.proveedor_id=pr.id
@@ -4050,7 +4063,6 @@ def productos_para_pedir():
             proveedores_dict[pid] = {
                 'proveedor_nombre': ped['proveedor_nombre'] or 'Sin proveedor',
                 'proveedor_celular': ped['proveedor_celular'] or '',
-                'proveedor_correo': ped['proveedor_correo'] or '',
                 'productos': []
             }
         proveedores_dict[pid]['productos'].append(ped)
@@ -4109,34 +4121,6 @@ def marcar_enviado(id):
     mysql.connection.commit()
     cur.close()
     flash('Pedido marcado como enviado.', 'success')
-    return redirect('/productos-para-pedir')
-
-@app.route('/productos-para-pedir/enviar-email/<int:proveedor_id>')
-def enviar_email_a_proveedor(proveedor_id):
-    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
-        return redirect('/login')
-    cur = mysql.connection.cursor()
-    cur.execute(f"SELECT * FROM {ALMACEN_DB}.proveedores WHERE id=%s", (proveedor_id,))
-    proveedor = cur.fetchone()
-    if not proveedor:
-        flash('Proveedor no encontrado.', 'danger')
-        return redirect('/productos-para-pedir')
-    cur.execute(f"""
-        SELECT p.nombre, p.categoria, pp.cantidad_pedido
-        FROM {ALMACEN_DB}.productos_para_pedir pp
-        JOIN {ALMACEN_DB}.productos p ON pp.producto_id=p.id
-        WHERE pp.proveedor_id=%s AND pp.estado='pendiente'
-    """, (proveedor_id,))
-    productos_lista = cur.fetchall()
-    cur.close()
-    if not productos_lista:
-        flash('No hay productos pendientes para este proveedor.', 'warning')
-        return redirect('/productos-para-pedir')
-    ok = enviar_email_proveedor(proveedor, productos_lista)
-    if ok:
-        flash(f'Email enviado a {proveedor["correo"]}', 'success')
-    else:
-        flash('Error al enviar email. Verifica la configuración SMTP.', 'danger')
     return redirect('/productos-para-pedir')
 
 # ─────────────────────────────────────────────
@@ -4369,8 +4353,10 @@ def comprobante_ingreso(id):
     cur = mysql.connection.cursor()
     cur.execute("""
         SELECT i.id, i.fecha, i.notas,
-               p.nombre AS proveedor_nombre, p.ruc AS proveedor_ruc,
-               p.celular AS proveedor_celular, p.correo AS proveedor_correo
+               p.nombre AS proveedor_nombre,
+               p.tipo_documento AS proveedor_tipo_documento,
+               p.numero_documento AS proveedor_numero_documento,
+               p.celular AS proveedor_celular
         FROM {0}.ingresos i
         LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
         WHERE i.id=%s

@@ -1364,3 +1364,9 @@ a.btn-bloqueado {
   user-select: none;
   pointer-events: none;
 }
+
+/* Datos obtenidos de RENIEC/SUNAT: se ven pero no se editan. */
+.campo-verificado {
+  opacity: .75;
+  cursor: not-allowed;
+}

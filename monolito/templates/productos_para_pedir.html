@@ -17,7 +17,7 @@
   <div class="alert border-0 tc-success">
     <i class="bi bi-info-circle me-2"></i>
     Estos productos fueron <strong>agregados automáticamente</strong> porque su stock llegó a 1 o menos.
-    Aquí puedes ajustar cantidades, enviar el pedido al proveedor por WhatsApp o Email, y marcarlos como enviados.
+    Aquí puedes ajustar cantidades, enviar el pedido al proveedor por WhatsApp y marcarlos como enviados.
   </div>
 
   {% if pedidos %}
@@ -37,11 +37,6 @@
         {% if data.whatsapp_url %}
         <a href="{{ data.whatsapp_url }}" target="_blank" class="btn btn-success btn-sm fw-bold">
           <i class="bi bi-whatsapp me-1"></i>Enviar por WhatsApp
-        </a>
-        {% endif %}
-        {% if data.proveedor_correo and pid != 'sin_proveedor' %}
-        <a href="/productos-para-pedir/enviar-email/{{ pid }}" class="btn btn-info btn-sm fw-bold text-dark">
-          <i class="bi bi-envelope me-1"></i>Enviar por Email
         </a>
         {% endif %}
       </div>

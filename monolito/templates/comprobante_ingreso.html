@@ -20,7 +20,7 @@
         <div class="col-md-4">
           <small style="color:var(--text-muted)">Proveedor</small><br>
           <strong style="color:var(--text-primary)">{{ ingreso.proveedor_nombre or 'Sin proveedor' }}</strong>
-          {% if ingreso.proveedor_ruc %}<br><small style="color:var(--text-muted)">RUC: {{ ingreso.proveedor_ruc }}</small>{% endif %}
+          {% if ingreso.proveedor_numero_documento %}<br><small style="color:var(--text-muted)">{{ ingreso.proveedor_tipo_documento }}: {{ ingreso.proveedor_numero_documento }}</small>{% endif %}
           {% if ingreso.proveedor_celular %}<br><small style="color:var(--text-muted)">Cel: {{ ingreso.proveedor_celular }}</small>{% endif %}
         </div>
       </div>

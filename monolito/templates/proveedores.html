@@ -24,17 +24,32 @@
       <form method="POST" action="{% if editar %}/proveedores/editar/{{ editar.id }}{% else %}/proveedores{% endif %}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label text-white">Nombre completo *</label>
-            <input name="nombre" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.nombre if editar else '' }}" required
-                   minlength="4" maxlength="120"
-                   pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{4,}"
-                   title="Solo letras y espacios, mínimo 4 letras"
-                   oninput="soloLetras(this)"
-                   placeholder="Nombre del proveedor">
-            <div class="form-text text-muted">Solo letras y espacios (mínimo 4 letras).</div>
+
+          <!-- ── TIPO DE DOCUMENTO ── -->
+          <div class="col-md-3">
+            <label class="form-label text-white">Tipo de documento *</label>
+            <select name="tipo_documento" id="tipoDocumento"
+                    class="form-control bg-dark text-white border-secondary" required>
+              <option value="dni"
+                {% if not editar or editar.tipo_documento|lower != 'ruc' %}selected{% endif %}>DNI</option>
+              <option value="ruc"
+                {% if editar and editar.tipo_documento|lower == 'ruc' %}selected{% endif %}>RUC</option>
+            </select>
           </div>
+
+          <!-- ── NUMERO DE DOCUMENTO ── -->
+          <div class="col-md-3">
+            <label class="form-label text-white">Número de documento *</label>
+            <input name="numero_documento" id="numeroDocumento"
+                   class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.numero_documento if editar else '' }}"
+                   placeholder="12345678" inputmode="numeric" autocomplete="off"
+                   minlength="8" maxlength="11" required>
+            <div class="form-text text-muted" id="ayudaDocumento">8 dígitos</div>
+            <div class="form-text" id="estadoDocumento"></div>
+          </div>
+
+          <!-- ── CELULAR ── -->
           <div class="col-md-6">
             <label class="form-label text-white">Celular / WhatsApp</label>
             <div class="input-group">
@@ -44,34 +59,66 @@
               <input name="celular" class="form-control bg-dark text-white border-secondary"
                      value="{{ editar.celular if editar else '' }}" placeholder="Ej: 999888777"
                      inputmode="numeric" pattern="\d{9}" minlength="9" maxlength="9"
-                     title="Exactamente 9 números" oninput="soloDigitos(this, 9)">
+                     oninput="soloDigitos(this, 9)">
             </div>
-            <div class="form-text text-muted">Exactamente 9 números.</div>
           </div>
-          <div class="col-md-6">
-            <label class="form-label text-white">Correo electrónico</label>
-            <input type="email" name="correo" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.correo if editar else '' }}" placeholder="proveedor@email.com"
-                   maxlength="200" title="Debe incluir @ y un dominio válido">
+
+          <!-- ── PERSONA (DNI) ── -->
+          <div class="col-12" id="bloqueDni">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label text-white">Nombres *</label>
+                <input name="nombres" id="nombres"
+                       class="form-control bg-dark text-white border-secondary{% if editar and editar.tipo_documento|lower != 'ruc' %} campo-verificado{% endif %}"
+                       value="{{ editar.nombres if editar and editar.tipo_documento|lower != 'ruc' else '' }}"
+                       placeholder="Nombres" maxlength="120"
+                       pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{2,}"
+                       title="Solo letras y espacios"
+                       {% if editar and editar.tipo_documento|lower != 'ruc' %}readonly{% endif %}
+                       oninput="soloLetras(this)">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label text-white">Apellido paterno *</label>
+                <input name="apellido_paterno" id="apellido_paterno"
+                       class="form-control bg-dark text-white border-secondary{% if editar and editar.tipo_documento|lower != 'ruc' %} campo-verificado{% endif %}"
+                       value="{{ editar.apellido_paterno if editar else '' }}"
+                       placeholder="Apellido paterno" maxlength="60"
+                       pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{2,}"
+                       title="Solo letras y espacios"
+                       {% if editar and editar.tipo_documento|lower != 'ruc' %}readonly{% endif %}
+                       oninput="soloLetras(this)">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label text-white">Apellido materno *</label>
+                <input name="apellido_materno" id="apellido_materno"
+                       class="form-control bg-dark text-white border-secondary{% if editar and editar.tipo_documento|lower != 'ruc' %} campo-verificado{% endif %}"
+                       value="{{ editar.apellido_materno if editar else '' }}"
+                       placeholder="Apellido materno" maxlength="60"
+                       pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{2,}"
+                       title="Solo letras y espacios"
+                       {% if editar and editar.tipo_documento|lower != 'ruc' %}readonly{% endif %}
+                       oninput="soloLetras(this)">
+              </div>
+            </div>
           </div>
-          <div class="col-md-3">
-            <label class="form-label text-white">DNI</label>
-            <input name="dni" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.dni if editar else '' }}" placeholder="12345678"
-                   inputmode="numeric" pattern="\d{8}" minlength="8" maxlength="8"
-                   title="Exactamente 8 números" oninput="soloDigitos(this, 8)">
+
+          <!-- ── EMPRESA (RUC) ── -->
+          <div class="col-12" id="bloqueRuc" style="display:none">
+            <label class="form-label text-white">Razón social *</label>
+            <input name="razon_social" id="razon_social"
+                   class="form-control bg-dark text-white border-secondary{% if editar and editar.tipo_documento|lower == 'ruc' %} campo-verificado{% endif %}"
+                   value="{{ editar.nombres if editar and editar.tipo_documento|lower == 'ruc' else '' }}"
+                   placeholder="Nombre o razón social de la empresa" maxlength="120"
+                   {% if editar and editar.tipo_documento|lower == 'ruc' %}readonly{% endif %}>
           </div>
-          <div class="col-md-3">
-            <label class="form-label text-white">RUC</label>
-            <input name="ruc" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.ruc if editar else '' }}" placeholder="20123456789"
-                   inputmode="numeric" pattern="\d{11}" minlength="11" maxlength="11"
-                   title="Exactamente 11 números" oninput="soloDigitos(this, 11)">
-          </div>
+
+          <!-- ── DATOS COMUNES ── -->
           <div class="col-md-6">
             <label class="form-label text-white">Dirección</label>
-            <input name="direccion" class="form-control bg-dark text-white border-secondary"
-                   value="{{ editar.direccion if editar else '' }}" placeholder="Jr. Ejemplo 123, Ciudad">
+            <input name="direccion" id="direccion"
+                   class="form-control bg-dark text-white border-secondary"
+                   value="{{ editar.direccion if editar else '' }}" maxlength="300"
+                   placeholder="Jr. Ejemplo 123, Ciudad">
           </div>
           <div class="col-md-3">
             <label class="form-label text-white">Categoría que provee *</label>
@@ -147,8 +194,7 @@
               <th>Nombre</th>
               <th>Categoría</th>
               <th>WhatsApp</th>
-              <th>Correo</th>
-              <th>DNI/RUC</th>
+              <th>Documento</th>
               <th>Dirección</th>
               <th>Acciones</th>
             </tr>
@@ -173,16 +219,12 @@
                 {% endif %}
               </td>
               <td>
-                {% if prov.correo %}
-                <a href="mailto:{{ prov.correo }}" class="text-info">{{ prov.correo }}</a>
+                {% if prov.numero_documento %}
+                <span class="badge bg-secondary">{{ prov.tipo_documento }}</span>
+                <small class="text-muted">{{ prov.numero_documento }}</small>
                 {% else %}
                 <span class="text-muted">—</span>
                 {% endif %}
-              </td>
-              <td>
-                {% if prov.dni %}<small class="text-muted">DNI: {{ prov.dni }}</small>{% endif %}
-                {% if prov.ruc %}<small class="text-muted">RUC: {{ prov.ruc }}</small>{% endif %}
-                {% if not prov.dni and not prov.ruc %}—{% endif %}
               </td>
               <td><small>{{ prov.direccion or '—' }}</small></td>
               <td>
@@ -221,5 +263,125 @@ function soloLetras(el) {
 function soloDigitos(el, max) {
   el.value = el.value.replace(/\D/g, '').slice(0, max);
 }
+
+/* ── Tipo de documento: DNI muestra nombres y apellidos; RUC muestra
+   razón social. Solo se envía el bloque visible, el otro se limpia para no
+   guardar datos cruzados. ── */
+(function(){
+  var sel    = document.getElementById('tipoDocumento');
+  var num    = document.getElementById('numeroDocumento');
+  var ayuda  = document.getElementById('ayudaDocumento');
+  var estado = document.getElementById('estadoDocumento');
+  var dniBox = document.getElementById('bloqueDni');
+  var rucBox = document.getElementById('bloqueRuc');
+  if (!sel || !num) return;
+
+  var camposDni = ['nombres', 'apellido_paterno', 'apellido_materno'];
+  var camposRuc = ['razon_social'];
+  var seq = 0, ultimaConsulta = '';
+
+  function esRuc(){ return sel.value === 'ruc'; }
+  function esperado(){ return esRuc() ? 11 : 8; }
+  function camposNombre(){ return esRuc() ? camposRuc : camposDni; }
+  function campo(id){ return document.getElementById(id); }
+
+  /* Los datos que devuelve RENIEC/SUNAT no se editan a mano: solo cambian
+     al consultar otro número de documento. */
+  function bloquear(bloqueado){
+    camposNombre().forEach(function(id){
+      var c = campo(id);
+      if (!c) return;
+      c.readOnly = bloqueado;
+      c.classList.toggle('campo-verificado', bloqueado);
+    });
+  }
+
+  function limpiarNombres(){
+    camposDni.concat(camposRuc).forEach(function(id){
+      var c = campo(id);
+      if (c) c.value = '';
+    });
+  }
+
+  function pintarTipo(limpiarOtro){
+    dniBox.style.display = esRuc() ? 'none' : '';
+    rucBox.style.display = esRuc() ? '' : 'none';
+    num.maxLength = esperado();
+    ayuda.textContent = esperado() + ' dígitos';
+    num.value = num.value.replace(/\D/g, '').slice(0, esperado());
+    estado.textContent = '';
+    estado.className = 'form-text';
+    ultimaConsulta = '';
+    if (limpiarOtro) { limpiarNombres(); bloquear(false); }
+  }
+
+  function pintarEstado(texto, clase){
+    estado.textContent = texto;
+    estado.className = 'form-text ' + (clase || '');
+  }
+
+  function consultar(){
+    var numero = num.value.replace(/\D/g, '');
+    if (numero.length !== esperado()) return;
+    var clave = sel.value + ':' + numero;
+    if (clave === ultimaConsulta) return;
+    ultimaConsulta = clave;
+    var s = ++seq;
+    pintarEstado('Consultando…', 'text-info');
+
+    fetch('/api/consultar-documento', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+      body: JSON.stringify({tipo: sel.value, numero: numero})
+    })
+    .then(function(r){
+      return r.json().catch(function(){
+        return {ok: false, error: 'Respuesta inválida del servidor.'};
+      });
+    })
+    .then(function(d){
+      if (s !== seq) return;               // llegó una respuesta vieja
+      if (!d || !d.ok){
+        ultimaConsulta = '';               // permite reintentar
+        pintarEstado((d && d.error) ||
+          'No se pudo consultar el documento. Escribe los datos a mano.', 'text-warning');
+        return;
+      }
+      var lleno;
+      if (esRuc()){
+        campo('razon_social').value = d.razon_social || '';
+        var dir = campo('direccion');
+        if (d.direccion && !dir.value.trim()) dir.value = d.direccion;
+        lleno = !!campo('razon_social').value;
+      } else {
+        campo('nombres').value = d.nombres || '';
+        campo('apellido_paterno').value = d.apellido_paterno || '';
+        campo('apellido_materno').value = d.apellido_materno || '';
+        lleno = !!campo('nombres').value;
+      }
+      bloquear(lleno);
+      pintarEstado('', '');
+    })
+    .catch(function(){
+      if (s !== seq) return;
+      ultimaConsulta = '';
+      pintarEstado('No se pudo consultar el documento. Escribe los datos a mano.', 'text-warning');
+    });
+  }
+
+  sel.addEventListener('change', function(){ pintarTipo(true); });
+
+  num.addEventListener('input', function(){
+    this.value = this.value.replace(/\D/g, '').slice(0, esperado());
+    // Si cambia el número, lo consultado antes ya no le corresponde.
+    limpiarNombres();
+    bloquear(false);
+    ultimaConsulta = '';
+    if (this.value.length === esperado()) consultar();
+    else pintarEstado('', '');
+  });
+
+  pintarTipo(false);
+})();
 </script>
 {% endblock %}
