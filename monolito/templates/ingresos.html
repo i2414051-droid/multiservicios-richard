@@ -32,16 +32,83 @@
         <input type="date" name="fecha_hasta" class="form-control form-control-sm"
                value="{{ fecha_hasta }}">
       </div>
+      <div class="col-md-2 col-sm-6">
+        <label class="form-label small fw-bold mb-1">Estado</label>
+        <select name="estado" class="form-select form-select-sm">
+          <option value="todos" {% if estado == 'todos' %}selected{% endif %}>Todos</option>
+          <option value="vigentes" {% if estado == 'vigentes' %}selected{% endif %}>Vigentes</option>
+          <option value="anulados" {% if estado == 'anulados' %}selected{% endif %}>Anulados</option>
+        </select>
+      </div>
       <div class="col-md-2 col-sm-12">
         <button type="submit" class="btn btn-warning w-100"><i class="bi bi-search"></i> Filtrar</button>
       </div>
       <div class="col-md-2 col-sm-12">
-        {% if buscar_proveedor or buscar_producto or fecha_desde or fecha_hasta %}
+        {% if buscar_proveedor or buscar_producto or fecha_desde or fecha_hasta or estado != 'todos' %}
         <a href="/ingresos" class="btn btn-outline-secondary w-100">Limpiar</a>
         {% endif %}
       </div>
     </div>
   </form>
+
+  <!-- EXPORTAR A PDF -->
+  <div class="card tc mb-3">
+    <div class="card-body d-flex flex-wrap gap-4 align-items-end">
+      <div>
+        <label class="form-label small fw-bold mb-1 d-block">
+          <i class="bi bi-file-earmark-pdf"></i> PDF del periodo actual
+        </label>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="/ingresos/pdf?periodo=semana" id="exportSemanaActual"
+             class="btn btn-sm btn-outline-warning" data-sin-carga download>
+            <i class="bi bi-calendar-week"></i> Semana actual
+          </a>
+          <a href="/ingresos/pdf?periodo=mes" id="exportMesActual"
+             class="btn btn-sm btn-outline-warning" data-sin-carga download>
+            <i class="bi bi-calendar-month"></i> Mes actual
+          </a>
+        </div>
+      </div>
+      {# data-sin-carga: una descarga no recarga la pagina, y el bloqueo global
+         de base.html dejaria el boton "cargando" para siempre. #}
+      <form method="GET" action="/ingresos/pdf" id="formExporte" data-sin-carga
+            class="d-flex gap-2 align-items-end flex-wrap">
+        <div>
+          <label class="form-label small fw-bold mb-1 d-block">PDF de un periodo específico</label>
+          <select name="periodo" id="exportPeriodo" class="form-select form-select-sm" style="width:auto">
+            <option value="mes" selected>Mensual</option>
+            <option value="semana">Semanal</option>
+          </select>
+        </div>
+        <div id="exportSemanaCampo" style="display:none">
+          <label class="form-label small fw-bold mb-1 d-block">Semana</label>
+          <select name="semana" id="exportSemana" class="form-select form-select-sm" style="width:auto"></select>
+        </div>
+        <div>
+          <label class="form-label small fw-bold mb-1 d-block">Mes</label>
+          <select name="mes" id="exportMes" class="form-select form-select-sm" style="width:auto">
+            {% for nombre in meses %}
+            <option value="{{ loop.index }}"{% if loop.index == mes_actual %} selected{% endif %}>{{ nombre|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="form-label small fw-bold mb-1 d-block">Año</label>
+          <select name="anio" id="exportAnio" class="form-select form-select-sm" style="width:auto">
+            {% for a in anios %}
+            <option value="{{ a }}"{% if a == anio_actual %} selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" id="exportDescargar" class="btn btn-sm btn-warning" data-sin-carga>
+          <i class="bi bi-download"></i> Descargar
+        </button>
+        <small id="exportAviso" class="w-100" style="color:var(--text-muted)">
+          Las semanas van de lunes a domingo y se cortan donde termina el mes.
+        </small>
+      </form>
+    </div>
+  </div>
 
   {% if ingresos %}
   <div class="card tc">
@@ -61,9 +128,18 @@
         </thead>
         <tbody>
           {% for i in ingresos %}
-          <tr>
+          <tr {% if i.estado == 'anulado' %}style="opacity:.6"{% endif %}>
             <td><span class="badge" style="background:#f39c12;color:#000;font-size:14px">#{{ i.id }}</span></td>
-            <td>{{ i.proveedor_nombre or 'Sin proveedor' }}</td>
+            <td>
+              {{ i.proveedor_nombre or 'Sin proveedor' }}
+              {% if i.proveedor_documento %}
+              <br><small style="color:var(--text-muted)">{{ i.proveedor_documento }}</small>
+              {% endif %}
+              {% if i.estado == 'anulado' %}
+              <br><span class="badge bg-danger">ANULADO</span>
+              <br><small style="color:var(--text-muted)">{{ i.motivo_anulacion or '' }}</small>
+              {% endif %}
+            </td>
             <td><span class="badge bg-secondary">{{ i.proveedor_categoria or '-' }}</span></td>
             <td><span class="badge bg-info text-dark">{{ i.productos_distintos }}</span></td>
             <td><span class="badge bg-success">{{ i.total_cantidad }}</span></td>
@@ -71,8 +147,22 @@
             <td>
               <div class="d-flex gap-1 justify-content-center">
                 <a href="/comprobante-ingreso/{{ i.id }}" class="btn btn-sm" style="border:1px solid #f39c12;color:#f39c12">Ver</a>
-                <a href="/eliminar-ingreso/{{ i.id }}" class="btn btn-sm btn-danger"
-                   onclick="return confirm('¿Eliminar ingreso #{{ i.id }}? Se revertirá el stock.')">Eliminar</a>
+                <a href="/ingresos/pdf/{{ i.id }}" class="btn btn-sm btn-outline-warning"
+                   data-sin-carga download title="Descargar PDF de este ingreso"><i class="bi bi-file-earmark-pdf"></i></a>
+                {% if i.estado == 'anulado' %}
+                <span class="btn btn-sm btn-outline-secondary disabled"
+                      title="Anulado {{ i.anulado_en.strftime('%d/%m/%Y %H:%M') if i.anulado_en else '' }} por {{ i.anulado_por or '-' }}">
+                  <i class="bi bi-x-circle"></i> Anulado</span>
+                {% else %}
+                <button type="button" class="btn btn-sm btn-outline-danger"
+                        data-sin-carga data-sin-bloqueo
+                        data-anular="{{ i.id }}"
+                        data-proveedor="{{ i.proveedor_nombre or 'Sin proveedor' }}"
+                        data-productos="{{ i.productos_distintos }}"
+                        data-cantidad="{{ i.total_cantidad }}"
+                        title="Deja constancia con motivo: no borra el registro">
+                  <i class="bi bi-x-circle"></i> Anular</button>
+                {% endif %}
               </div>
             </td>
           </tr>
@@ -84,16 +174,274 @@
         'buscar_proveedor': buscar_proveedor,
         'buscar_producto': buscar_producto,
         'fecha_desde': fecha_desde,
-        'fecha_hasta': fecha_hasta
+        'fecha_hasta': fecha_hasta,
+        'estado': estado
       }) }}
     </div>
   </div>
   {% else %}
   <div class="text-center py-5" style="color:var(--text-muted)">
     <i class="bi bi-inbox display-4"></i>
-    <p class="mt-3">No hay ingresos registrados.</p>
+    <p class="mt-3">No hay ingresos registrados{% if estado != 'todos' %} con ese filtro{% endif %}.</p>
     <a href="/registrar-ingreso" class="btn mt-2" style="background:#f39c12;font-weight:bold;border-radius:20px">Registrar primer ingreso</a>
   </div>
   {% endif %}
 </div>
+
+<!-- ANULAR INGRESO: deja constancia, nunca borra el registro -->
+<div class="modal fade" id="modalAnular" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-dark text-white">
+      <form method="POST" id="formAnular" action="" novalidate>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h5 class="modal-title" style="color:#dc3545;font-weight:800">
+            <i class="bi bi-x-circle"></i> Anular ingreso #<span id="anularId">-</span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white"
+                  data-bs-dismiss="modal" data-sin-carga data-sin-bloqueo></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3" style="color:var(--text-secondary);font-size:.92rem">
+            El ingreso <strong>no se elimina</strong>: queda marcado como
+            <strong>ANULADO</strong> con su motivo, tu correo y la hora.
+            Se descuenta del stock lo que sumó
+            (<span id="anularCantidad">0</span> unidad(es) de
+            <span id="anularProductos">0</span> producto(s) de
+            <strong id="anularProveedor">—</strong>). Si parte ya se vendió, el
+            stock baja hasta 0 y el aviso queda en el registro.
+          </p>
+          <label class="form-label fw-bold" for="anularMotivo">Motivo *</label>
+          <select name="motivo" id="anularMotivo" class="form-select mb-3" required>
+            <option value="">Selecciona un motivo...</option>
+            {% for codigo, texto in motivos.items() %}
+            <option value="{{ codigo }}">{{ texto }}</option>
+            {% endfor %}
+          </select>
+          <label class="form-label fw-bold" for="anularDetalle">
+            Detalle <span id="detalleObligatorio" style="color:#dc3545"></span>
+            <span id="detalleOpcional" style="color:var(--text-muted)">(opcional)</span>
+          </label>
+          <textarea name="motivo_detalle" id="anularDetalle" class="form-control" rows="2"
+                    maxlength="255" placeholder="Ej: se registró dos veces el mismo remache"></textarea>
+          <div id="anularError" class="text-danger mt-2" style="display:none"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary"
+                  data-bs-dismiss="modal" data-sin-carga data-sin-bloqueo>Volver</button>
+          <button type="submit" class="btn btn-danger fw-bold">
+            <i class="bi bi-check2"></i> Confirmar anulación
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Selector de periodo del PDF: mensual -> mes + anio; semanal -> semana + mes
+   + anio. Los periodos sin ingresos se marcan y no se pueden descargar (el
+   servidor también los rechaza, por si alguien arma la URL a mano). */
+(function(){
+  var PERIODOS = {{ periodos|tojson }};  /* {anio: {meses:{mes:n}, semanas:{mes:[n,...]}}} */
+  var HOY = { anio: {{ anio_actual }}, mes: {{ mes_actual }}, dia: {{ dia_actual }} };
+
+  var periodo = document.getElementById('exportPeriodo');
+  var campo   = document.getElementById('exportSemanaCampo');
+  var semana  = document.getElementById('exportSemana');
+  var mes     = document.getElementById('exportMes');
+  var anio    = document.getElementById('exportAnio');
+  var btn     = document.getElementById('exportDescargar');
+  var aviso   = document.getElementById('exportAviso');
+  if (!periodo || !campo || !semana || !mes || !anio || !btn || !aviso) return;
+
+  var TEXTO_BASE = 'Las semanas van de lunes a domingo y se cortan donde termina el mes.';
+
+  function dos(n){ return (n < 10 ? '0' : '') + n; }
+  function etiquetaFecha(f){ return dos(f.getDate()) + '/' + dos(f.getMonth() + 1); }
+
+  /* Mismos bloques lunes-domingo recortados al mes que calcula el servidor. */
+  function bloques(a, m){
+    var ultimo = new Date(a, m, 0);          // dia 0 del mes siguiente
+    var sal = [], dia = new Date(a, m - 1, 1);
+    while (dia <= ultimo){
+      var lunes = (dia.getDay() + 6) % 7;    // lunes 0 ... domingo 6
+      var fin = new Date(a, m - 1, dia.getDate() + (6 - lunes));
+      if (fin > ultimo) fin = new Date(ultimo);
+      sal.push([new Date(dia), new Date(fin)]);
+      dia = new Date(fin);
+      dia.setDate(fin.getDate() + 1);
+    }
+    return sal;
+  }
+
+  function ingresosMes(a, m){
+    var b = (PERIODOS[a] || {}).meses || {};
+    return b[m] || 0;
+  }
+  function ingresosSemana(a, m, n){
+    var b = ((PERIODOS[a] || {}).semanas || {})[m] || [];
+    return b[n - 1] || 0;
+  }
+
+  function pintarMeses(){
+    Array.prototype.forEach.call(mes.options, function(op){
+      var titulo = op.textContent.replace(/ \(sin ingresos\)$/, '');
+      op.disabled = !ingresosMes(anio.value, op.value);
+      op.textContent = titulo + (op.disabled ? ' (sin ingresos)' : '');
+    });
+    if (mes.selectedIndex >= 0 && mes.options[mes.selectedIndex].disabled){
+      var hay = Array.prototype.filter.call(mes.options, function(o){ return !o.disabled; })[0];
+      if (hay) mes.value = hay.value;
+    }
+  }
+
+  function pintarSemanas(){
+    var bs = bloques(parseInt(anio.value, 10), parseInt(mes.value, 10));
+    var previa = parseInt(semana.value, 10) || 0;
+    semana.innerHTML = '';
+    bs.forEach(function(b, i){
+      var n = ingresosSemana(anio.value, mes.value, i + 1);
+      var op = document.createElement('option');
+      op.value = i + 1;
+      op.textContent = 'Semana ' + (i + 1) + ' · '
+                     + etiquetaFecha(b[0]) + ' al ' + etiquetaFecha(b[1])
+                     + (n ? '' : ' (sin ingresos)');
+      op.disabled = !n;
+      semana.appendChild(op);
+    });
+    var opcion = semana.options[previa - 1];
+    if (opcion && !opcion.disabled){
+      semana.value = String(previa);
+    } else {
+      var hay = Array.prototype.filter.call(semana.options, function(o){ return !o.disabled; })[0];
+      if (hay) semana.value = hay.value;
+    }
+  }
+
+  function totalElegido(){
+    if (periodo.value === 'semana'){
+      return ingresosSemana(anio.value, mes.value, parseInt(semana.value || '0', 10));
+    }
+    return ingresosMes(anio.value, mes.value);
+  }
+
+  function actualizar(){
+    var esSemana = periodo.value === 'semana';
+    campo.style.display = esSemana ? '' : 'none';
+    semana.disabled = !esSemana;      // no se envia cuando el reporte es mensual
+    var n = totalElegido();
+    btn.disabled = !n;
+    aviso.style.color = n ? 'var(--text-muted)' : '#dc3545';
+    aviso.textContent = n ? TEXTO_BASE + ' Ingresos en el periodo: ' + n + '.'
+                          : 'No hay ingresos en el periodo seleccionado.';
+  }
+
+  /* Botones del periodo en curso: se apagan si esa semana o ese mes estan vacios. */
+  function apagar(link, sinDatos){
+    if (!link) return;
+    if (sinDatos){
+      link.classList.add('disabled');
+      link.setAttribute('aria-disabled', 'true');
+      link.setAttribute('title', 'No hay ingresos en el periodo');
+    } else {
+      link.classList.remove('disabled');
+      link.removeAttribute('aria-disabled');
+      link.removeAttribute('title');
+    }
+  }
+  function semanaDeHoy(){
+    var bs = bloques(HOY.anio, HOY.mes);
+    for (var i = 0; i < bs.length; i++){
+      if (bs[i][0].getDate() <= HOY.dia && HOY.dia <= bs[i][1].getDate()) return i + 1;
+    }
+    return 0;
+  }
+  function actualizarRapidos(){
+    apagar(document.getElementById('exportMesActual'), !ingresosMes(HOY.anio, HOY.mes));
+    apagar(document.getElementById('exportSemanaActual'),
+           !ingresosSemana(HOY.anio, HOY.mes, semanaDeHoy()));
+  }
+
+  // Un enlace con .disabled sigue siendo clickeable: se corta antes del
+  // handler global de carga para que no dispare ninguna descarga.
+  document.addEventListener('click', function(e){
+    var a = e.target.closest ? e.target.closest('a[aria-disabled="true"]') : null;
+    if (a) e.preventDefault();
+  }, true);
+
+  periodo.addEventListener('change', actualizar);
+  anio.addEventListener('change', function(){ pintarMeses(); pintarSemanas(); actualizar(); });
+  mes.addEventListener('change', function(){ pintarSemanas(); actualizar(); });
+  semana.addEventListener('change', actualizar);
+
+  pintarMeses();
+  pintarSemanas();
+  actualizar();
+  actualizarRapidos();
+})();
+
+/* Anular un ingreso: el modal se llena con los datos de la fila y se valida
+   el motivo antes de enviar. La anulacion es terminal: no se reabre. */
+(function(){
+  var form = document.getElementById('formAnular');
+  var modalEl = document.getElementById('modalAnular');
+  if (!form || !modalEl || !window.bootstrap) return;
+
+  var motivo = document.getElementById('anularMotivo');
+  var detalle = document.getElementById('anularDetalle');
+  var error = document.getElementById('anularError');
+  var marcado = document.getElementById('detalleObligatorio');
+  var opcional = document.getElementById('detalleOpcional');
+  var modal = new bootstrap.Modal(modalEl);
+
+  function cambiarMotivo(){
+    var req = motivo.value === 'otro';
+    marcado.textContent = req ? '* ' : '';
+    opcional.style.display = req ? 'none' : '';
+  }
+  function mostrarError(texto){
+    error.textContent = texto;
+    error.style.display = texto ? '' : 'none';
+  }
+
+  document.querySelectorAll('[data-anular]').forEach(function(boton){
+    boton.addEventListener('click', function(){
+      var id = boton.getAttribute('data-anular');
+      form.action = '/ingresos/anular/' + id;
+      document.getElementById('anularId').textContent = id;
+      document.getElementById('anularProveedor').textContent =
+        boton.getAttribute('data-proveedor');
+      document.getElementById('anularProductos').textContent =
+        boton.getAttribute('data-productos');
+      document.getElementById('anularCantidad').textContent =
+        boton.getAttribute('data-cantidad');
+      motivo.value = '';
+      detalle.value = '';
+      cambiarMotivo();
+      mostrarError('');
+      modal.show();
+    });
+  });
+
+  motivo.addEventListener('change', function(){ cambiarMotivo(); mostrarError(''); });
+
+  form.addEventListener('submit', function(e){
+    if (!motivo.value){
+      e.preventDefault();
+      mostrarError('Selecciona un motivo para anular el ingreso.');
+      return;
+    }
+    if (motivo.value === 'otro' && detalle.value.trim().length < 5){
+      e.preventDefault();
+      mostrarError('Con "Otro motivo" hay que describirlo (al menos 5 caracteres).');
+      return;
+    }
+    // El bloqueo y la barra de carga los pone el handler global de base.html:
+    // este POST si navega (vuelve a /ingresos), asi que no hay que excluirlo.
+  });
+})();
+</script>
 {% endblock %}

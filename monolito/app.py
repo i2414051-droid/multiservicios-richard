@@ -22,7 +22,7 @@ except ImportError:  # python-dotenv no instalado: se usan las variables del sis
     pass
 
 import os, uuid, io, csv, json, threading, secrets, time, re, logging, traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, date
 from functools import wraps
 from urllib.parse import quote, urlencode
 
@@ -57,10 +57,27 @@ def _invalidar_cache_kpi():
 
 logging.basicConfig(level=logging.ERROR)
 
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                TableStyle, KeepTogether)
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
+
+# ─────────────────────────────────────────────
+# HORA DE PERU
+# ─────────────────────────────────────────────
+# Las fechas de negocio se guardan naive: lo que se escribe es lo que se lee.
+# El servidor de Render corre en UTC, asi que datetime.now() ahi devuelve una
+# hora 5 horas adelantada respecto a Peru. Por eso la hora de negocio se
+# calcula siempre desde UTC hacia Lima (Peru no tiene horario de verano).
+ZONA_LIMA = timezone(timedelta(hours=-5))
+
+
+def _ahora_lima():
+    """Hora actual de Peru como datetime naive (sin tzinfo)."""
+    return datetime.now(timezone.utc).astimezone(ZONA_LIMA).replace(tzinfo=None)
+
 
 # ─────────────────────────────────────────────
 # APP SETUP
@@ -784,6 +801,33 @@ def _backfill_entregas(cur):
     return cur.rowcount
 
 
+def _respaldar_nombres_ingresos(cur):
+    """Rellena la foto de nombres que aun no tienen los ingresos antiguos.
+
+    El ingreso es un libro: el nombre del proveedor y del producto se guarda al
+    registrar y no debe cambiar si despues se renombra o se borra esa fila.
+    Mientras no haya foto (filas anteriores a esta regla) se toma el nombre
+    actual, solo si la fila del proveedor/producto todavia existe. Es idempotente.
+    """
+    for sql in (
+        f"""UPDATE {ALMACEN_DB}.ingresos i
+            JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
+            SET i.proveedor_nombre=p.nombre,
+                i.proveedor_documento=CONCAT_WS(' ', p.tipo_documento, p.numero_documento)
+            WHERE i.proveedor_nombre IS NULL OR i.proveedor_nombre=''""",
+        f"""UPDATE {ALMACEN_DB}.detalle_ingreso di
+            JOIN {ALMACEN_DB}.productos pr ON di.producto_id=pr.id
+            SET di.producto_nombre=pr.nombre
+            WHERE di.producto_nombre IS NULL OR di.producto_nombre=''""",
+    ):
+        try:
+            cur.execute(sql)
+        except Exception:
+            # Si el alter todavia no puso la columna, se intenta en el próximo
+            # arranque; no debe tumbar el resto de la inicializacion.
+            pass
+
+
 def init_db():
     global ALMACEN_DB
     try:
@@ -1255,7 +1299,13 @@ def _init_db_inner():
                 id              INT AUTO_INCREMENT PRIMARY KEY,
                 proveedor_id    INT,
                 notas           TEXT,
-                fecha           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                fecha           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                estado          VARCHAR(20) DEFAULT 'vigente',
+                proveedor_nombre    VARCHAR(200),
+                proveedor_documento VARCHAR(40),
+                motivo_anulacion    VARCHAR(255),
+                anulado_en          DATETIME NULL,
+                anulado_por         VARCHAR(120)
             )
         """)
         cur.execute(f"""
@@ -1265,16 +1315,40 @@ def _init_db_inner():
                 producto_id INT NOT NULL,
                 cantidad    INT NOT NULL,
                 precio_compra DECIMAL(10,2) DEFAULT 0,
-                precio_venta  DECIMAL(10,2) DEFAULT 0
+                precio_venta  DECIMAL(10,2) DEFAULT 0,
+                producto_nombre VARCHAR(200)
             )
         """)
-        # Migracion: tabla ya existente -> anadir precio_venta (el que se
-        # define al ingresar) para poder mostrarlo luego en la boleta.
-        try:
-            cur.execute(f"ALTER TABLE {ALMACEN_DB}.detalle_ingreso "
-                        f"ADD COLUMN precio_venta DECIMAL(10,2) DEFAULT 0")
-        except Exception:
-            pass
+        # Migracion: MySQL no tiene "ADD COLUMN IF NOT EXISTS", asi que cada
+        # ALTER se intenta y se ignora si la columna ya existe.
+        #   precio_venta  : el precio definido al ingresar (para la boleta).
+        #   *_nombre/_documento : foto del nombre al momento del ingreso. El
+        #     libro de ingresos no puede cambiar si despues se renombra o se
+        #     borra el proveedor o el producto.
+        #   estado/motivo/anulado_* : el ingreso se anula, nunca se borra.
+        for sql in (
+            f"ALTER TABLE {ALMACEN_DB}.detalle_ingreso "
+            f"ADD COLUMN precio_venta DECIMAL(10,2) DEFAULT 0",
+            f"ALTER TABLE {ALMACEN_DB}.detalle_ingreso "
+            f"ADD COLUMN producto_nombre VARCHAR(200)",
+            f"ALTER TABLE {ALMACEN_DB}.ingresos "
+            f"ADD COLUMN estado VARCHAR(20) DEFAULT 'vigente'",
+            f"ALTER TABLE {ALMACEN_DB}.ingresos "
+            f"ADD COLUMN proveedor_nombre VARCHAR(200)",
+            f"ALTER TABLE {ALMACEN_DB}.ingresos "
+            f"ADD COLUMN proveedor_documento VARCHAR(40)",
+            f"ALTER TABLE {ALMACEN_DB}.ingresos "
+            f"ADD COLUMN motivo_anulacion VARCHAR(255)",
+            f"ALTER TABLE {ALMACEN_DB}.ingresos "
+            f"ADD COLUMN anulado_en DATETIME NULL",
+            f"ALTER TABLE {ALMACEN_DB}.ingresos "
+            f"ADD COLUMN anulado_por VARCHAR(120)",
+        ):
+            try:
+                cur.execute(sql)
+            except Exception:
+                pass
+        _respaldar_nombres_ingresos(cur)
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.salidas (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -4179,6 +4253,9 @@ def ingresos():
     buscar_producto = request.args.get('buscar_producto', '').strip()
     fecha_desde = request.args.get('fecha_desde', '').strip()
     fecha_hasta = request.args.get('fecha_hasta', '').strip()
+    estado = (request.args.get('estado') or 'todos').strip().lower()
+    if estado not in ('todos', 'vigentes', 'anulados'):
+        estado = 'todos'
     page = int(request.args.get('page', 1))
     
     cur = mysql.connection.cursor()
@@ -4188,10 +4265,16 @@ def ingresos():
     params = []
     
     if buscar_proveedor:
-        where_parts.append("p.nombre LIKE %s")
+        # Se busca sobre la foto guardada en el ingreso; el nombre actual del
+        # proveedor solo es el respaldo de las filas antiguas.
+        where_parts.append("COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) LIKE %s")
         params.append(f'%{buscar_proveedor}%')
     if buscar_producto:
-        where_parts.append("EXISTS (SELECT 1 FROM {0}.detalle_ingreso di2 JOIN {0}.productos pr ON di2.producto_id=pr.id WHERE di2.ingreso_id=i.id AND pr.nombre LIKE %s)".format(ALMACEN_DB))
+        where_parts.append("EXISTS (SELECT 1 FROM {0}.detalle_ingreso di2 "
+                           "LEFT JOIN {0}.productos pr ON di2.producto_id=pr.id "
+                           "WHERE di2.ingreso_id=i.id AND "
+                           "COALESCE(NULLIF(di2.producto_nombre,''), pr.nombre) LIKE %s)"
+                           .format(ALMACEN_DB))
         params.append(f'%{buscar_producto}%')
     if fecha_desde:
         where_parts.append("DATE(i.fecha) >= %s")
@@ -4199,16 +4282,25 @@ def ingresos():
     if fecha_hasta:
         where_parts.append("DATE(i.fecha) <= %s")
         params.append(fecha_hasta)
+    if estado == 'vigentes':
+        where_parts.append("COALESCE(i.estado,'vigente') <> 'anulado'")
+    elif estado == 'anulados':
+        where_parts.append("i.estado = 'anulado'")
     
     where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
     
-    # Consulta con agregados: categoría, productos distintos, cantidad total
+    # Consulta con agregados: categoría, productos distintos, cantidad total.
+    # El nombre del proveedor sale de la foto del ingreso (proveedor_nombre).
     sql_count = f"""SELECT COUNT(*) AS total FROM {ALMACEN_DB}.ingresos i
         LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
         {where_sql}"""
     
     sql_data = f"""SELECT i.id, i.fecha, i.notas,
-               p.nombre AS proveedor_nombre,
+               COALESCE(i.estado,'vigente') AS estado,
+               i.motivo_anulacion, i.anulado_en, i.anulado_por,
+               COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) AS proveedor_nombre,
+               COALESCE(NULLIF(i.proveedor_documento,''),
+                        CONCAT_WS(' ', p.tipo_documento, p.numero_documento)) AS proveedor_documento,
                p.categoria AS proveedor_categoria,
                COUNT(DISTINCT di.producto_id) AS productos_distintos,
                COALESCE(SUM(di.cantidad), 0) AS total_cantidad
@@ -4216,10 +4308,14 @@ def ingresos():
         LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
         LEFT JOIN {ALMACEN_DB}.detalle_ingreso di ON di.ingreso_id=i.id
         {where_sql}
-        GROUP BY i.id, i.fecha, i.notas, p.nombre, p.categoria
+        GROUP BY i.id, i.fecha, i.notas, i.estado, i.motivo_anulacion, i.anulado_en,
+                 i.anulado_por, i.proveedor_nombre, p.nombre, p.tipo_documento,
+                 p.numero_documento, p.categoria
         ORDER BY i.fecha DESC"""
     
     items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
+    anios = _anios_ingresos(cur)
+    periodos = _mapa_periodos_ingresos(cur)
     cur.close()
     
     return render_template('ingresos.html', 
@@ -4228,8 +4324,14 @@ def ingresos():
                            buscar_producto=buscar_producto,
                            fecha_desde=fecha_desde,
                            fecha_hasta=fecha_hasta,
+                           estado=estado,
                            page=page, total_pages=total_pages, total=total,
-                           has_prev=page > 1, has_next=page < total_pages)
+                           has_prev=page > 1, has_next=page < total_pages,
+                           meses=MESES_ES, anios=anios, periodos=periodos,
+                           motivos=MOTIVOS_ANULACION_INGRESO,
+                           mes_actual=_ahora_lima().month,
+                           anio_actual=_ahora_lima().year,
+                           dia_actual=_ahora_lima().day)
 
 @app.route('/registrar-ingreso', methods=['GET','POST'])
 def registrar_ingreso():
@@ -4244,7 +4346,11 @@ def registrar_ingreso():
         prod = [{'id': r['id'], 'nombre': r['nombre'],
                  'stock': int(r['stock'] or 0), 'precio': float(r['precio'] or 0)}
                 for r in cur.fetchall()]
-        cur.execute(f"SELECT id, nombre FROM {ALMACEN_DB}.proveedores ORDER BY nombre")
+        # Un mismo proveedor puede estar en varias categorias (una fila por
+        # categoria). En el selector del ingreso solo interesa la persona, por
+        # eso se muestra una vez por nombre y se enlaza la primera fila.
+        cur.execute(f"SELECT MIN(id) AS id, nombre FROM {ALMACEN_DB}.proveedores "
+                    f"GROUP BY nombre ORDER BY nombre")
         prov = [{'id': r['id'], 'nombre': r['nombre']} for r in cur.fetchall()]
         cur.close()
         return prod, prov
@@ -4323,32 +4429,53 @@ def registrar_ingreso():
         if not filas and not any(e.startswith('Fila ') for e in errores):
             errores.append('Agrega al menos un producto al ingreso.')
 
-        # El proveedor debe existir si se envio.
+        # El proveedor debe existir si se envio. Del mismo dato sale la foto de
+        # nombre y documento que se guarda en el ingreso.
+        prov_nombre = prov_documento = ''
         if not errores and proveedor_id:
             cur = mysql.connection.cursor()
-            cur.execute(f"SELECT id FROM {ALMACEN_DB}.proveedores WHERE id=%s",
+            cur.execute(f"""SELECT nombre, tipo_documento, numero_documento
+                            FROM {ALMACEN_DB}.proveedores WHERE id=%s""",
                         (proveedor_id,))
-            if not cur.fetchone():
-                errores.append('El proveedor seleccionado no existe.')
+            prov = cur.fetchone()
             cur.close()
+            if not prov:
+                errores.append('El proveedor seleccionado no existe.')
+            else:
+                prov_nombre = prov['nombre'] or ''
+                if prov['numero_documento']:
+                    prov_documento = f"{prov['tipo_documento'] or ''} " \
+                                     f"{prov['numero_documento']}".strip()
 
         if not errores:
             cur = mysql.connection.cursor()
             try:
-                # Se fija la fecha desde Python (mismo reloj que usan los KPIs).
+                # Los nombres de proveedor y producto se guardan como foto del
+                # momento del registro: si despues se renombra o se borra esa
+                # fila, el ingreso se sigue leyendo igual que ese dia.
+                ids = [f['producto_id'] for f in filas]
+                nombres = {}
+                if ids:
+                    cur.execute(f"SELECT id, nombre FROM {ALMACEN_DB}.productos "
+                                f"WHERE id IN ({','.join(['%s'] * len(ids))})", tuple(ids))
+                    nombres = {r['id']: r['nombre'] for r in cur.fetchall()}
+
+                # Se fija la fecha desde Python (hora de Peru, no la del servidor).
                 cur.execute(
-                    f"INSERT INTO {ALMACEN_DB}.ingresos (proveedor_id, notas, fecha) "
-                    f"VALUES (%s,%s,%s)",
-                    (proveedor_id, notas, datetime.now()))
+                    f"INSERT INTO {ALMACEN_DB}.ingresos "
+                    f"(proveedor_id, notas, fecha, estado, proveedor_nombre, proveedor_documento) "
+                    f"VALUES (%s,%s,%s,'vigente',%s,%s)",
+                    (proveedor_id, notas, _ahora_lima(), prov_nombre, prov_documento))
                 ingreso_id = cur.lastrowid
 
                 for f in filas:
                     cur.execute(
                         f"INSERT INTO {ALMACEN_DB}.detalle_ingreso "
-                        f"(ingreso_id, producto_id, cantidad, precio_compra, precio_venta) "
-                        f"VALUES (%s,%s,%s,%s,%s)",
-                        (ingreso_id, f['producto_id'], f['cantidad'],
-                         f['precio_compra'], f['precio_venta']))
+                        f"(ingreso_id, producto_id, producto_nombre, cantidad, "
+                        f" precio_compra, precio_venta) "
+                        f"VALUES (%s,%s,%s,%s,%s,%s)",
+                        (ingreso_id, f['producto_id'], nombres.get(f['producto_id'], ''),
+                         f['cantidad'], f['precio_compra'], f['precio_venta']))
                     # El ingreso repone stock y actualiza el precio de venta.
                     # Si el producto estaba inactivo por quedarse sin stock,
                     # vuelve a estar disponible en la tienda.
@@ -4394,12 +4521,16 @@ def comprobante_ingreso(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
+    # El nombre del proveedor y de cada producto salen primero de la foto
+    # guardada en el ingreso; el join solo es el respaldo de las filas antiguas.
     cur.execute("""
-        SELECT i.id, i.fecha, i.notas,
-               p.nombre AS proveedor_nombre,
-               p.tipo_documento AS proveedor_tipo_documento,
-               p.numero_documento AS proveedor_numero_documento,
-               p.celular AS proveedor_celular
+        SELECT i.id, i.fecha, i.notas, COALESCE(i.estado,'vigente') AS estado,
+               i.motivo_anulacion, i.anulado_en, i.anulado_por,
+               COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) AS proveedor_nombre,
+               COALESCE(NULLIF(i.proveedor_documento,''),
+                        CONCAT_WS(' ', p.tipo_documento, p.numero_documento)) AS proveedor_documento,
+               p.celular AS proveedor_celular,
+               p.categoria AS proveedor_categoria
         FROM {0}.ingresos i
         LEFT JOIN {0}.proveedores p ON i.proveedor_id=p.id
         WHERE i.id=%s
@@ -4410,10 +4541,12 @@ def comprobante_ingreso(id):
         return redirect('/ingresos')
     cur.execute("""
         SELECT di.cantidad, di.precio_compra, di.precio_venta,
-               pr.nombre AS producto_nombre, pr.stock AS stock_actual
+               COALESCE(NULLIF(di.producto_nombre,''), pr.nombre) AS producto_nombre,
+               pr.stock AS stock_actual
         FROM {0}.detalle_ingreso di
-        JOIN {0}.productos pr ON di.producto_id=pr.id
+        LEFT JOIN {0}.productos pr ON di.producto_id=pr.id
         WHERE di.ingreso_id=%s
+        ORDER BY producto_nombre
     """.format(ALMACEN_DB), (id,))
     items = cur.fetchall()
     total_compra = sum(i['cantidad'] * float(i['precio_compra'] or 0) for i in items)
@@ -4423,30 +4556,550 @@ def comprobante_ingreso(id):
                            total_general=total_compra, total_compra=total_compra,
                            total_venta=total_venta)
 
-@app.route('/eliminar-ingreso/<int:id>')
-def eliminar_ingreso(id):
+# El ingreso es un libro: no se borra, se anula. Queda el registro completo con
+# el motivo, quien lo anulo y cuando (mismo criterio que las ventas canceladas).
+MOTIVOS_ANULACION_INGRESO = {
+    'duplicado':  'Ingreso duplicado',
+    'datos':      'Datos incorrectos (producto, cantidad o precio)',
+    'devolucion': 'El proveedor devolvió la mercadería',
+    'carga':      'Error de carga',
+    'otro':       'Otro motivo',
+}
+
+
+@app.route('/ingresos/anular/<int:id>', methods=['POST'])
+def anular_ingreso(id):
+    """Anula un ingreso (terminal) y revierte el stock que sumo."""
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect('/ingresos')
+
+    motivo  = (request.form.get('motivo') or '').strip()
+    detalle = ' '.join((request.form.get('motivo_detalle') or '').split())
+    if motivo not in MOTIVOS_ANULACION_INGRESO:
+        flash('Selecciona un motivo de anulación.', 'danger')
+        return redirect('/ingresos')
+    if motivo == 'otro' and len(detalle) < 5:
+        flash('Cuando eliges "Otro motivo" hay que describirlo.', 'danger')
+        return redirect('/ingresos')
+    texto = MOTIVOS_ANULACION_INGRESO[motivo]
+    if detalle:
+        texto = f'{texto}: {detalle}' if motivo == 'otro' else f'{texto} ({detalle})'
+    texto = texto[:255]
+
     cur = mysql.connection.cursor()
-    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
+    cur.execute(f"""SELECT COALESCE(estado,'vigente') AS estado
+                    FROM {ALMACEN_DB}.ingresos WHERE id=%s""", (id,))
+    ingreso = cur.fetchone()
+    if not ingreso:
+        cur.close()
+        flash('Ingreso no encontrado.', 'danger')
+        return redirect('/ingresos')
+    if ingreso['estado'] == 'anulado':
+        cur.close()
+        flash(f'El ingreso #{id} ya está anulado.', 'warning')
+        return redirect('/ingresos')
+
+    # Se descuenta el stock que sumo este ingreso (lo mismo que hacia Eliminar).
+    # Si parte ya se vendio, el stock baja hasta 0 y se avisa; el registro no se
+    # toca: lo que se anula es el efecto, no la historia.
+    cur.execute(f"SELECT producto_id, cantidad FROM {ALMACEN_DB}.detalle_ingreso "
+                f"WHERE ingreso_id=%s", (id,))
     items = cur.fetchall()
-    revertidos = 0
+    revertidos = faltaron = 0
     for item in items:
-        cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s", (item['producto_id'],))
+        cant = int(item['cantidad'] or 0)
+        cur.execute(f"SELECT stock FROM {ALMACEN_DB}.productos WHERE id=%s",
+                    (item['producto_id'],))
         prod = cur.fetchone()
-        stock_actual = prod['stock'] if prod else 0
-        if stock_actual >= item['cantidad']:
-            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s", (item['cantidad'], item['producto_id']))
-            revertidos += 1
+        actual = int(prod['stock'] or 0) if prod else 0
+        if actual >= cant:
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s",
+                        (cant, item['producto_id']))
         else:
-            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=0 WHERE id=%s", (item['producto_id'],))
-            revertidos += 1
-    cur.execute(f"DELETE FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=%s", (id,))
-    cur.execute(f"DELETE FROM {ALMACEN_DB}.ingresos WHERE id=%s", (id,))
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=0 WHERE id=%s",
+                        (item['producto_id'],))
+            faltaron += 1
+        revertidos += 1
+
+    # El filtro por estado en el UPDATE corta la doble presion y las dos
+    # pestanas abiertas: si otro pedido ya anulo el ingreso, esto se revierte.
+    cur.execute(f"""
+        UPDATE {ALMACEN_DB}.ingresos
+        SET estado='anulado', motivo_anulacion=%s, anulado_en=%s, anulado_por=%s
+        WHERE id=%s AND COALESCE(estado,'vigente')='vigente'
+    """, (texto, _ahora_lima(), session.get('correo') or 'administrador', id))
+    if cur.rowcount != 1:
+        mysql.connection.rollback()
+        cur.close()
+        flash(f'El ingreso #{id} ya estaba anulado.', 'warning')
+        return redirect('/ingresos')
     mysql.connection.commit()
     cur.close()
-    flash(f'Ingreso eliminado y stock revertido ({revertidos} productos).', 'success')
+
+    msg = f'Ingreso #{id} anulado. Stock revertido ({revertidos} productos).'
+    if faltaron:
+        msg += f' En {faltaron} producto(s) el stock ya era menor y quedó en 0.'
+    flash(msg, 'warning')
     return redirect('/ingresos')
+
+# ─────────────────────────────────────────────
+# PRO14B: EXPORTAR INGRESOS A PDF
+# ─────────────────────────────────────────────
+# Un PDF por ingreso (detalle de sus productos) y reportes por periodo:
+# semanal (lunes a domingo) o mensual (dia 1 al ultimo del mes). Los reportes
+# llevan un resumen y despues el detalle de cada ingreso.
+MESES_ES = ('enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+            'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre')
+_NARANJA = colors.HexColor('#f39c12')
+
+
+def _pdf_escapar(valor):
+    """Escapa el texto para que ReportLab no lo lea como marcado."""
+    return (str(valor if valor is not None else '')
+            .replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+
+
+def _pdf_estilos():
+    """Estilos propios de los reportes de ingresos."""
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Celda', parent=styles['Normal'],
+                              fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name='Cabecera', parent=styles['Normal'],
+                              fontSize=8, leading=10, textColor=colors.black))
+    styles.add(ParagraphStyle(name='Dato', parent=styles['Normal'],
+                              fontSize=9, leading=12))
+    styles.add(ParagraphStyle(name='TituloSeccion', parent=styles['Heading3'],
+                              fontSize=10, spaceBefore=8, spaceAfter=3))
+    styles.add(ParagraphStyle(name='Anulado', parent=styles['Normal'], fontSize=8,
+                              leading=10, textColor=colors.red))
+    styles.add(ParagraphStyle(name='TituloAnulado', parent=styles['Heading3'],
+                              fontSize=10, spaceBefore=8, spaceAfter=3,
+                              textColor=colors.red))
+    return styles
+
+
+def _pdf_estilo_tabla():
+    return TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), _NARANJA),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -2),
+         [colors.white, colors.HexColor('#fdf4e6')]),
+    ])
+
+
+def _pdf_fecha(valor, con_hora=True):
+    if not valor:
+        return '-'
+    return valor.strftime('%d/%m/%Y %H:%M' if con_hora else '%d/%m/%Y')
+
+
+def _pdf_encabezado(styles, titulo, subtitulo, datos=None):
+    """Portada corta: empresa, titulo del reporte y datos del periodo."""
+    elems = [Paragraph(f"<b>{_pdf_escapar(EMPRESA_INFO['nombre'])}</b>", styles['Title']),
+             Paragraph(_pdf_escapar(titulo), styles['Heading3']),
+             Paragraph(_pdf_escapar(subtitulo), styles['Dato'])]
+    if datos:
+        filas = [[Paragraph(f'<b>{_pdf_escapar(k)}</b>', styles['Dato']),
+                  Paragraph(_pdf_escapar(v), styles['Dato'])] for k, v in datos]
+        t = Table(filas, colWidths=[110, 390], hAlign='LEFT')
+        t.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                               ('TOPPADDING', (0, 0), (-1, -1), 1),
+                               ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+                               ('LEFTPADDING', (0, 0), (0, -1), 0)]))
+        elems.append(Spacer(1, 0.1 * inch))
+        elems.append(t)
+    elems.append(Spacer(1, 0.22 * inch))
+    return elems
+
+
+def _pdf_tabla_productos(styles, items):
+    """Productos de un ingreso. Devuelve (tabla, total_compra, total_venta)."""
+    data = [[Paragraph(f'<b>{c}</b>', styles['Cabecera']) for c in
+             ['Producto', 'Cantidad', 'P. compra', 'P. venta', 'Subtotal compra']]]
+    for it in items:
+        cant = int(it['cantidad'] or 0)
+        pc = float(it['precio_compra'] or 0)
+        pv = float(it['precio_venta'] or 0)
+        data.append([Paragraph(_pdf_escapar(it['producto_nombre']), styles['Celda']),
+                     str(cant), f'S/ {pc:.2f}', f'S/ {pv:.2f}',
+                     f'S/ {cant * pc:.2f}'])
+    total_compra = sum(int(it['cantidad'] or 0) * float(it['precio_compra'] or 0)
+                       for it in items)
+    total_venta = sum(int(it['cantidad'] or 0) * float(it['precio_venta'] or 0)
+                      for it in items)
+    if items:
+        data.append([Paragraph('<b>Total compra</b>', styles['Celda']), '', '', '',
+                     Paragraph(f'<b>S/ {total_compra:.2f}</b>', styles['Celda'])])
+    else:
+        data.append([Paragraph('Sin productos.', styles['Celda']), '', '', '', ''])
+    t = Table(data, colWidths=[235, 60, 70, 70, 80], repeatRows=1)
+    t.setStyle(_pdf_estilo_tabla())
+    return t, total_compra, total_venta
+
+
+def _pdf_tabla_resumen(styles, ingresos):
+    """Una fila por ingreso con sus totales. Los anulados no suman."""
+    vigentes = [r for r in ingresos
+                if (r.get('estado') or 'vigente') != 'anulado']
+    data = [[Paragraph(f'<b>{c}</b>', styles['Cabecera']) for c in
+             ['#', 'Fecha', 'Proveedor', 'Categoría', 'Estado', 'Cant.', 'Total compra']]]
+    for r in ingresos:
+        anulado = (r.get('estado') or 'vigente') == 'anulado'
+        data.append([str(r['id']), _pdf_fecha(r['fecha']),
+                     Paragraph(_pdf_escapar(r['proveedor_nombre'] or 'Sin proveedor'),
+                               styles['Celda']),
+                     _pdf_escapar(r['proveedor_categoria'] or '-'),
+                     Paragraph('<b>ANULADO</b>', styles['Anulado']) if anulado else '',
+                     str(int(r['total_cantidad'] or 0)),
+                     f"S/ {float(r['total_compra'] or 0):.2f}"])
+    if ingresos:
+        cant = sum(int(r['total_cantidad'] or 0) for r in vigentes)
+        compra = sum(float(r['total_compra'] or 0) for r in vigentes)
+        data.append([Paragraph('<b>Totales</b>', styles['Celda']), '', '',
+                     Paragraph(f'<b>{len(vigentes)} ingreso(s)</b>', styles['Celda']),
+                     '',
+                     Paragraph(f'<b>{cant}</b>', styles['Celda']),
+                     Paragraph(f'<b>S/ {compra:.2f}</b>', styles['Celda'])])
+    t = Table(data, colWidths=[26, 82, 150, 64, 52, 38, 78], repeatRows=1)
+    t.setStyle(_pdf_estilo_tabla())
+    return t
+
+
+def _datos_ingreso_pdf(cur, ingreso_id):
+    """Un ingreso con su detalle de productos (mismo dato que el comprobante)."""
+    cur.execute(f"""
+        SELECT i.id, i.fecha, i.notas, COALESCE(i.estado,'vigente') AS estado,
+               i.motivo_anulacion, i.anulado_en, i.anulado_por,
+               COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) AS proveedor_nombre,
+               COALESCE(NULLIF(i.proveedor_documento,''),
+                        CONCAT_WS(' ', p.tipo_documento, p.numero_documento)) AS proveedor_documento,
+               p.celular AS proveedor_celular,
+               p.categoria AS proveedor_categoria
+        FROM {ALMACEN_DB}.ingresos i
+        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
+        WHERE i.id=%s
+    """, (ingreso_id,))
+    ingreso = cur.fetchone()
+    if not ingreso:
+        return None, []
+    # LEFT JOIN: si el producto se borro despues, la linea se sigue imprimiendo
+    # con el nombre que quedo guardado en el ingreso.
+    cur.execute(f"""
+        SELECT di.cantidad, di.precio_compra, di.precio_venta,
+               COALESCE(NULLIF(di.producto_nombre,''), pr.nombre) AS producto_nombre
+        FROM {ALMACEN_DB}.detalle_ingreso di
+        LEFT JOIN {ALMACEN_DB}.productos pr ON di.producto_id=pr.id
+        WHERE di.ingreso_id=%s
+        ORDER BY producto_nombre
+    """, (ingreso_id,))
+    return ingreso, cur.fetchall()
+
+
+def _datos_ingresos_pdf(cur, desde, hasta):
+    """Ingresos de un rango de fechas con totales y detalle por ingreso."""
+    cur.execute(f"""
+        SELECT i.id, i.fecha, i.notas, COALESCE(i.estado,'vigente') AS estado,
+               i.motivo_anulacion,
+               COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) AS proveedor_nombre,
+               p.categoria AS proveedor_categoria,
+               COUNT(DISTINCT di.producto_id) AS productos_distintos,
+               COALESCE(SUM(di.cantidad), 0) AS total_cantidad,
+               COALESCE(SUM(di.cantidad * di.precio_compra), 0) AS total_compra
+        FROM {ALMACEN_DB}.ingresos i
+        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
+        LEFT JOIN {ALMACEN_DB}.detalle_ingreso di ON di.ingreso_id=i.id
+        WHERE DATE(i.fecha) BETWEEN %s AND %s
+        GROUP BY i.id, i.fecha, i.notas, i.estado, i.motivo_anulacion,
+                 i.proveedor_nombre, p.nombre, p.categoria
+        ORDER BY i.fecha ASC, i.id ASC
+    """, (desde, hasta))
+    ingresos = cur.fetchall()
+    detalles = {}
+    if ingresos:
+        ids = [r['id'] for r in ingresos]
+        cur.execute(f"""
+            SELECT di.ingreso_id, di.cantidad, di.precio_compra, di.precio_venta,
+                   COALESCE(NULLIF(di.producto_nombre,''), pr.nombre) AS producto_nombre
+            FROM {ALMACEN_DB}.detalle_ingreso di
+            LEFT JOIN {ALMACEN_DB}.productos pr ON di.producto_id=pr.id
+            WHERE di.ingreso_id IN ({','.join(['%s'] * len(ids))})
+            ORDER BY di.ingreso_id, producto_nombre
+        """, tuple(ids))
+        for d in cur.fetchall():
+            detalles.setdefault(d['ingreso_id'], []).append(d)
+    return ingresos, detalles
+
+
+def _ultimo_dia_mes(anio, mes):
+    """Ultimo dia de un mes (sin depender del locale de strftime)."""
+    if mes == 12:
+        return date(anio + 1, 1, 1) - timedelta(days=1)
+    return date(anio, mes + 1, 1) - timedelta(days=1)
+
+
+def _bloques_semana_mes(anio, mes):
+    """Bloques lunes-domingo de un mes, recortados al propio mes.
+
+    Se recortan para que un ingreso no aparezca en dos reportes: la semana 1
+    de noviembre, por ejemplo, no repite los dias que caen en octubre.
+    """
+    ultimo = _ultimo_dia_mes(anio, mes)
+    bloques = []
+    desde = date(anio, mes, 1)
+    while desde <= ultimo:
+        # weekday(): lunes 0 ... domingo 6 -> dias que faltan para el domingo.
+        hasta = min(desde + timedelta(days=6 - desde.weekday()), ultimo)
+        bloques.append((desde, hasta))
+        desde = hasta + timedelta(days=1)
+    return bloques
+
+
+def _periodo_ingresos(periodo, referencia=None, numero=None):
+    """(desde, hasta, etiqueta) del mes o de una semana dentro del mes.
+
+    periodo: 'mes' o 'semana'. referencia: date que fija el mes (hoy en hora
+    de Peru si no se pasa). numero: semana 1..n; si no se usa, la semana que
+    contiene a referencia. Los numeros fuera de rango se ajustan al mes.
+    """
+    ref = referencia or _ahora_lima().date()
+    if periodo == 'semana':
+        bloques = _bloques_semana_mes(ref.year, ref.month)
+        if numero is None:
+            indice = next((i for i, (d, h) in enumerate(bloques) if d <= ref <= h), 0)
+        else:
+            indice = min(max(numero, 1), len(bloques)) - 1
+        desde, hasta = bloques[indice]
+        etiqueta = (f"Semana {indice + 1} de {MESES_ES[ref.month - 1]} de {ref.year} "
+                    f"(del {desde.strftime('%d/%m/%Y')} al {hasta.strftime('%d/%m/%Y')})")
+    else:
+        desde = ref.replace(day=1)
+        hasta = _ultimo_dia_mes(desde.year, desde.month)
+        etiqueta = f"Mes de {MESES_ES[ref.month - 1]} de {ref.year}"
+    return desde, hasta, etiqueta
+
+
+def _anios_ingresos(cur):
+    """Anios que ofrece el selector: del ultimo al del primer ingreso."""
+    actual = _ahora_lima().year
+    cur.execute(f"SELECT MIN(YEAR(fecha)) AS minimo FROM {ALMACEN_DB}.ingresos")
+    fila = cur.fetchone()
+    minimo = int((fila or {}).get('minimo') or actual)
+    minimo = min(minimo, actual)
+    return list(range(actual, minimo - 1, -1))
+
+
+def _mapa_periodos_ingresos(cur):
+    """Ingresos existentes por anio, mes y semana, para el selector de PDF.
+
+    Devuelve {anio: {'meses': {mes: cantidad}, 'semanas': {mes: [c1, c2, ...]}}}.
+    Las semanas se numeran igual que en el PDF (lunes a domingo recortadas al
+    mes), asi lo que el dueno ve como "sin registros" es exactamente lo que el
+    servidor rechazaria.
+    """
+    cur.execute(f"SELECT DATE(fecha) AS dia FROM {ALMACEN_DB}.ingresos")
+    mapa = {}
+    for fila in cur.fetchall():
+        dia = fila['dia']
+        if not dia:
+            continue
+        dia = dia.date() if isinstance(dia, datetime) else dia
+        anio, mes = dia.year, dia.month
+        datos = mapa.setdefault(str(anio), {'meses': {}, 'semanas': {}})
+        datos['meses'][str(mes)] = datos['meses'].get(str(mes), 0) + 1
+        bloques = _bloques_semana_mes(anio, mes)
+        for indice, (desde, hasta) in enumerate(bloques):
+            if desde <= dia <= hasta:
+                cuenta = datos['semanas'].setdefault(str(mes), [0] * len(bloques))
+                cuenta[indice] += 1
+                break
+    return mapa
+
+
+def _pdf_respuesta(buf, nombre):
+    buf.seek(0)
+    return send_file(buf, mimetype='application/pdf', as_attachment=True,
+                     download_name=nombre)
+
+
+@app.route('/ingresos/pdf/<int:id>')
+def ingreso_pdf(id):
+    """PDF de un solo ingreso, con el detalle de sus productos."""
+    if not _es_admin():
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    ingreso, items = _datos_ingreso_pdf(cur, id)
+    cur.close()
+    if not ingreso:
+        flash('Ingreso no encontrado.', 'danger')
+        return redirect('/ingresos')
+
+    styles = _pdf_estilos()
+    anulado = (ingreso['estado'] or 'vigente') == 'anulado'
+    datos = [('Fecha', _pdf_fecha(ingreso['fecha'])),
+             ('Estado', 'ANULADO' if anulado else 'Vigente'),
+             ('Proveedor', ingreso['proveedor_nombre'] or 'Sin proveedor')]
+    if ingreso['proveedor_documento']:
+        datos.append(('Documento', ingreso['proveedor_documento']))
+    if ingreso['proveedor_celular']:
+        datos.append(('Celular', ingreso['proveedor_celular']))
+    if ingreso['proveedor_categoria']:
+        datos.append(('Categoría', ingreso['proveedor_categoria']))
+    if anulado and ingreso['motivo_anulacion']:
+        datos.append(('Motivo de anulación', ingreso['motivo_anulacion']))
+    if anulado and ingreso['anulado_en']:
+        datos.append(('Anulado', f"{_pdf_fecha(ingreso['anulado_en'])} · "
+                                 f"{ingreso['anulado_por'] or '-'}"))
+    if ingreso['notas']:
+        datos.append(('Notas', ingreso['notas']))
+
+    elems = _pdf_encabezado(styles, 'Comprobante de ingreso',
+                            f"Ingreso #{ingreso['id']}", datos)
+    if anulado:
+        elems.append(Paragraph('<b>INGRESO ANULADO — no cuenta en los totales '
+                               'del almacen.</b>', styles['Anulado']))
+        elems.append(Spacer(1, 0.12 * inch))
+    tabla, total_compra, total_venta = _pdf_tabla_productos(styles, items)
+    elems.append(Paragraph('<b>Productos ingresados</b>', styles['TituloSeccion']))
+    elems.append(tabla)
+    elems.append(Spacer(1, 0.18 * inch))
+
+    cant_total = sum(int(i['cantidad'] or 0) for i in items)
+    resumen = Table([
+        ['Productos distintos', str(len(items))],
+        ['Cantidad total', str(cant_total)],
+        ['Total compra', f'S/ {total_compra:.2f}'],
+        ['Total venta (estimado)', f'S/ {total_venta:.2f}'],
+    ], colWidths=[180, 140], hAlign='LEFT')
+    resumen.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('BACKGROUND', (0, 0), (0, -1), colors.whitesmoke),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    elems.append(resumen)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=36, rightMargin=36,
+                            topMargin=36, bottomMargin=36,
+                            title=f'Ingreso {id}',
+                            author='Multiservicios Richard')
+    doc.build(elems)
+    fecha_pdf = _ahora_lima().strftime('%Y%m%d')
+    return _pdf_respuesta(buf, f'ingreso_{id}_{fecha_pdf}.pdf')
+
+
+@app.route('/ingresos/pdf')
+def ingresos_pdf():
+    """PDF de los ingresos de una semana o de un mes (resumen + detalle).
+
+    ?periodo=mes|semana&anio=YYYY&mes=1..12&semana=1..5. Sin parametros se
+    exporta el periodo en curso; la semana solo aplica a periodo=semana.
+    """
+    if not _es_admin():
+        return redirect('/login')
+    periodo = (request.args.get('periodo') or 'mes').strip().lower()
+    if periodo != 'semana':
+        periodo = 'mes'
+
+    hoy = _ahora_lima().date()
+    anio_raw   = (request.args.get('anio') or '').strip()
+    mes_raw    = (request.args.get('mes') or '').strip()
+    semana_raw = (request.args.get('semana') or '').strip()
+    invalido = 'El periodo seleccionado no es válido.'
+    referencia, numero = None, None
+    if anio_raw or mes_raw:
+        try:
+            anio = int(anio_raw or hoy.year)
+            mes  = int(mes_raw or hoy.month)
+            if not (1 <= mes <= 12 and 1900 <= anio <= 9999):
+                raise ValueError
+            referencia = date(anio, mes, 1)
+        except ValueError:
+            flash(invalido, 'danger')
+            return redirect('/ingresos')
+    if semana_raw:
+        try:
+            numero = int(semana_raw)
+        except ValueError:
+            flash(invalido, 'danger')
+            return redirect('/ingresos')
+    # Una semana que no existe en ese mes no se "ajusta" a otra: mejor no
+    # descargar nada que entregar un periodo que el dueno no pidio.
+    if periodo == 'semana' and referencia is not None and numero is not None:
+        if not 1 <= numero <= len(_bloques_semana_mes(referencia.year, referencia.month)):
+            flash(invalido, 'danger')
+            return redirect('/ingresos')
+    desde, hasta, etiqueta = _periodo_ingresos(periodo, referencia, numero)
+
+    cur = mysql.connection.cursor()
+    ingresos, detalles = _datos_ingresos_pdf(cur, desde, hasta)
+    cur.close()
+
+    # Un periodo sin ingresos no se descarga: se avisa y se vuelve al listado.
+    if not ingresos:
+        flash('No hay ingresos registrados en el periodo seleccionado.', 'warning')
+        return redirect('/ingresos')
+
+    styles = _pdf_estilos()
+    vigentes = [r for r in ingresos if (r['estado'] or 'vigente') != 'anulado']
+    n_anulados = len(ingresos) - len(vigentes)
+    titulo = ('Reporte de ingresos semanal' if periodo == 'semana'
+              else 'Reporte de ingresos mensual')
+    resumen_cab = f"{len(vigentes)} vigente(s)"
+    if n_anulados:
+        resumen_cab += f" y {n_anulados} anulado(s)"
+    elems = _pdf_encabezado(styles, titulo, etiqueta, [
+        ('Periodo', f"{desde.strftime('%d/%m/%Y')} al {hasta.strftime('%d/%m/%Y')}"),
+        ('Ingresos', resumen_cab),
+        ('Generado', _ahora_lima().strftime('%d/%m/%Y %H:%M')),
+    ])
+
+    elems.append(Paragraph('<b>Resumen</b>', styles['TituloSeccion']))
+    elems.append(_pdf_tabla_resumen(styles, ingresos))
+    if n_anulados:
+        elems.append(Spacer(1, 0.06 * inch))
+        elems.append(Paragraph(f'Los {n_anulados} ingreso(s) anulado(s) no incluyen '
+                               'en los totales.', styles['Anulado']))
+    elems.append(Spacer(1, 0.2 * inch))
+    elems.append(Paragraph('<b>Detalle por ingreso</b>', styles['TituloSeccion']))
+    for r in ingresos:
+        items = detalles.get(r['id'], [])
+        anulado = (r['estado'] or 'vigente') == 'anulado'
+        encabezado = (('ANULADO · ' if anulado else '') +
+                      f"Ingreso #{r['id']} · {_pdf_fecha(r['fecha'])} · "
+                      f"{r['proveedor_nombre'] or 'Sin proveedor'}")
+        bloque = [Paragraph('<b>' + _pdf_escapar(encabezado) + '</b>',
+                            styles['TituloAnulado'] if anulado else styles['TituloSeccion'])]
+        if anulado and r['motivo_anulacion']:
+            bloque.append(Paragraph('Motivo de anulación: '
+                                    + _pdf_escapar(r['motivo_anulacion']), styles['Dato']))
+        if r['notas']:
+            bloque.append(Paragraph('Notas: ' + _pdf_escapar(r['notas']),
+                                    styles['Dato']))
+        bloque.append(_pdf_tabla_productos(styles, items)[0])
+        elems.append(KeepTogether(bloque))
+        elems.append(Spacer(1, 0.1 * inch))
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=36, rightMargin=36,
+                            topMargin=36, bottomMargin=36, title=titulo,
+                            author='Multiservicios Richard')
+    doc.build(elems)
+    nombre = (f"ingresos_{periodo}_{desde.strftime('%Y%m%d')}_"
+              f"{hasta.strftime('%Y%m%d')}.pdf")
+    return _pdf_respuesta(buf, nombre)
+
 
 # ─────────────────────────────────────────────
 # PRO15-19: SEGUIMIENTO DE ENTREGAS
@@ -4946,7 +5599,12 @@ def verificar_registros():
         cur.execute("SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento, u.correo FROM ventas v LEFT JOIN usuarios u ON v.cliente_id=u.id ORDER BY v.fecha DESC LIMIT 50")
         datos = cur.fetchall()
     elif seccion == 'ingresos':
-        cur.execute(f"SELECT i.id, i.fecha, p.nombre AS proveedor_nombre, (SELECT SUM(cantidad) FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=i.id) AS items FROM {ALMACEN_DB}.ingresos i LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id ORDER BY i.fecha DESC LIMIT 50")
+        cur.execute(f"""SELECT i.id, i.fecha, COALESCE(i.estado,'vigente') AS estado,
+                               COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) AS proveedor_nombre,
+                               (SELECT SUM(cantidad) FROM {ALMACEN_DB}.detalle_ingreso WHERE ingreso_id=i.id) AS items
+                        FROM {ALMACEN_DB}.ingresos i
+                        LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
+                        ORDER BY i.fecha DESC LIMIT 50""")
         datos = cur.fetchall()
     elif seccion == 'salidas':
         cur.execute(f"SELECT s.id, s.fecha, v.nombre AS cliente_nombre, (SELECT SUM(cantidad) FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=s.id) AS items FROM {ALMACEN_DB}.salidas s LEFT JOIN ventas v ON s.venta_id=v.id ORDER BY s.fecha DESC LIMIT 50")
@@ -4979,15 +5637,20 @@ def informe_diario():
     cur.execute("SELECT COUNT(*) AS n FROM ventas WHERE DATE(fecha)=%s AND COALESCE(estado,'') <> 'cancelado'", (fecha_str,))
     num_ventas = cur.fetchone()['n']
 
+    # Los ingresos anulados no cuentan en el informe del dia (igual que las
+    # ventas canceladas no cuentan como venta).
     cur.execute(f"""
-        SELECT i.id, i.fecha, p.nombre AS proveedor_nombre,
+        SELECT i.id, i.fecha,
+               COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) AS proveedor_nombre,
                (SELECT SUM(di.cantidad) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS items,
                (SELECT COALESCE(SUM(di.cantidad*di.precio_compra),0) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS costo
         FROM {ALMACEN_DB}.ingresos i LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
-        WHERE DATE(i.fecha)=%s ORDER BY i.fecha
+        WHERE DATE(i.fecha)=%s AND COALESCE(i.estado,'vigente') <> 'anulado'
+        ORDER BY i.fecha
     """, (fecha_str,))
     ingresos_dia = cur.fetchall()
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.ingresos WHERE DATE(fecha)=%s", (fecha_str,))
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.ingresos WHERE DATE(fecha)=%s "
+                f"AND COALESCE(estado,'vigente') <> 'anulado'", (fecha_str,))
     num_ingresos = cur.fetchone()['n']
 
     cur.execute(f"""

@@ -135,7 +135,7 @@
               {% if seccion == 'ventas' %}
                 <th>Cliente</th><th>Documento</th><th>Total</th><th>Estado</th><th>Fecha</th>
               {% elif seccion == 'ingresos' %}
-                <th>Proveedor</th><th>Items</th><th>Fecha</th>
+                <th>Proveedor</th><th>Items</th><th>Estado</th><th>Fecha</th>
               {% elif seccion == 'salidas' %}
                 <th>Cliente</th><th>Items</th><th>Fecha</th>
               {% elif seccion == 'entregas' %}
@@ -162,6 +162,10 @@
               {% elif seccion == 'ingresos' %}
                 <td style="color:var(--text-secondary)">{{ d.proveedor_nombre or '—' }}</td>
                 <td style="color:var(--text-secondary)">{{ d.items or 0 }}</td>
+                <td>
+                  {% if d.estado == 'anulado' %}<span class="badge bg-danger">Anulado</span>
+                  {% else %}<span class="badge bg-success">Vigente</span>{% endif %}
+                </td>
                 <td style="color:var(--text-muted);font-size:13px">{{ d.fecha }}</td>
               {% elif seccion == 'salidas' %}
                 <td style="color:var(--text-secondary)">{{ d.cliente_nombre or '—' }}</td>
