@@ -1,5 +1,12 @@
 ﻿{% extends 'base.html' %}
 
+{% block head %}
+{# reCAPTCHA v2: el script solo se carga en las paginas que lo usan. #}
+{% if recaptcha_site_key %}
+<script src="https://www.google.com/recaptcha/api.js" async defer></script>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 
 <div class="container d-flex justify-content-center align-items-center" style="height:90vh;">
@@ -84,6 +91,17 @@
 
                 <div class="alert alert-danger py-2 mb-3" id="avisoPaso2" style="display:none"></div>
 
+                {# ── reCAPTCHA v2 ──
+                   Vive en el PASO 2, no en el paso 1: el token se envia con el
+                   submit y caduca a los ~2 minutos. Si se dibujara en el paso 1
+                   expiraria mientras el usuario escribe su contraseña. #}
+                {% if recaptcha_site_key %}
+                <div class="d-flex justify-content-center mb-3">
+                    <div class="g-recaptcha" id="recaptchaRegistro"
+                         data-sitekey="{{ recaptcha_site_key }}"></div>
+                </div>
+                {% endif %}
+
                 <button type="submit" class="btn btn-success w-100 fw-bold">
                     Registrarse
                 </button>
@@ -105,6 +123,15 @@
 </div>
 
 <script>
+/* El widget de reCAPTCHA hereda el tema claro/oscuro de la pagina. El atributo
+   se aplica durante el parseo, antes de que api.js dibuje el widget. */
+(function(){
+    var w = document.getElementById('recaptchaRegistro');
+    if (w && localStorage.getItem('theme') === 'dark') {
+        w.setAttribute('data-theme', 'dark');
+    }
+})();
+
 function mostrarAviso(id, msg) {
     var box = document.getElementById(id);
     box.textContent = msg;

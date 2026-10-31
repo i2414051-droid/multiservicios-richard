@@ -128,6 +128,64 @@ python app.py
 
 ---
 
+## reCAPTCHA v2 (registro)
+
+La casilla "No soy un robot" protege `/registro`, el unico formulario publico
+que crea cuentas. Vive en el **paso 2** del formulario (el token se envia con el
+submit y caduca a los ~2 minutos, asi que dibujarlo en el paso 1 lo dejaria
+expirar mientras el usuario escribe su contraseña).
+
+El login **no** lleva captcha a proposito: ahi la fuerza bruta ya la frenan el
+bloqueo por intentos fallidos, el bloqueo por IP y el rate limiting.
+
+### Configuracion
+
+```ini
+RECAPTCHA_SITE_KEY=6L...    # publica por diseno: se renderiza en el HTML
+RECAPTCHA_SECRET_KEY=6L...  # privada: solo .env (local) y Render (produccion)
+# RECAPTCHA_TIMEOUT=9       # segundos de espera contra la API de Google
+```
+
+Si falta cualquiera de las dos, el captcha **se desactiva solo**: los
+formularios se dibujan sin widget y no se validan. Un entorno sin credenciales
+nunca queda bloqueado por configuracion incompleta.
+
+### Dominios (es lo que mas se rompe)
+
+En [google.com/recaptcha/admin](https://www.google.com/recaptcha/admin) → tu
+sitio → **Configuracion → Dominios** deben estar registrados TODOS los dominios
+desde donde se use el widget:
+
+- `localhost` y `127.0.0.1` (pruebas locales)
+- el dominio de Render (`....onrender.com`)
+- el dominio personalizado, si lo tienes
+
+Si falta alguno, el widget muestra *"ERROR for site owner: Invalid site key"* y
+`siteverify` responde `invalid-input-response` aunque las claves sean correctas.
+
+### Que valida el servidor
+
+`_recaptcha_valido()` en `monolito/app.py` hace un POST a
+`https://www.google.com/recaptcha/api/siteverify` con `secret`, `response` y
+`remoteip`, y comprueba:
+
+1. `success == true`.
+2. Que el `hostname` que devuelve Google coincida con el host de la peticion:
+   asi un token obtenido en otra pagina no sirve aqui.
+
+Se valida **antes** de tocar la base de datos y antes de bcrypt: un bot se va
+sin consumir consultas ni ciclos de hashing. El token es de un solo uso, asi
+que la funcion se llama una sola vez por peticion. Si Google no responde (red
+caida), se rechaza y se pide reintentar.
+
+### Render
+
+Añade `RECAPTCHA_SITE_KEY` y `RECAPTCHA_SECRET_KEY` en **Render → tu servicio →
+Environment** y registra el dominio de Render en la consola de Google. Sin eso
+el captcha funciona en local y falla **solo en produccion**.
+
+---
+
 ## Despliegue en Render
 
 1. Conecta el repo `multiservicios-richard` (rama `main`) a un **Web Service** de Render.

@@ -595,6 +595,37 @@ CULQI_YAPE_MONTO_MAXIMO = int(os.environ.get('CULQI_YAPE_MONTO_MAXIMO', '200000'
 # error de autenticacion. Se muestra un mensaje claro en vez del generico.
 CULQI_MODO_PRUEBA = CULQI_PUBLIC_KEY.startswith('pk_test_')
 
+# ─────────────────────────────────────────────
+# reCAPTCHA v2 — casilla "No soy un robot"
+# ─────────────────────────────────────────────
+# Protege el unico formulario publico que crea cuentas: /registro. El login se
+# dejo fuera a proposito (se pidio explicitamente): ahi la fuerza bruta ya la
+# frena el bloqueo por intentos + IP y el rate limiting.
+#
+# La SITE KEY es publica por diseno: se renderiza en el HTML y el navegador la
+# necesita para dibujar el widget. La SECRET KEY solo vive en el servidor
+# (.env en local, Render -> Environment en produccion) y nunca se renderiza.
+#
+# Google exige que el dominio este registrado en la consola de reCAPTCHA
+# (google.com/recaptcha/admin). Sin eso el widget muestra "Invalid site key" y
+# siteverify responde invalid-input-response, aunque las claves sean correctas.
+RECAPTCHA_SITE_KEY   = os.environ.get('RECAPTCHA_SITE_KEY', '').strip()
+RECAPTCHA_SECRET_KEY = os.environ.get('RECAPTCHA_SECRET_KEY', '').strip()
+RECAPTCHA_VERIFY_URL = os.environ.get(
+    'RECAPTCHA_VERIFY_URL',
+    'https://www.google.com/recaptcha/api/siteverify').rstrip('/')
+RECAPTCHA_TIMEOUT = float(os.environ.get('RECAPTCHA_TIMEOUT', '9'))
+
+# El captcha solo esta activo con las DOS claves. Si falta alguna, el widget no
+# se dibuja y la validacion se omite: un entorno sin credenciales (por ejemplo
+# una maquina nueva o un despliegue de pruebas) nunca queda bloqueado por
+# configuracion incompleta.
+RECAPTCHA_ACTIVO = bool(RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY)
+
+# La plantilla solo necesita la site key. Se expone como global de Jinja en vez
+# de un context_processor: es un valor fijo del proceso, no depende del request.
+app.jinja_env.globals['recaptcha_site_key'] = RECAPTCHA_SITE_KEY
+
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
 # ─────────────────────────────────────────────
@@ -1785,6 +1816,72 @@ def humanizar_bloqueo(timedelta_restante):
         return f'{horas}h' if not resto else f'{horas}h {resto}m'
     return f'{total // 86400}d'
 
+
+# ─────────────────────────────────────────────
+# VALIDACION DE reCAPTCHA v2
+# ─────────────────────────────────────────────
+# Codigos que devuelve Google en `error-codes`, traducidos a lo que el usuario
+# puede hacer al respecto. Un mensaje tecnico ("invalid-input-response") no le
+# sirve de nada a quien solo queria entrar a su cuenta.
+_RECAPTCHA_ERRORES = {
+    'missing-input-secret':   'El captcha no esta bien configurado en el servidor.',
+    'invalid-input-secret':   'El captcha no esta bien configurado en el servidor.',
+    'missing-input-response': 'Marca la casilla "No soy un robot" para continuar.',
+    'invalid-input-response': 'La verificacion del captcha fallo o expiro. Vuelve a marcarla.',
+    'bad-request':            'La solicitud del captcha no es valida. Recarga la pagina.',
+    'timeout-or-duplicate':   'El captcha expiro o ya se uso. Vuelve a marcarlo.',
+}
+
+
+def _recaptcha_valido(token, ip):
+    """Valida el token de reCAPTCHA v2 contra Google.
+
+    Devuelve `(ok, mensaje)`. `mensaje` es None si la verificacion paso; si no,
+    es el texto que se muestra al usuario con flash.
+
+    Se llama ANTES de tocar la base de datos y antes de bcrypt: un bot no debe
+    consumir consultas ni ciclos de hashing. El token es de un solo uso, asi que
+    esta funcion debe llamarse una sola vez por peticion.
+    """
+    if not RECAPTCHA_ACTIVO:
+        return True, None
+    if not token:
+        return False, 'Marca la casilla "No soy un robot" para continuar.'
+
+    try:
+        respuesta = requests.post(
+            RECAPTCHA_VERIFY_URL,
+            data={'secret': RECAPTCHA_SECRET_KEY, 'response': token,
+                  'remoteip': ip},
+            timeout=RECAPTCHA_TIMEOUT,
+        )
+        datos = respuesta.json()
+    except Exception:
+        # Sin respuesta de Google no hay forma de distinguir a un humano de un
+        # bot: se rechaza (fail-closed) y se pide reintentar. Se registra el
+        # error completo porque casi siempre es red o DNS, no el usuario.
+        app.logger.error('reCAPTCHA: no se pudo consultar a Google', exc_info=True)
+        return False, 'No se pudo verificar el captcha. Intenta de nuevo en unos segundos.'
+
+    if datos.get('success'):
+        # Google devuelve el hostname donde se resolvio el desafio. Si no
+        # coincide con el nuestro, el token se obtuvo en otra pagina (o se
+        # reutilizo) y no vale para esta peticion.
+        hostname = (datos.get('hostname') or '').lower()
+        propio = (request.host or '').split(':')[0].lower()
+        if hostname and propio and hostname != propio:
+            app.logger.warning('reCAPTCHA: hostname %s no coincide con %s',
+                               hostname, propio)
+            return False, 'La verificacion del captcha fue rechazada. Recarga la pagina.'
+        return True, None
+
+    codigos = datos.get('error-codes') or []
+    app.logger.warning('reCAPTCHA rechazado: %s', ','.join(codigos) or 'sin codigo')
+    return False, _RECAPTCHA_ERRORES.get(
+        codigos[0] if codigos else '',
+        'La verificacion del captcha fallo. Intenta de nuevo.')
+
+
 @app.route('/login', methods=['GET','POST'])
 @app.route('/Iniciar Sesion', methods=['GET','POST'])
 def login():
@@ -1963,6 +2060,15 @@ def logout():
 @app.route('/registro', methods=['GET','POST'])
 def registro():
     if request.method == 'POST':
+        # reCAPTCHA v2: se valida antes de leer el formulario y antes de la BD.
+        # El registro es el formulario que crea cuentas: sin captcha, cualquiera
+        # puede llenar la tabla usuarios con registros automaticos.
+        captcha_ok, captcha_msg = _recaptcha_valido(
+            request.form.get('g-recaptcha-response'), obtener_ip())
+        if not captcha_ok:
+            flash(captcha_msg, 'danger')
+            return redirect('/registro')
+
         correo           = request.form['correo'].strip()
         password         = request.form['password']
         confirmar        = request.form['confirmar']
