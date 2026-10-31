@@ -74,10 +74,9 @@
     <!-- LEYENDA STOCK -->
     <div class="d-flex gap-3 mb-3 align-items-center flex-wrap">
         <small class="text-muted fw-bold">Indicador de stock:</small>
-        <span class="badge bg-success">≥ 15 — Normal</span>
-        <span class="badge bg-warning text-dark">5–14 — Bajo</span>
-        <span class="badge bg-danger">&lt; 5 — Crítico</span>
-        <span class="badge bg-danger border border-white">≤ 1 — Auto-pedido 🔔</span>
+        <span class="badge bg-success">≥ {{ STOCK_NORMAL }} — Normal</span>
+        <span class="badge bg-warning text-dark">{{ STOCK_CRITICO + 1 }}–{{ STOCK_NORMAL - 1 }} — Bajo</span>
+        <span class="badge bg-danger">≤ {{ STOCK_CRITICO }} — Crítico 🔔 (va a Pedidos)</span>
     </div>
 
     <!-- TABLA PRODUCTOS -->
@@ -124,13 +123,12 @@
                         <!-- STOCK CON COLORES -->
                         <td>
                             {% if p.stock is not none %}
-                                {% if p.stock <= 1 %}
-                                    <span class="badge bg-danger" title="¡Auto-pedido generado!">
+                                {% if p.stock <= STOCK_CRITICO %}
+                                    <span class="badge bg-danger"
+                                          title="Stock crítico: se agregó solo a Productos para Pedir">
                                         {{ p.stock }} 🔔
                                     </span>
-                                {% elif p.stock < 5 %}
-                                    <span class="badge bg-danger">{{ p.stock }}</span>
-                                {% elif p.stock < 15 %}
+                                {% elif p.stock < STOCK_NORMAL %}
                                     <span class="badge bg-warning text-dark">{{ p.stock }}</span>
                                 {% else %}
                                     <span class="badge bg-success">{{ p.stock }}</span>

@@ -646,6 +646,21 @@ app.jinja_env.globals['recaptcha_site_key'] = RECAPTCHA_SITE_KEY
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
 # ─────────────────────────────────────────────
+# UMBRALES DE STOCK
+# ─────────────────────────────────────────────
+# Una sola fuente para /admin, /verificar-inventario, /dashboard y el
+# auto-pedido: antes cada pantalla tenia sus numeros (15/5/1 y 10/4/1) y un
+# mismo producto podia verse "Normal" en un lado y "Critico" en otro.
+STOCK_NORMAL  = 50    # >= 50  -> Normal   (verde)
+STOCK_CRITICO = 15    # <= 15  -> Critico  (rojo) y se agrega solo a Pedidos
+                      # 16-49  -> Bajo     (amarillo)
+
+# Las plantillas leen los mismos numeros, asi ningun listado se queda con un
+# umbral propio si manana cambian.
+app.jinja_env.globals['STOCK_NORMAL']  = STOCK_NORMAL
+app.jinja_env.globals['STOCK_CRITICO'] = STOCK_CRITICO
+
+# ─────────────────────────────────────────────
 # ESTADOS DE CLIENTE (P0)
 # ─────────────────────────────────────────────
 # Catálogo de estados de cliente.
@@ -825,6 +840,59 @@ def _respaldar_nombres_ingresos(cur):
         except Exception:
             # Si el alter todavia no puso la columna, se intenta en el próximo
             # arranque; no debe tumbar el resto de la inicializacion.
+            pass
+
+
+def _reconciliar_pedidos_por_stock(cur):
+    """Pone la lista de Pedidos al dia con la regla actual (stock <= STOCK_CRITICO).
+
+    Al arrancar, para que el cambio de umbral no deje colgados:
+      - pedidos 'pendiente' de productos que ya se repusieron -> 'surtido'.
+        (caso real: LUZ LED con stock 93 seguia pendiente porque el pedido se
+        genero cuando el umbral era 1)
+      - productos criticos que nunca entraron a la lista.
+    Un pedido 'cancelado' no se revive: si el dueno lo quito, se queda fuera.
+    """
+    try:
+        cur.execute(f"""
+            UPDATE {ALMACEN_DB}.productos_para_pedir pp
+            LEFT JOIN {ALMACEN_DB}.proveedores pr ON pp.proveedor_id=pr.id
+            SET pp.proveedor_id=NULL
+            WHERE pp.estado='pendiente' AND pp.proveedor_id IS NOT NULL AND pr.id IS NULL
+        """)
+    except Exception:
+        pass
+    try:
+        cur.execute(f"""
+            UPDATE {ALMACEN_DB}.productos_para_pedir pp
+            JOIN {ALMACEN_DB}.productos p ON pp.producto_id=p.id
+            SET pp.estado='surtido'
+            WHERE pp.estado='pendiente' AND p.stock > {STOCK_CRITICO}
+        """)
+    except Exception:
+        pass
+    try:
+        cur.execute(f"""
+            SELECT p.id, p.categoria
+            FROM {ALMACEN_DB}.productos p
+            WHERE p.stock <= {STOCK_CRITICO}
+              AND NOT EXISTS (SELECT 1 FROM {ALMACEN_DB}.productos_para_pedir pp
+                              WHERE pp.producto_id=p.id)
+        """)
+        faltan = cur.fetchall()
+    except Exception:
+        faltan = []
+    for p in faltan:
+        try:
+            cur.execute(f"SELECT id FROM {ALMACEN_DB}.proveedores WHERE categoria=%s",
+                        (p['categoria'],))
+            ids = [r['id'] for r in cur.fetchall()]
+            cur.execute(f"""
+                INSERT INTO {ALMACEN_DB}.productos_para_pedir
+                    (producto_id, cantidad_pedido, proveedor_id)
+                VALUES (%s, 1, %s)
+            """, (p['id'], ids[0] if len(ids) == 1 else None))
+        except Exception:
             pass
 
 
@@ -1349,6 +1417,7 @@ def _init_db_inner():
             except Exception:
                 pass
         _respaldar_nombres_ingresos(cur)
+        _reconciliar_pedidos_por_stock(cur)
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {ALMACEN_DB}.salidas (
                 id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -1517,35 +1586,60 @@ def enviar_boleta_cliente(correo_cliente, venta_id):
         print(f"[email_boleta] {e}")
         return False
 
-def verificar_stock_bajo(cur, producto_id):
-    """Si stock <= 1 auto-agrega a productos_para_pedir.
-       Si stock <= 0 oculta el producto (estado='inactivo')."""
+def sincronizar_pedido_por_stock(cur, producto_id):
+    """Ajusta la lista de Pedidos segun el stock actual del producto.
+
+    - stock <= STOCK_CRITICO (15): si no tiene pedido pendiente, se crea.
+    - stock >  STOCK_CRITICO        : su pedido pendiente se cierra como
+      'surtido' (ya se repuso, no tiene sentido que siga en la lista).
+    - stock <= 0                    : el producto se oculta ('inactivo').
+
+    El proveedor se preselecciona solo cuando hay UNO posible para la categoria
+    del producto; con varios queda 'sin asignar' para que el dueno elija en
+    /productos-para-pedir (antes se tomaba el primero que encontraba LIMIT 1).
+    """
     try:
-        cur.execute(f"SELECT nombre, stock, categoria FROM {ALMACEN_DB}.productos WHERE id=%s", (producto_id,))
+        cur.execute(f"SELECT nombre, stock, categoria FROM {ALMACEN_DB}.productos "
+                    f"WHERE id=%s", (producto_id,))
         p = cur.fetchone()
         if not p:
             return
-        if p['stock'] <= 0:
-            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='inactivo' WHERE id=%s", (producto_id,))
-        if p['stock'] > 1:
+        stock = int(p['stock'] or 0)
+
+        if stock <= 0:
+            cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='inactivo' WHERE id=%s",
+                        (producto_id,))
+
+        if stock > STOCK_CRITICO:
+            # Se repuso: los pedidos pendientes de este producto dejan de
+            # tener sentido. Se cierran en vez de borrarse, queda el rastro.
+            cur.execute(f"""
+                UPDATE {ALMACEN_DB}.productos_para_pedir
+                SET estado='surtido'
+                WHERE producto_id=%s AND estado='pendiente'
+            """, (producto_id,))
             return
-        # ¿Ya existe pendiente?
+
+        # ¿Ya esta en la lista?
         cur.execute(f"""
             SELECT id FROM {ALMACEN_DB}.productos_para_pedir
             WHERE producto_id=%s AND estado='pendiente'
         """, (producto_id,))
         if cur.fetchone():
             return
-        # Proveedor por categoría
-        cur.execute(f"""
-            SELECT id, nombre, celular
-            FROM {ALMACEN_DB}.proveedores WHERE categoria=%s LIMIT 1
-        """, (p['categoria'],))
-        proveedor = cur.fetchone()
-        proveedor_id = proveedor['id'] if proveedor else None
+
+        candidatos = []
+        if p['categoria']:
+            cur.execute(f"""
+                SELECT id, nombre FROM {ALMACEN_DB}.proveedores
+                WHERE categoria=%s ORDER BY nombre
+            """, (p['categoria'],))
+            candidatos = cur.fetchall()
+        proveedor_id = candidatos[0]['id'] if len(candidatos) == 1 else None
 
         cur.execute(f"""
-            INSERT INTO {ALMACEN_DB}.productos_para_pedir (producto_id, cantidad_pedido, proveedor_id)
+            INSERT INTO {ALMACEN_DB}.productos_para_pedir
+                (producto_id, cantidad_pedido, proveedor_id)
             VALUES (%s, 1, %s)
         """, (producto_id, proveedor_id))
     except Exception as e:
@@ -1577,6 +1671,8 @@ def restaurar_stock_venta(cur, venta_id):
     for it in lineas:
         cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock+%s WHERE id=%s",
                     (it['cantidad'], it['producto_id']))
+        # Si al volver el stock ya no es critico, su pedido pendiente se cierra.
+        sincronizar_pedido_por_stock(cur, it['producto_id'])
     return len(lineas)
 
 def registrar_cancelacion(cur, venta_id, motivo_codigo, motivo_detalle, cancelado_por):
@@ -2164,7 +2260,8 @@ def dashboard():
     cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos WHERE estado='activo'")
     productos_activos = cur.fetchone()['total'] or 0
 
-    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock <= 5")
+    cur.execute(f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos "
+                f"WHERE estado='activo' AND stock <= %s", (STOCK_CRITICO,))
     stock_bajo = cur.fetchone()['total'] or 0
 
     cur.execute("SELECT COUNT(*) AS total FROM usuarios")
@@ -2191,9 +2288,9 @@ def dashboard():
     cur.execute(f"""
         SELECT id, nombre, stock, categoria, imagen
         FROM {ALMACEN_DB}.productos
-        WHERE estado='activo' AND stock <= 5
+        WHERE estado='activo' AND stock <= %s
         ORDER BY stock ASC LIMIT 10
-    """)
+    """, (STOCK_CRITICO,))
     productos_stock_bajo = cur.fetchall()
 
     cur.close()
@@ -2411,7 +2508,7 @@ def agregar_producto():
     if extras:
         _insertar_extras(cur, nuevo_id, extras, orden_inicial=1)
     mysql.connection.commit()
-    verificar_stock_bajo(cur, nuevo_id)
+    sincronizar_pedido_por_stock(cur, nuevo_id)
     mysql.connection.commit()
     return redirect('/admin')
 
@@ -2532,7 +2629,7 @@ def editar_producto(id):
             _insertar_extras(cur, id, nuevos, orden_inicial=orden_base)
 
         mysql.connection.commit()
-        verificar_stock_bajo(cur, id)
+        sincronizar_pedido_por_stock(cur, id)
         mysql.connection.commit()
         cur.close()
         flash('Producto actualizado correctamente.', 'success')
@@ -4153,39 +4250,162 @@ def imprimir_reclamacion(id):
 # ─────────────────────────────────────────────
 # PRODUCTOS PARA PEDIR
 # ─────────────────────────────────────────────
+PER_PAGE_PEDIDOS = 10
+
+
+def _volver_pedidos():
+    """Vuelve a la lista de Pedidos conservando la pagina y el filtro activos.
+
+    Acepta `page` y `filtro` del POST (campos ocultos) o del GET, para que
+    asignar un proveedor o marcar enviado no regrese siempre a la pagina 1.
+    """
+    try:
+        page = int(request.values.get('page', 1))
+    except (TypeError, ValueError):
+        page = 1
+    filtro = (request.values.get('filtro') or 'todos').strip().lower()
+    destino = '/productos-para-pedir?page=%d' % max(1, page)
+    if filtro == 'sin_asignar':
+        destino += '&filtro=sin_asignar'
+    return redirect(destino)
+
+
+def _paginar_grupos_pedidos(grupos, page):
+    """Reparte los bloques de proveedor en paginas de PER_PAGE_PEDIDOS productos.
+
+    El orden ya viene decidido (Sin proveedor arriba, luego A-Z), asi la lista
+    es siempre la misma y asignar un proveedor mueve el producto hacia abajo.
+    Si un proveedor tiene mas productos que una pagina, su bloque se corta: en
+    cada pagina se muestran los que tocan, pero el boton de WhatsApp y el
+    "marcar enviado" siguen trabajando con TODOS sus pendientes (por eso se
+    guarda tambien `total_productos`).
+    Devuelve (bloques_de_la_pagina, page, total_pages).
+    """
+    filas = []
+    for g in grupos:
+        for ped in g['productos']:
+            filas.append((g, ped))
+
+    total = len(filas)
+    if not total:
+        return [], 1, 1
+    total_pages = -(-total // PER_PAGE_PEDIDOS)
+    page = max(1, min(page, total_pages))
+    inicio = (page - 1) * PER_PAGE_PEDIDOS
+    por_pagina, indice = [], {}
+    for g, ped in filas[inicio:inicio + PER_PAGE_PEDIDOS]:
+        clave = g['proveedor_id'] or 'sin_proveedor'
+        if clave not in indice:
+            bloque = dict(g)
+            bloque['total_productos'] = len(g['productos'])
+            bloque['productos'] = []
+            indice[clave] = bloque
+            por_pagina.append(bloque)
+        indice[clave]['productos'].append(ped)
+    return por_pagina, page, total_pages
+
+
+# ─────────────────────────────────────────────
 @app.route('/productos-para-pedir')
 def productos_para_pedir():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    try:
+        page = int(request.args.get('page', 1))
+    except (TypeError, ValueError):
+        page = 1
+    # Atajo para quedarse solo con los que todavia no tienen proveedor.
+    filtro = (request.args.get('filtro') or 'todos').strip().lower()
+    if filtro not in ('todos', 'sin_asignar'):
+        filtro = 'todos'
+    # Un pedido puede apuntar a un proveedor borrado: cuenta como sin asignar.
+    sin_asignar_sql = "(pp.proveedor_id IS NULL OR pr.id IS NULL)"
+
     cur = mysql.connection.cursor()
+    # Orden estable: primero los que todavia no tienen proveedor (los que
+    # faltan accion) y despues los proveedores en orden alfabetico. Al asignar
+    # uno, el producto sale del bloque de arriba y baja al de su proveedor: ya
+    # no hay filas que suben y bajan segun la hora en que se crearon.
     cur.execute(f"""
-        SELECT pp.id, pp.cantidad_pedido, pp.fecha, pp.estado,
+        SELECT pp.id, pp.producto_id, pp.cantidad_pedido, pp.fecha, pp.estado,
+               pp.proveedor_id AS proveedor_asignado,
                p.nombre AS producto_nombre, p.stock AS stock_actual,
                p.categoria,
-               pr.id AS proveedor_id, pr.nombre AS proveedor_nombre,
+               pr.nombre AS proveedor_nombre,
                pr.celular AS proveedor_celular
         FROM {ALMACEN_DB}.productos_para_pedir pp
         JOIN {ALMACEN_DB}.productos p ON pp.producto_id=p.id
         LEFT JOIN {ALMACEN_DB}.proveedores pr ON pp.proveedor_id=pr.id
         WHERE pp.estado='pendiente'
-        ORDER BY pp.fecha DESC
+          {'AND ' + sin_asignar_sql if filtro == 'sin_asignar' else ''}
+        ORDER BY (pp.proveedor_id IS NULL) DESC,
+                 pr.nombre IS NULL DESC, pr.nombre ASC, p.nombre ASC
     """)
-    pedidos = cur.fetchall()
+    pedidos = list(cur.fetchall())
 
-    # Agrupar por proveedor para generar mensajes WhatsApp
-    proveedores_dict = {}
+    cur.execute(f"""
+        SELECT COUNT(*) AS n
+        FROM {ALMACEN_DB}.productos_para_pedir pp
+        LEFT JOIN {ALMACEN_DB}.proveedores pr ON pp.proveedor_id=pr.id
+        WHERE pp.estado='pendiente' AND {sin_asignar_sql}
+    """)
+    sin_asignar_total = (cur.fetchone() or {}).get('n') or 0
+
+    # Un pedido puede apuntar a un proveedor que se borro: se trata como "sin
+    # proveedor", si no apareceria un bloque sin nombre mezclado con los demas.
     for ped in pedidos:
-        pid = ped['proveedor_id'] or 'sin_proveedor'
-        if pid not in proveedores_dict:
-            proveedores_dict[pid] = {
+        ped['colgado'] = bool(ped['proveedor_asignado']) and not ped['proveedor_nombre']
+        if ped['colgado']:
+            ped['proveedor_asignado'] = None
+
+    # Orden definitivo en Python: primero los que no tienen proveedor, y dentro
+    # de cada bloque el que tiene menos stock arriba (es el que urge). Al
+    # asignar, el producto sale del bloque de arriba y BAJA al de su proveedor.
+    pedidos.sort(key=lambda ped: (0 if not ped['proveedor_asignado'] else 1,
+                                  (ped['proveedor_nombre'] or '').lower(),
+                                  int(ped['stock_actual'] or 0),
+                                  (ped['producto_nombre'] or '').strip().lower()))
+
+    # Proveedores posibles por categoria: solo entran los de la categoria del
+    # producto, asi no se puede pedir "Repuestos" a quien vende Electricos.
+    categorias = sorted({p['categoria'] for p in pedidos if p['categoria']})
+    por_categoria = {c: [] for c in categorias}
+    if categorias:
+        cur.execute(f"""
+            SELECT id, nombre, celular, categoria
+            FROM {ALMACEN_DB}.proveedores
+            WHERE categoria IN ({','.join(['%s'] * len(categorias))})
+            ORDER BY nombre
+        """, tuple(categorias))
+        for pr in cur.fetchall():
+            por_categoria.setdefault(pr['categoria'], []).append(pr)
+    cur.close()
+
+    # Los productos de una categoria sin proveedores quedan marcados para
+    # mostrar el aviso: no se les puede mandar WhatsApp todavia.
+    # El contador viene de la consulta de arriba: no cambia con el filtro activo.
+    for ped in pedidos:
+        ped['proveedores'] = por_categoria.get(ped['categoria'] or '', [])
+        ped['sin_proveedor'] = not ped['proveedores']
+    sin_asignar = sin_asignar_total
+
+    # Agrupar por proveedor para generar mensajes WhatsApp. Se conserva el
+    # orden del SQL: el bloque "Sin proveedor" arriba y luego un bloque por
+    # proveedor en orden alfabetico.
+    grupos, indice = [], {}
+    for ped in pedidos:
+        clave = ped['proveedor_asignado'] or 'sin_proveedor'
+        if clave not in indice:
+            indice[clave] = {
+                'proveedor_id': ped['proveedor_asignado'],
                 'proveedor_nombre': ped['proveedor_nombre'] or 'Sin proveedor',
                 'proveedor_celular': ped['proveedor_celular'] or '',
                 'productos': []
             }
-        proveedores_dict[pid]['productos'].append(ped)
+            grupos.append(indice[clave])
+        indice[clave]['productos'].append(ped)
 
-    # Generar URLs de WhatsApp
-    for pid, data in proveedores_dict.items():
+    for data in grupos:
         if data['proveedor_celular']:
             lista = "\n".join([
                 f"- {p['producto_nombre']} x{p['cantidad_pedido']} (Stock actual: {p['stock_actual']})"
@@ -4196,21 +4416,108 @@ def productos_para_pedir():
         else:
             data['whatsapp_url'] = None
 
-    cur.close()
-    return render_template('productos_para_pedir.html',
-                           pedidos=pedidos,
-                           proveedores_pedidos=proveedores_dict)
+    grupos, page, total_pages = _paginar_grupos_pedidos(grupos, page)
 
-@app.route('/productos-para-pedir/eliminar/<int:id>')
-def eliminar_pedido(id):
+    return render_template('productos_para_pedir.html',
+                           grupos=grupos,
+                           pedidos=pedidos,
+                           sin_asignar=sin_asignar,
+                           filtro=filtro,
+                           umbral=STOCK_CRITICO,
+                           page=page, total_pages=total_pages,
+                           total=len(pedidos))
+
+@app.route('/productos-para-pedir/proveedor/<int:id>', methods=['POST'])
+def asignar_proveedor_pedido(id):
+    """Cambia el proveedor de un producto de la lista de Pedidos.
+
+    Solo vale un proveedor de la MISMA categoria que el producto; si no, se
+    rechaza (tambien en el servidor, por si alguien manda el POST a mano).
+    """
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return _volver_pedidos()
+
+    proveedor_id = (request.form.get('proveedor_id') or '').strip()
     cur = mysql.connection.cursor()
-    cur.execute(f"UPDATE {ALMACEN_DB}.productos_para_pedir SET estado='cancelado' WHERE id=%s", (id,))
+    cur.execute(f"""
+        SELECT pp.id, pp.producto_id, p.categoria
+        FROM {ALMACEN_DB}.productos_para_pedir pp
+        JOIN {ALMACEN_DB}.productos p ON pp.producto_id=p.id
+        WHERE pp.id=%s AND pp.estado='pendiente'
+    """, (id,))
+    pedido = cur.fetchone()
+    if not pedido:
+        cur.close()
+        flash('El pedido no existe o ya no está pendiente.', 'danger')
+        return _volver_pedidos()
+
+    if not proveedor_id:
+        cur.execute(f"UPDATE {ALMACEN_DB}.productos_para_pedir SET proveedor_id=NULL WHERE id=%s",
+                    (id,))
+        mysql.connection.commit()
+        cur.close()
+        flash('Proveedor quitado: vuelve a elegir uno.', 'warning')
+        return _volver_pedidos()
+
+    try:
+        pid = int(proveedor_id)
+    except (TypeError, ValueError):
+        cur.close()
+        flash('Proveedor no válido.', 'danger')
+        return _volver_pedidos()
+
+    cur.execute(f"SELECT nombre, celular, categoria FROM {ALMACEN_DB}.proveedores WHERE id=%s",
+                (pid,))
+    prov = cur.fetchone()
+    if not prov:
+        cur.close()
+        flash('El proveedor seleccionado no existe.', 'danger')
+        return _volver_pedidos()
+    if (prov['categoria'] or '') != (pedido['categoria'] or ''):
+        cur.close()
+        flash(f'{prov["nombre"]} es de {prov["categoria"] or "sin categoría"} y el producto '
+              f'es de {pedido["categoria"] or "sin categoría"}.', 'danger')
+        return _volver_pedidos()
+
+    cur.execute(f"UPDATE {ALMACEN_DB}.productos_para_pedir SET proveedor_id=%s WHERE id=%s",
+                (pid, id))
     mysql.connection.commit()
     cur.close()
-    flash('Pedido eliminado.', 'success')
-    return redirect('/productos-para-pedir')
+    flash(f'Proveedor asignado: {prov["nombre"]}.', 'success')
+    return _volver_pedidos()
+
+@app.route('/productos-para-pedir/quitar-proveedor/<int:id>', methods=['POST'])
+def quitar_proveedor_pedido(id):
+    """Suelta el proveedor asignado: el producto vuelve al bloque 'Sin proveedor'.
+
+    La lista de Pedidos es un registro de trabajo: aqui nada desaparece. El
+    producto sale de la lista solo cuando se repone el stock (estado 'surtido')
+    o cuando se marca enviado el pedido de su proveedor.
+    """
+    if 'rol' not in session or session['rol'] not in ['admin','administrador']:
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return _volver_pedidos()
+
+    cur = mysql.connection.cursor()
+    cur.execute(f"""
+        UPDATE {ALMACEN_DB}.productos_para_pedir
+        SET proveedor_id=NULL
+        WHERE id=%s AND estado='pendiente'
+    """, (id,))
+    if cur.rowcount != 1:
+        mysql.connection.commit()
+        cur.close()
+        flash('Ese pedido ya no está pendiente.', 'warning')
+        return _volver_pedidos()
+    mysql.connection.commit()
+    cur.close()
+    flash('Proveedor quitado: el producto volvió a "Sin proveedor".', 'success')
+    return _volver_pedidos()
 
 @app.route('/productos-para-pedir/actualizar/<int:id>', methods=['POST'])
 def actualizar_pedido(id):
@@ -4227,18 +4534,49 @@ def actualizar_pedido(id):
     mysql.connection.commit()
     cur.close()
     flash('Cantidad actualizada.', 'success')
-    return redirect('/productos-para-pedir')
+    return _volver_pedidos()
 
-@app.route('/productos-para-pedir/marcar-enviado/<int:id>')
-def marcar_enviado(id):
+@app.route('/productos-para-pedir/marcar-enviado', methods=['POST'])
+def marcar_enviado_grupo():
+    """Marca como enviados TODOS los pedidos pendientes de un proveedor.
+
+    Es el flujo real: se manda el WhatsApp del grupo y se cierra el grupo
+    entero, en vez de fila por fila.
+    """
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return _volver_pedidos()
+
+    proveedor_id = (request.form.get('proveedor_id') or '').strip()
+    if not proveedor_id.isdigit():
+        flash('Selecciona el proveedor del grupo para marcarlo como enviado.', 'danger')
+        return _volver_pedidos()
+
     cur = mysql.connection.cursor()
-    cur.execute(f"UPDATE {ALMACEN_DB}.productos_para_pedir SET estado='enviado' WHERE id=%s", (id,))
+    cur.execute(f"SELECT nombre, celular FROM {ALMACEN_DB}.proveedores WHERE id=%s",
+                (int(proveedor_id),))
+    prov = cur.fetchone()
+    if not prov:
+        cur.close()
+        flash('El proveedor no existe.', 'danger')
+        return _volver_pedidos()
+
+    cur.execute(f"""
+        UPDATE {ALMACEN_DB}.productos_para_pedir
+        SET estado='enviado'
+        WHERE estado='pendiente' AND proveedor_id=%s
+    """, (int(proveedor_id),))
+    n = cur.rowcount
     mysql.connection.commit()
     cur.close()
-    flash('Pedido marcado como enviado.', 'success')
-    return redirect('/productos-para-pedir')
+
+    if n:
+        flash(f'Pedido de {prov["nombre"]} marcado como enviado ({n} producto(s)).', 'success')
+    else:
+        flash('Ese proveedor ya no tiene productos pendientes.', 'warning')
+    return _volver_pedidos()
 
 # ─────────────────────────────────────────────
 # PRO14: INGRESOS DE PRODUCTOS (Comprobante de ingreso)
@@ -4484,6 +4822,11 @@ def registrar_ingreso():
                         f"SET stock=stock+%s, precio=%s, estado='activo' WHERE id=%s",
                         (f['cantidad'], f['precio_venta'], f['producto_id']))
 
+                # Con el stock repuesto, el pedido pendiente de estos productos
+                # se cierra solo ('surtido') si ya salieron del critico.
+                for f in filas:
+                    sincronizar_pedido_por_stock(cur, f['producto_id'])
+
                 mysql.connection.commit()
                 cur.close()
                 flash(f'Ingreso #{ingreso_id} registrado correctamente.', 'success')
@@ -4623,6 +4966,11 @@ def anular_ingreso(id):
                         (item['producto_id'],))
             faltaron += 1
         revertidos += 1
+
+    # Al descontar el stock, algun producto puede haber vuelto a critico (<= 15)
+    # y entra solo a la lista de Pedidos.
+    for item in items:
+        sincronizar_pedido_por_stock(cur, item['producto_id'])
 
     # El filtro por estado en el UPDATE corta la doble presion y las dos
     # pestanas abiertas: si otro pedido ya anulo el ingreso, esto se revierte.
@@ -5342,6 +5690,7 @@ def registrar_salida():
                 cur.execute(f"INSERT INTO {ALMACEN_DB}.detalle_salida (salida_id, producto_id, cantidad) VALUES (%s,%s,%s)",
                             (salida_id, pid, cant))
                 cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock-%s WHERE id=%s AND stock>=%s", (cant, pid, cant))
+                sincronizar_pedido_por_stock(cur, pid)
 
         mysql.connection.commit()
         cur.close()
@@ -5386,6 +5735,7 @@ def eliminar_salida(id):
     items = cur.fetchall()
     for item in items:
         cur.execute(f"UPDATE {ALMACEN_DB}.productos SET stock=stock+%s WHERE id=%s", (item['cantidad'], item['producto_id']))
+        sincronizar_pedido_por_stock(cur, item['producto_id'])
     cur.execute(f"DELETE FROM {ALMACEN_DB}.detalle_salida WHERE salida_id=%s", (id,))
     cur.execute(f"DELETE FROM {ALMACEN_DB}.salidas WHERE id=%s", (id,))
     mysql.connection.commit()
@@ -5430,14 +5780,16 @@ def verificar_inventario():
     cur = mysql.connection.cursor()
     where = "WHERE p.nombre LIKE %s"
     params = [f'%{buscar}%']
+    # Mismos tramos que /admin y que el auto-pedido (una sola fuente).
     if filtro == 'sin_stock':
         where += " AND p.stock=0 AND p.estado='activo'"
     elif filtro == 'critico':
-        where += " AND p.stock BETWEEN 1 AND 3 AND p.estado='activo'"
+        where += f" AND p.stock BETWEEN 1 AND {STOCK_CRITICO} AND p.estado='activo'"
     elif filtro == 'bajo':
-        where += " AND p.stock BETWEEN 4 AND 10 AND p.estado='activo'"
+        where += (f" AND p.stock BETWEEN {STOCK_CRITICO + 1} AND {STOCK_NORMAL - 1} "
+                  "AND p.estado='activo'")
     elif filtro == 'normal':
-        where += " AND p.stock > 10 AND p.estado='activo'"
+        where += f" AND p.stock >= {STOCK_NORMAL} AND p.estado='activo'"
     elif filtro == 'inactivos':
         where += " AND p.estado='inactivo'"
     sql_count = f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos p {where}"
@@ -5447,11 +5799,15 @@ def verificar_inventario():
 
     cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock=0")
     sin_stock = cur.fetchone()['n']
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock BETWEEN 1 AND 3")
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos "
+                f"WHERE estado='activo' AND stock BETWEEN 1 AND %s", (STOCK_CRITICO,))
     critico = cur.fetchone()['n']
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock BETWEEN 4 AND 10")
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos "
+                f"WHERE estado='activo' AND stock BETWEEN %s AND %s",
+                (STOCK_CRITICO + 1, STOCK_NORMAL - 1))
     bajo = cur.fetchone()['n']
-    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos WHERE estado='activo' AND stock > 10")
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos "
+                f"WHERE estado='activo' AND stock >= %s", (STOCK_NORMAL,))
     normal = cur.fetchone()['n']
     cur.close()
     return render_template('verificar_inventario.html',
@@ -6265,7 +6621,7 @@ def procesar_compra():
                 (item['cantidad'], item['id'], item['cantidad']))
             if cur.rowcount != 1:
                 raise _SinStock(f'Stock insuficiente para: {item["nombre"]}.')
-            verificar_stock_bajo(cur, item['id'])
+            sincronizar_pedido_por_stock(cur, item['id'])
         cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
         _carrito_invalidar(user_id)
 

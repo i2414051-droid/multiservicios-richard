@@ -74,7 +74,7 @@
         </div>
         <div class="dash-card">
             <div class="icon-box icon-stock"><i class="bi bi-exclamation-triangle"></i></div>
-            <div class="info"><h3>{{ stock_bajo }}</h3><p>Stock Bajo</p></div>
+            <div class="info"><h3>{{ stock_bajo }}</h3><p>Stock Crítico (≤ {{ STOCK_CRITICO }})</p></div>
         </div>
         <div class="dash-card">
             <div class="icon-box icon-usuarios"><i class="bi bi-people"></i></div>
@@ -196,7 +196,7 @@
         <div class="col-lg-5">
             <div class="dash-section">
                 <div class="sec-header">
-                    <h5><i class="bi bi-exclamation-triangle"></i> Stock Bajo</h5>
+                    <h5><i class="bi bi-exclamation-triangle"></i> Stock Crítico (≤ {{ STOCK_CRITICO }})</h5>
                 </div>
                 <div class="sec-body p-0">
                     {% if productos_stock_bajo %}
@@ -220,13 +220,9 @@
                                     </div>
                                 </td>
                                 <td>
-                                    {% if p.stock <= 1 %}
-                                        <span class="stock-badge stock-crit">{{ p.stock }} &#128276;</span>
-                                    {% elif p.stock <= 3 %}
-                                        <span class="stock-badge stock-crit">{{ p.stock }}</span>
-                                    {% else %}
-                                        <span class="stock-badge stock-warn">{{ p.stock }}</span>
-                                    {% endif %}
+                                    {# Toda esta lista es critica (<= umbral): el 🔔 avisa
+                                       que ya está en Productos para Pedir. #}
+                                    <span class="stock-badge stock-crit">{{ p.stock }} &#128276;</span>
                                 </td>
                                 <td><span style="color:var(--text-muted)">{{ p.categoria or '-' }}</span></td>
                             </tr>
