@@ -51,7 +51,7 @@
 
           <!-- ── CELULAR ── -->
           <div class="col-md-6">
-            <label class="form-label text-white">Celular / WhatsApp</label>
+            <label class="form-label text-white">Celular / WhatsApp *</label>
             <div class="input-group">
               <span class="input-group-text bg-success text-white border-0">
                 <i class="bi bi-whatsapp"></i>
@@ -59,7 +59,7 @@
               <input name="celular" class="form-control bg-dark text-white border-secondary"
                      value="{{ editar.celular if editar else '' }}" placeholder="Ej: 999888777"
                      inputmode="numeric" pattern="\d{9}" minlength="9" maxlength="9"
-                     oninput="soloDigitos(this, 9)">
+                     required oninput="soloDigitos(this, 9)">
             </div>
           </div>
 
@@ -73,7 +73,7 @@
                        value="{{ editar.nombres if editar and editar.tipo_documento|lower != 'ruc' else '' }}"
                        placeholder="Nombres" maxlength="120"
                        pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{2,}"
-                       title="Solo letras y espacios"
+                       title="Solo letras y espacios" required
                        {% if editar and editar.tipo_documento|lower != 'ruc' %}readonly{% endif %}
                        oninput="soloLetras(this)">
               </div>
@@ -84,7 +84,7 @@
                        value="{{ editar.apellido_paterno if editar else '' }}"
                        placeholder="Apellido paterno" maxlength="60"
                        pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{2,}"
-                       title="Solo letras y espacios"
+                       title="Solo letras y espacios" required
                        {% if editar and editar.tipo_documento|lower != 'ruc' %}readonly{% endif %}
                        oninput="soloLetras(this)">
               </div>
@@ -95,7 +95,7 @@
                        value="{{ editar.apellido_materno if editar else '' }}"
                        placeholder="Apellido materno" maxlength="60"
                        pattern="[A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{2,}"
-                       title="Solo letras y espacios"
+                       title="Solo letras y espacios" required
                        {% if editar and editar.tipo_documento|lower != 'ruc' %}readonly{% endif %}
                        oninput="soloLetras(this)">
               </div>
@@ -108,21 +108,22 @@
             <input name="razon_social" id="razon_social"
                    class="form-control bg-dark text-white border-secondary{% if editar and editar.tipo_documento|lower == 'ruc' %} campo-verificado{% endif %}"
                    value="{{ editar.nombres if editar and editar.tipo_documento|lower == 'ruc' else '' }}"
-                   placeholder="Nombre o razón social de la empresa" maxlength="120"
+                   placeholder="Nombre o razón social de la empresa" maxlength="120" required
                    {% if editar and editar.tipo_documento|lower == 'ruc' %}readonly{% endif %}>
           </div>
 
           <!-- ── DATOS COMUNES ── -->
           <div class="col-md-6">
-            <label class="form-label text-white">Dirección</label>
+            <label class="form-label text-white">Dirección *</label>
             <input name="direccion" id="direccion"
                    class="form-control bg-dark text-white border-secondary"
                    value="{{ editar.direccion if editar else '' }}" maxlength="300"
-                   placeholder="Jr. Ejemplo 123, Ciudad">
+                   placeholder="Jr. Ejemplo 123, Ciudad" required>
           </div>
           <div class="col-md-3">
             <label class="form-label text-white">Categoría que provee *</label>
             <select name="categoria" class="form-control bg-dark text-white border-secondary" required>
+              <option value="">Selecciona una categoría</option>
               {% for cat in categorias %}
               <option value="{{ cat }}"
                 {% if editar and editar.categoria == cat %}selected{% endif %}>
@@ -303,9 +304,19 @@ function soloDigitos(el, max) {
     });
   }
 
+  /* El bloque que no aplica (DNI vs RUC) se desactiva: sus campos son
+     obligatorios, y un campo required oculto frena el envio del formulario. */
+  function activarBloque(){
+    var visibles = esRuc() ? camposRuc : camposDni;
+    var ocultos  = esRuc() ? camposDni : camposRuc;
+    visibles.forEach(function(id){ var c = campo(id); if (c) c.disabled = false; });
+    ocultos.forEach(function(id){ var c = campo(id); if (c) c.disabled = true; });
+  }
+
   function pintarTipo(limpiarOtro){
     dniBox.style.display = esRuc() ? 'none' : '';
     rucBox.style.display = esRuc() ? '' : 'none';
+    activarBloque();
     num.maxLength = esperado();
     ayuda.textContent = esperado() + ' dígitos';
     num.value = num.value.replace(/\D/g, '').slice(0, esperado());

@@ -1900,7 +1900,6 @@ def login():
                 cur.execute("UPDATE intentos_usuario SET bloqueado_hasta=NULL WHERE correo=%s", (correo,))
                 mysql.connection.commit()
                 bloqueo_usuario = dict(bloqueo_usuario, bloqueado_hasta=None)
-                flash('Bloqueo vencido. Tienes un intento. Si fallas de nuevo el bloqueo sera mayor.', 'info')
 
             # Decaimiento: si la rafaga es mas vieja que su ventana, los fallos
             # anteriores dejan de contar. max_intentos conserva el pico, asi que
@@ -1910,7 +1909,6 @@ def login():
                             (correo,))
                 mysql.connection.commit()
                 bloqueo_usuario = dict(bloqueo_usuario, intentos=0, bloqueado_hasta=None)
-                flash('La rafaga de intentos anteriores caduco. Empiezas de cero.', 'info')
 
         cur.execute("SELECT * FROM usuarios WHERE correo=%s", (correo,))
         usuario = cur.fetchone()
@@ -3634,7 +3632,7 @@ def _validar_proveedor(form):
     DNI -> nombres + apellido paterno + apellido materno (los tres obligatorios).
     RUC -> razon social (una empresa no tiene apellidos).
     En ambos casos se guarda `nombre` ya armado, que es lo que muestra el resto
-    de la aplicacion.
+    de la aplicacion. Todos los campos son obligatorios salvo las notas.
     """
     tipo      = (form.get('tipo_documento') or 'dni').strip().lower()
     numero    = re.sub(r'\D', '', form.get('numero_documento') or '')
@@ -3674,8 +3672,14 @@ def _validar_proveedor(form):
         nombres = nombres[:120]
         nombre  = nombres[:200]
 
-    if celular and not re.fullmatch(r'\d{9}', celular):
+    if not celular:
+        return None, 'El celular es obligatorio.'
+    if not re.fullmatch(r'\d{9}', celular):
         return None, 'El celular debe tener exactamente 9 números (solo dígitos).'
+    if not direccion:
+        return None, 'La dirección es obligatoria.'
+    if not categoria:
+        return None, 'La categoría es obligatoria.'
 
     return {
         'tipo_documento': tipo.upper(),
@@ -3691,6 +3695,25 @@ def _validar_proveedor(form):
     }, None
 
 
+def _proveedor_duplicado(cur, datos, excluir_id=None):
+    """True si ya existe un proveedor con el mismo documento y categoria.
+
+    Un mismo proveedor puede estar en varias categorias (una fila por
+    categoria), pero no dos veces en la misma. Al editar se excluye la propia
+    fila, para que guardar sin cambiar la categoria siga funcionando.
+    """
+    sql = f"""
+        SELECT id FROM {ALMACEN_DB}.proveedores
+        WHERE tipo_documento=%s AND numero_documento=%s AND categoria=%s
+    """
+    params = [datos['tipo_documento'], datos['numero_documento'], datos['categoria']]
+    if excluir_id is not None:
+        sql += " AND id<>%s"
+        params.append(excluir_id)
+    cur.execute(sql + " LIMIT 1", tuple(params))
+    return cur.fetchone() is not None
+
+
 @app.route('/proveedores', methods=['GET','POST'])
 def proveedores():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -3703,6 +3726,9 @@ def proveedores():
         datos, error = _validar_proveedor(request.form)
         if error:
             flash(error, 'danger')
+            return redirect('/proveedores')
+        if _proveedor_duplicado(cur, datos):
+            flash('Ya hay un proveedor agregado con este nombre y categoría.', 'danger')
             return redirect('/proveedores')
         cur.execute(f"""
             INSERT INTO {ALMACEN_DB}.proveedores
@@ -3741,6 +3767,14 @@ def editar_proveedor(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
     cur = mysql.connection.cursor()
+    # Se busca primero: si el id no existe, ni el formulario ni un POST
+    # manual tienen sentido. Antes se mostraba el formulario vacio de alta.
+    cur.execute(f"SELECT * FROM {ALMACEN_DB}.proveedores WHERE id=%s", (id,))
+    p = cur.fetchone()
+    if not p:
+        cur.close()
+        flash('Proveedor no encontrado.', 'danger')
+        return redirect('/proveedores')
     if request.method == 'POST':
         if not validate_csrf():
             flash('Token CSRF inválido.', 'danger')
@@ -3748,6 +3782,16 @@ def editar_proveedor(id):
         datos, error = _validar_proveedor(request.form)
         if error:
             flash(error, 'danger')
+            return redirect(f'/proveedores/editar/{id}')
+        # Solo se bloquea si el documento o la categoria cambian a una
+        # combinacion que ya existe. Guardar sin tocar la categoria sigue
+        # funcionando aunque haya filas repetidas de antes de esta regla.
+        sin_cambio = (
+            (p['tipo_documento'] or '').upper() == datos['tipo_documento']
+            and (p['numero_documento'] or '') == datos['numero_documento']
+            and (p['categoria'] or '') == datos['categoria'])
+        if not sin_cambio and _proveedor_duplicado(cur, datos, excluir_id=id):
+            flash('Ya hay un proveedor agregado con este nombre y categoría.', 'danger')
             return redirect(f'/proveedores/editar/{id}')
         cur.execute(f"""
             UPDATE {ALMACEN_DB}.proveedores SET
@@ -3759,10 +3803,9 @@ def editar_proveedor(id):
               datos['nombres'], datos['apellido_paterno'], datos['apellido_materno'],
               datos['celular'], datos['direccion'], datos['categoria'], datos['notas'], id))
         mysql.connection.commit()
+        cur.close()
         flash('Proveedor actualizado.', 'success')
         return redirect('/proveedores')
-    cur.execute(f"SELECT * FROM {ALMACEN_DB}.proveedores WHERE id=%s", (id,))
-    p = cur.fetchone()
     cur.close()
     return render_template('proveedores.html', editar=p, categorias=CATEGORIAS,
                            proveedores=[], buscar='', cat_filtro='')
