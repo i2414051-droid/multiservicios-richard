@@ -102,7 +102,7 @@
         </table>
       </div>
     </div>
-    {{ paginacion(page, total_pages, total, '/clientes?filtro=' ~ filtro ~ '&buscar=' ~ buscar ~ '&', '') }}
+    {{ paginacion(page, total_pages, total, '/clientes?', {'filtro': filtro, 'buscar': buscar}) }}
   </div>
 </div>
 
