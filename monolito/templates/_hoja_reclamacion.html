@@ -113,22 +113,9 @@
     <div class="lr-cuerpo">{{ r.respuesta }}</div>
     <div class="lr-meta">
       <span><strong>Responsable:</strong> {{ r.respondido_por or '—' }}</span>
-      <span><strong>Fecha de respuesta:</strong> {{ r.fecha_respuesta|fechahora }}</span>
     </div>
   </div>
   {% endif %}
-
-  <!-- FIRMAS -->
-  <div class="lr-sheet__firmas">
-    <div class="lr-sheet__firma">
-      <strong>Firma del consumidor</strong>
-      Nombre: {{ r.consumidor_nombre }}
-    </div>
-    <div class="lr-sheet__firma">
-      <strong>Firma y sello del proveedor</strong>
-      {{ empresa_info.nombre }}
-    </div>
-  </div>
 
   <!-- PIE LEGAL -->
   <div class="lr-sheet__pie">

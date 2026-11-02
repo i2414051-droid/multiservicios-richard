@@ -84,9 +84,9 @@
               <span class="input-group-text"><i class="bi bi-telephone"></i></span>
               <input type="tel" class="form-control" id="consumidor_telefono" name="consumidor_telefono"
                      value="{{ valores.get('consumidor_telefono', '') }}"
-                     inputmode="numeric" maxlength="15" pattern="\d{6,15}"
+                     inputmode="numeric" maxlength="9" pattern="\d{9}"
                      placeholder="999888777"
-                     oninput="lrSoloDigitos(this, 15)">
+                     oninput="lrSoloDigitos(this, 9)">
             </div>
           </div>
           <div class="col-md-6">
@@ -94,14 +94,20 @@
             <div class="input-group">
               <span class="input-group-text"><i class="bi bi-envelope"></i></span>
               <input type="email" class="form-control" id="consumidor_correo" name="consumidor_correo"
-                     value="{{ valores.get('consumidor_correo', '') }}"
-                     maxlength="200" placeholder="tucorreo@ejemplo.com">
+                     value="{{ valores.get('consumidor_correo') or session.get('correo') or '' }}"
+                     {% if session.get('correo') %}readonly title="Correo de tu cuenta (no editable)" style="background:var(--bg-body-3);cursor:not-allowed"{% endif %}
+                     maxlength="200" placeholder="tucorreo@ejemplo.com" required>
             </div>
+            {% if session.get('correo') %}
+            <small class="form-text" style="font-size:11.5px;color:var(--text-muted)">
+              <i class="bi bi-lock-fill me-1"></i>Correo de tu cuenta (no editable).
+            </small>
+            {% endif %}
           </div>
           <div class="col-12">
             <div class="form-text" style="font-size:12px">
               <i class="bi bi-info-circle me-1"></i>
-              Es obligatorio dejar al menos un medio de contacto: teléfono o correo electrónico.
+              El correo electrónico es obligatorio (ahí llegará la respuesta). El teléfono es opcional: 9 dígitos.
             </div>
           </div>
         </div>
@@ -243,8 +249,13 @@ function lrCambiarDocumento(limpiar) {
 function lrValidarContacto() {
   const tel = document.getElementById('consumidor_telefono');
   const correo = document.getElementById('consumidor_correo');
-  if (tel && correo && !tel.value.trim() && !correo.value.trim()) {
-    alert('Ingresa al menos un medio de contacto: teléfono o correo electrónico.');
+  if (correo && !correo.value.trim()) {
+    alert('El correo electrónico es obligatorio (ahí llegará la respuesta).');
+    correo.focus();
+    return false;
+  }
+  if (tel && tel.value.trim() && !/^\d{9}$/.test(tel.value.trim())) {
+    alert('El teléfono / celular debe tener exactamente 9 dígitos.');
     tel.focus();
     return false;
   }

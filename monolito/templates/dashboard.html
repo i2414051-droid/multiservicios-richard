@@ -136,8 +136,11 @@
         <a href="/clientes" class="quick-link">
             <i class="bi bi-people"></i><span>Clientes</span>
         </a>
-        <a href="/reclamaciones" class="quick-link">
+        <a href="/reclamaciones" class="quick-link position-relative">
             <i class="bi bi-journal-text"></i><span>Reclamaciones</span>
+            {% if reclamaciones_pendientes %}
+            <span class="badge rounded-pill" style="position:absolute;top:8px;right:12px;background:#e74c3c;color:#fff;font-size:12px">{{ reclamaciones_pendientes }}</span>
+            {% endif %}
         </a>
     </div>
 

@@ -82,21 +82,6 @@
         <strong style="word-break:break-all">{{ r.consumidor_correo or '—' }}</strong>
       </div>
 
-      {% if r.consumidor_telefono or r.consumidor_correo %}
-      <div class="d-flex gap-2 mt-3 mb-4">
-        {% if r.consumidor_telefono %}
-        <a href="tel:{{ r.consumidor_telefono }}" class="btn btn-sm lr-btn-sec flex-grow-1">
-          <i class="bi bi-telephone me-1"></i> Llamar
-        </a>
-        {% endif %}
-        {% if r.consumidor_correo %}
-        <a href="mailto:{{ r.consumidor_correo }}" class="btn btn-sm lr-btn-sec flex-grow-1">
-          <i class="bi bi-envelope me-1"></i> Correo
-        </a>
-        {% endif %}
-      </div>
-      {% endif %}
-
       {% if r.estado == 'respondido' %}
       <div class="mb-3 p-3" style="background:rgba(46,204,113,.1);border:1px solid rgba(46,204,113,.35);border-radius:12px">
         <strong style="color:#2ecc71;font-size:13px"><i class="bi bi-check2-circle me-1"></i>Respuesta registrada</strong>

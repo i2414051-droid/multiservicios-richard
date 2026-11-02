@@ -4659,15 +4659,15 @@ def _validar_reclamacion(form):
         errores.append('Ingresa tu domicilio completo (mínimo 5 caracteres).')
 
     tel = datos['consumidor_telefono']
-    if tel and not re.fullmatch(r'\d{6,15}', tel):
-        errores.append('El teléfono solo debe contener números (entre 6 y 15 dígitos).')
+    if tel and not re.fullmatch(r'\d{9}', tel):
+        errores.append('El teléfono / celular debe tener exactamente 9 dígitos.')
 
     correo = datos['consumidor_correo']
-    if correo and not _RE_CORREO.match(correo):
+    if not correo:
+        errores.append('El correo electrónico es obligatorio (ahí se enviará la respuesta).')
+    elif not _RE_CORREO.match(correo):
         errores.append('El correo electrónico debe incluir @ y un dominio válido '
                        '(ejemplo@correo.com).')
-    if not tel and not correo:
-        errores.append('Ingresa al menos un teléfono o un correo electrónico de contacto.')
 
     if len(datos['bien_descripcion']) < 3:
         errores.append('Describe el producto comprado (mínimo 3 caracteres).')
@@ -4748,6 +4748,25 @@ def constancia_reclamacion(token):
         return redirect('/libro-de-reclamaciones')
     return render_template('reclamacion_constancia.html', r=r,
                            dias=_dias_para_limite(r['fecha_limite']))
+
+
+@app.route('/mis-reclamaciones')
+def mis_reclamaciones():
+    """Reclamaciones del cliente (por su correo) y las respuestas recibidas."""
+    if 'correo' not in session:
+        return redirect('/login')
+    correo = session['correo']
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT * FROM reclamaciones
+        WHERE LOWER(consumidor_correo) = LOWER(%s)
+        ORDER BY fecha DESC
+    """, (correo,))
+    items = cur.fetchall()
+    cur.close()
+    respondidas = sum(1 for r in items if r['estado'] == 'respondido')
+    return render_template('mis_reclamaciones.html', reclamaciones=items,
+                           respondidas=respondidas)
 
 
 @app.route('/reclamaciones')
@@ -4840,9 +4859,9 @@ def responder_reclamacion(id):
         return redirect('/reclamaciones')
     cur.execute("""
         UPDATE reclamaciones
-        SET respuesta=%s, respondido_por=%s, fecha_respuesta=NOW(), estado='respondido'
+        SET respuesta=%s, respondido_por=%s, fecha_respuesta=%s, estado='respondido'
         WHERE id=%s
-    """, (respuesta, responsable, id))
+    """, (respuesta, responsable, _ahora_lima(), id))
     mysql.connection.commit()
     cur.close()
     flash('Respuesta registrada. El plazo de atención queda cerrado.', 'success')
