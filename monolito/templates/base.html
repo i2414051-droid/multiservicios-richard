@@ -69,9 +69,6 @@
         <a href="/mis-entregas" class="menu-item">
           <i class="bi bi-truck"></i> Entregas
         </a>
-        <a href="/direcciones" class="menu-item">
-          <i class="bi bi-geo-alt"></i> Direcciones
-        </a>
         {% endif %}
       {% endif %}
     </div>
@@ -107,7 +104,6 @@
         <ul class="dropdown-menu dropdown-menu-end menu-cuenta" aria-labelledby="menuCuenta">
           <li><h6 class="dropdown-header">{{ usuario_nombre }}</h6></li>
           <li><a class="dropdown-item" href="/perfil"><i class="bi bi-person-vcard me-2"></i>Datos personales</a></li>
-          <li><a class="dropdown-item" href="/direcciones"><i class="bi bi-geo-alt me-2"></i>Mis direcciones</a></li>
           <li><a class="dropdown-item" href="/historial"><i class="bi bi-bag-check me-2"></i>Mis compras</a></li>
           {% if session.get('rol') in ['admin','administrador'] %}
           <li><hr class="dropdown-divider"></li>

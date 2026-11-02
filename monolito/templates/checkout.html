@@ -372,6 +372,35 @@ function actualizarEnvio(){
   window.__envio=envio;
   document.getElementById('montoEnvio').textContent=detalle;
   document.getElementById('totalConEnvio').textContent='S/ '+(SUBTOTAL+envio).toFixed(2);
+  var bt=document.getElementById('btnTotal');
+  if(bt) bt.textContent='S/ '+(SUBTOTAL+envio).toFixed(2);
+  // Sidebar "Productos": línea de envío (solo si Delivery está seleccionado) + TOTAL.
+  var fe=document.getElementById('filaEnvioSidebar');
+  var es=document.getElementById('envioSidebar');
+  if(fe && es){
+    if(tipo === 'delivery'){
+      fe.style.display='';
+      es.textContent = envio > 0 ? '+ S/ '+envio.toFixed(2) : 'Gratis';
+    } else {
+      fe.style.display='none';
+    }
+  }
+  var ts=document.getElementById('totalSidebar');
+  if(ts) ts.textContent='S/ '+(SUBTOTAL+envio).toFixed(2);
+}
+
+/* Monto que cobra Culqi: productos + envío si corresponde (delivery/recojo).
+   Se recalcula antes de abrir el checkout para reflejar la selección actual. */
+function configurarCulqi(){
+  if(!window.Culqi) return;
+  Culqi.settings({
+    title:'Multiservicios Richard',
+    currency:'{{ culqi_currency or "PEN" }}',
+    amount: Math.round((SUBTOTAL + (window.__envio || 0)) * 100),
+    order:'',
+    xculqirsaid:'{{ culqi_rsa_id or "" }}',
+    rsapublickey:'{{ culqi_rsa_public_key or "" }}'
+  });
 }
 
 /* Dirección escrita -> ya no existe: el campo es de solo lectura y la
@@ -448,9 +477,13 @@ document.addEventListener('DOMContentLoaded', function(){
                 <span style="color:#27ae60;font-weight:700">S/ {{ "%.2f"|format(item.precio|float * item.cantidad|int) }}</span>
               </div>
               {% endfor %}
+              <div class="mt-3 d-flex justify-content-between align-items-center" id="filaEnvioSidebar" style="display:none">
+                <span style="color:var(--text-muted)"><i class="bi bi-truck me-1" style="color:#f39c12"></i>Envío delivery</span>
+                <span id="envioSidebar" style="color:#f39c12;font-weight:700">+ S/ 0.00</span>
+              </div>
               <div class="mt-3 d-flex justify-content-between align-items-center">
                 <span style="color:var(--text-primary);font-size:1.2em;font-weight:700">TOTAL</span>
-                <span style="color:#27ae60;font-size:1.4em;font-weight:800">S/ {{ "%.2f"|format(total) }}</span>
+                <span id="totalSidebar" style="color:#27ae60;font-size:1.4em;font-weight:800">S/ {{ "%.2f"|format(total) }}</span>
               </div>
             </div>
           </div>
@@ -473,7 +506,7 @@ document.addEventListener('DOMContentLoaded', function(){
                 <label for="confirmarDatos" style="color:var(--text-primary);cursor:pointer;user-select:none">Confirmo que todos los datos son correctos</label>
               </div>
               <button type="button" class="btn btn-success btn-lg fw-bold w-100 mt-3" id="btnComprar" style="border-radius:15px;display:none" disabled onclick="confirmarCompra()">
-                <i class="bi bi-check-circle me-1"></i> Confirmar compra — S/ {{ "%.2f"|format(total) }}
+                <i class="bi bi-check-circle me-1"></i> Confirmar compra — <span id="btnTotal">S/ {{ "%.2f"|format(total) }}</span>
               </button>
             </div>
           </div>
@@ -868,6 +901,7 @@ window.confirmarCompra=function(){
     setOverlay(true,'Abriendo formulario de pago...');
     iniciarTemporizadorCulqi();
     vigilarCierreCulqi();
+    configurarCulqi(); // monto actual: productos + envío (según delivery/recojo)
     try{ Culqi.open(); }catch(e){
       console.error('CULQI OPEN ERROR', e);
       detenerTemporizadorCulqi();
@@ -1058,14 +1092,7 @@ function initCulqiCheckout(){
   }
   try{
     Culqi.publicKey=pk;
-    Culqi.settings({
-      title:'Multiservicios Richard',
-      currency:'{{ culqi_currency or "PEN" }}',
-      amount:Math.round(parseFloat('{{ "%.2f"|format(total|float) }}')*100),
-      order:'',
-      xculqirsaid:'{{ culqi_rsa_id or "" }}',
-      rsapublickey:'{{ culqi_rsa_public_key or "" }}'
-    });
+    configurarCulqi();
     Culqi.options({
       lang:'es',
       installments:false,

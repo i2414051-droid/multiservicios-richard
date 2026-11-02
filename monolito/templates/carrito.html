@@ -99,22 +99,6 @@
     <div id="aviso-carrito" class="alert alert-warning mt-3 mb-0"
          style="display:none;" role="status" aria-live="polite"></div>
 
-    <script>
-      // Total a pagar = productos + delivery (S/ 15) cuando el subtotal está
-      // entre el mínimo (S/ 50) y el umbral de gratis (S/ 300); fuera de ese
-      // rango no suma. El checkout repite la misma lógica.
-      window.__cartMin = {{ delivery_minimo }};
-      window.__cartTarifa = {{ envio_delivery }};
-      window.__cartGratis = {{ envio_gratis_desde }};
-      function totalAPagar(productos){
-        var envio = 0;
-        if (productos >= window.__cartMin && (window.__cartGratis <= 0 || productos < window.__cartGratis)) {
-          envio = window.__cartTarifa;
-        }
-        return productos + envio;
-      }
-    </script>
-
     <div class="text-end mt-4">
         <a href="/checkout" class="btn btn-lg shadow-sm text-white fw-bold custom-btn-buy"
            data-sin-carga data-sin-bloqueo>
@@ -288,8 +272,7 @@ document.addEventListener('DOMContentLoaded', function () {
       var celda = document.getElementById('sub-' + id);
       if (celda) celda.textContent = 'S/. ' + sub.toFixed(2);
     });
-    document.getElementById('total-carrito').textContent =
-      'S/. ' + (typeof totalAPagar === 'function' ? totalAPagar(total) : total).toFixed(2);
+    document.getElementById('total-carrito').textContent = 'S/. ' + total.toFixed(2);
   }
 
   // El boton '+' se apaga cuando la cantidad llego al tope del producto
@@ -389,8 +372,7 @@ document.addEventListener('DOMContentLoaded', function () {
       }
 
       // 3) Actualizar total global
-      document.getElementById('total-carrito').textContent =
-        'S/. ' + (typeof totalAPagar === 'function' ? totalAPagar(d.total) : d.total).toFixed(2);
+      document.getElementById('total-carrito').textContent = 'S/. ' + d.total.toFixed(2);
 
       // 4) Quitar de "Otros productos disponibles"
       if (btn) {

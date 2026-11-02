@@ -27,21 +27,6 @@
                        oninput="this.value=this.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]/g,'')"
                        value="{{ usuario.apellido or '' }}">
               </div>
-              <div class="col-md-4">
-                <label class="form-label" style="color:var(--text-muted)">Tipo de documento</label>
-                <select class="form-select bg-dark text-white border-0" name="documento_tipo" id="docTipo">
-                  <option value="">—</option>
-                  <option value="dni" {% if usuario.documento_tipo == 'dni' %}selected{% endif %}>DNI</option>
-                  <option value="ruc" {% if usuario.documento_tipo == 'ruc' %}selected{% endif %}>RUC</option>
-                </select>
-              </div>
-              <div class="col-md-8">
-                <label class="form-label" style="color:var(--text-muted)">N° documento</label>
-                <input type="text" class="form-control bg-dark text-white border-0" name="documento_numero"
-                       id="docNumero" inputmode="numeric" title="Solo números"
-                       oninput="cleanDoc(this)"
-                       value="{{ usuario.documento_numero or '' }}">
-              </div>
             </div>
 
             <div class="mt-3 d-flex align-items-center gap-2 flex-wrap">
@@ -149,13 +134,6 @@
                 <i class="bi bi-truck me-1"></i>Ver mis entregas
               </a>
             </div>
-            <form method="POST" action="/perfil/solicitar-revision" class="mt-2">
-              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-              <div class="input-group input-group-sm">
-                <input type="text" name="motivo" class="form-control bg-dark text-white border-0" placeholder="Motivo de revisión (opcional)">
-                <button class="btn btn-outline-warning fw-bold" type="submit"><i class="bi bi-send me-1"></i>Solicitar revisión</button>
-              </div>
-            </form>
             {% if mi_historial %}
             <div class="mt-3">
               <small style="color:var(--text-muted);font-weight:700">Últimos cambios</small>

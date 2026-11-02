@@ -1769,7 +1769,7 @@ class _SinStock(Exception):
 def generar_boleta_pdf(venta_id):
     """Genera PDF en memoria y lo devuelve como bytes."""
     cur = mysql.connection.cursor()
-    cur.execute("SELECT documento, doc_tipo, nombre, apellido, total, fecha FROM ventas WHERE id=%s", (venta_id,))
+    cur.execute("SELECT documento, doc_tipo, nombre, apellido, total, costo_envio, fecha FROM ventas WHERE id=%s", (venta_id,))
     venta = cur.fetchone()
     if not venta:
         return None, None
@@ -1782,7 +1782,8 @@ def generar_boleta_pdf(venta_id):
     productos = cur.fetchall()
     cur.close()
 
-    total = sum(p['cantidad'] * p['precio'] for p in productos)
+    total = float(venta['total'] or 0)  # total real: productos + envío (si delivery)
+    costo_envio = float(venta['costo_envio'] or 0)
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf)
@@ -1805,6 +1806,8 @@ def generar_boleta_pdf(venta_id):
     for p in productos:
         sub = p['cantidad'] * p['precio']
         data.append([p['nombre'], p['cantidad'], f"S/ {p['precio']:.2f}", f"S/ {sub:.2f}"])
+    if costo_envio > 0:
+        data.append(["", "", "Envío", f"S/ {costo_envio:.2f}"])
     data.append(["","","TOTAL", f"S/ {total:.2f}"])
 
     t = Table(data, colWidths=[200,60,80,80])
@@ -3315,19 +3318,13 @@ def ver_carrito():
         """)
     sugeridos = cur.fetchall()
     cur.close()
-    # Total a pagar en el carrito: suma el delivery (S/ 15) cuando el subtotal
-    # está entre el mínimo y el umbral de gratis; fuera de ese rango no suma.
-    # El checkout repite la misma lógica para que coincidan.
-    sub = float(total or 0)
-    d_min = ajuste_float('delivery_minimo', 50)
-    d_tarifa = ajuste_float('envio_delivery', 15)
-    d_gratis = ajuste_float('envio_gratis_desde', 300)
-    envio_monto = 0.0
-    if d_min <= sub and (d_gratis <= 0 or sub < d_gratis):
-        envio_monto = d_tarifa
+    # El envío se calcula y suma en checkout (no en el carrito); aquí solo se
+    # muestran las reglas como información.
     return render_template('carrito.html', productos=productos, total=total, sugeridos=sugeridos,
-                           envio_delivery=d_tarifa, envio_gratis_desde=d_gratis,
-                           delivery_minimo=d_min, total_pagar=round(sub + envio_monto, 2))
+                           envio_delivery=ajuste_float('envio_delivery', 15),
+                           envio_gratis_desde=ajuste_float('envio_gratis_desde', 300),
+                           delivery_minimo=ajuste_float('delivery_minimo', 50),
+                           total_pagar=float(total or 0))
 
 
 # Tope de unidades por linea de carrito. Si el stock es menor, manda el stock:
