@@ -40,7 +40,8 @@
   is-critico, is-sin-datos.
 #}
 {% macro tarjeta(kpi) %}
-  <div class="kpi-biz-card {{ kpi.semaforo|default('is-sin-datos') }}">
+  {% set _sem = (kpi.semaforo|default('sin_datos'))|replace('_', '-') %}
+  <div class="kpi-biz-card {{ _sem if _sem.startswith('is-') else 'is-' ~ _sem }}">
     <div class="kpi-biz-cab"><i class="bi {{ kpi.icono|default('bi-graph-up') }}"></i>{{ kpi.titulo }}</div>
     <div class="kpi-biz-valor" data-kpi-valor>
       {% if kpi.valor is none %}

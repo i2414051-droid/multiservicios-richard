@@ -64,6 +64,10 @@ UMBRALES = {
     'frecuencia_compra':         {'sube': True,  'ok': 60.0, 'aviso': 40.0},
 
     # 2. Gestion de Almacen e Inventario
+    'productos_mas_vendidos':    {'sube': True,  'ok': None, 'aviso': None},
+    'proveedores_disponibles':   {'sube': True,  'ok': None, 'aviso': None},
+    'productos_no_vendidos':     {'sube': False, 'ok': 10.0, 'aviso': 25.0},
+    'productos_activos':         {'sube': True,  'ok': None, 'aviso': None},
     'quiebre_repuestos':         {'sube': False, 'ok': 5.0,  'aviso': 15.0},
     'doh_accesorios':            {'sube': False, 'ok': 30.0, 'aviso': 60.0},
     'doh_repuestos':             {'sube': False, 'ok': 30.0, 'aviso': 60.0},

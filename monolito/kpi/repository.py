@@ -347,13 +347,74 @@ def fetch_compras_por_cliente(desde, hasta):
 # 2. GESTION DE ALMACEN E INVENTARIO
 # ─────────────────────────────────────────────
 _UNIDADES_VENDIDAS_SUB = """
-    SELECT dv.producto_id AS pid, SUM(dv.cantidad) AS unidades
+    SELECT dv.producto_id AS pid, SUM(dv.cantidad) AS unidades,
+           COALESCE(SUM(dv.cantidad * dv.precio), 0) AS monto
     FROM detalle_venta dv
     JOIN ventas v ON v.id = dv.venta_id
     WHERE v.fecha >= %s AND v.fecha < %s
       AND COALESCE(v.estado,'') <> 'cancelado'
+      AND COALESCE(v.oculta,0) = 0
     GROUP BY dv.producto_id
 """
+
+
+def fetch_catalogo_ventas(desde, hasta):
+    """
+    Catalogo completo con las unidades y el monto vendidos en el periodo.
+
+    Es la base de las tarjetas de productos mas vendidos y productos sin
+    ventas. La venta oculta se descarta igual que en el historial y en el
+    reporte del dashboard: un pedido oculto no debe mover los KPI publicos.
+    """
+    almacen = almacen_db()
+    cur = get_cursor()
+    try:
+        cur.execute(
+            f"""SELECT p.id AS id, p.nombre AS nombre,
+                       p.categoria AS categoria,
+                       COALESCE(p.stock,0) AS stock,
+                       COALESCE(p.estado,'activo') AS estado,
+                       COALESCE(s.unidades,0) AS unidades,
+                       COALESCE(s.monto,0) AS monto
+                FROM {almacen}.productos p
+                LEFT JOIN ({_UNIDADES_VENDIDAS_SUB}) s ON s.pid = p.id""",
+            (desde, hasta),
+        )
+        return [{
+            'id': _i(row['id']),
+            'nombre': (row['nombre'] or '').strip(),
+            'categoria': (row['categoria'] or '').strip(),
+            'stock': _i(row['stock']),
+            'estado': (row['estado'] or 'activo').strip().lower(),
+            'unidades': _i(row['unidades']),
+            'monto': _f(row['monto']),
+        } for row in cur.fetchall()]
+    finally:
+        cur.close()
+
+
+def fetch_proveedores():
+    """Proveedores registrados, con su categoria y celular.
+
+    En esta base no existe un estado de disponibilidad: un proveedor
+    registrado es, para el panel, un proveedor disponible.
+    """
+    almacen = almacen_db()
+    cur = get_cursor()
+    try:
+        cur.execute(
+            f"""SELECT id, nombre, categoria, celular
+                FROM {almacen}.proveedores
+                ORDER BY categoria, nombre"""
+        )
+        return [{
+            'id': _i(row['id']),
+            'nombre': (row['nombre'] or '').strip(),
+            'categoria': (row['categoria'] or '').strip(),
+            'celular': (row['celular'] or '').strip(),
+        } for row in cur.fetchall()]
+    finally:
+        cur.close()
 
 
 def fetch_repuestos_demanda(desde, hasta, categorias=None):
@@ -641,6 +702,7 @@ def fetch_snapshot(desde, hasta, prev_desde, prev_hasta, dias):
     dias = max(1, int(dias))
     salida = {
         'categorias': productos['categorias'],
+        'catalogo': productos.get('catalogo') or [],
         'ahora': escalares['ahora'],
         # El inventario es una foto del momento, no un dato del periodo.
         'inventario': productos.get('resumen') or {},
@@ -858,20 +920,28 @@ def _productos_dos_periodos(desde, hasta, prev_desde, prev_hasta):
                        COALESCE(p.stock,0) AS stock,
                        COALESCE(p.estado,'activo') AS estado,
                        COALESCE(s.u_actual,0) AS u_actual,
-                       COALESCE(s.u_anterior,0) AS u_anterior
+                       COALESCE(s.m_actual,0) AS m_actual,
+                       COALESCE(s.u_anterior,0) AS u_anterior,
+                       COALESCE(s.m_anterior,0) AS m_anterior
                 FROM {almacen}.productos p
                 LEFT JOIN (
                     SELECT dv.producto_id AS pid,
                            SUM(CASE WHEN v.fecha >= %s AND v.fecha < %s
                                     THEN dv.cantidad ELSE 0 END) AS u_actual,
                            SUM(CASE WHEN v.fecha >= %s AND v.fecha < %s
-                                    THEN dv.cantidad ELSE 0 END) AS u_anterior
+                                    THEN dv.cantidad * dv.precio ELSE 0 END) AS m_actual,
+                           SUM(CASE WHEN v.fecha >= %s AND v.fecha < %s
+                                    THEN dv.cantidad ELSE 0 END) AS u_anterior,
+                           SUM(CASE WHEN v.fecha >= %s AND v.fecha < %s
+                                    THEN dv.cantidad * dv.precio ELSE 0 END) AS m_anterior
                     FROM detalle_venta dv
                     JOIN ventas v ON v.id = dv.venta_id
                     WHERE COALESCE(v.estado,'') <> 'cancelado'
+                      AND COALESCE(v.oculta,0) = 0
                     GROUP BY dv.producto_id
                 ) s ON s.pid = p.id""",
-            (desde, hasta, prev_desde, prev_hasta),
+            (desde, hasta, desde, hasta,
+             prev_desde, prev_hasta, prev_desde, prev_hasta),
         )
         filas = cur.fetchall()
     finally:
@@ -882,20 +952,33 @@ def _productos_dos_periodos(desde, hasta, prev_desde, prev_hasta):
     doh_cfg = tuple(settings.CATEGORIA_ACCESORIOS + settings.CATEGORIA_REPUESTOS)
 
     categorias = sorted({(r['categoria'] or '').strip() for r in filas})
+    catalogo = []
     salida = {
         'categorias': categorias,
+        'catalogo': catalogo,
         'actual': {'repuestos': [], 'doh': {
             c: {'stock': 0, 'unidades': 0, 'existe': False} for c in doh_cfg}},
         'anterior': {'repuestos': [], 'doh': {
             c: {'stock': 0, 'unidades': 0, 'existe': False} for c in doh_cfg}},
     }
-    for clave, campo in (('actual', 'u_actual'), ('anterior', 'u_anterior')):
+    for clave, campo, campo_monto in (('actual', 'u_actual', 'm_actual'),
+                                      ('anterior', 'u_anterior', 'm_anterior')):
         repuestos = salida[clave]['repuestos']
         doh = salida[clave]['doh']
         for r in filas:
             categoria = (r['categoria'] or '')
-            activo = r['estado'] == 'activo'
+            activo = (r['estado'] or '').strip().lower() == 'activo'
             unidades = _i(r[campo])
+            if clave == 'actual':
+                catalogo.append({
+                    'id': _i(r['id']),
+                    'nombre': (r['nombre'] or '').strip(),
+                    'categoria': categoria.strip(),
+                    'stock': _i(r['stock']),
+                    'estado': (r['estado'] or 'activo').strip().lower(),
+                    'unidades': unidades,
+                    'monto': _f(r[campo_monto]),
+                })
             if activo and categoria.casefold() in repuestos_ci:
                 repuestos.append({
                     'id': _i(r['id']),

@@ -41,6 +41,61 @@
 .estado-espera{background:rgba(241,196,15,.15);color:#f1c40f}
 .estado-cancelado{background:rgba(255,77,77,.15);color:#ff4d4d}
 .empty-msg{text-align:center;color:var(--text-muted);padding:30px;font-size:14px}
+
+/* ── Reporte circular en tiempo real ── */
+.graf-controles{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;margin-bottom:20px}
+.graf-chips{display:flex;gap:6px;flex-wrap:wrap}
+.graf-chip{background:transparent;border:1px solid var(--border-card);color:var(--text-muted);border-radius:20px;padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;transition:background .2s,border-color .2s,color .2s}
+.graf-chip:hover{border-color:#f39c12;color:#f39c12}
+.graf-chip.activo{background:rgba(243,156,18,.15);border-color:#f39c12;color:#f39c12}
+.graf-derecha{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.graf-derecha .form-select{width:auto;min-width:190px;background-color:var(--bg-card);color:var(--text-primary);border-color:var(--border-card)}
+.graf-refrescar{border:1px solid var(--border-card);color:var(--text-muted);border-radius:10px}
+.graf-refrescar:hover{border-color:#f39c12;color:#f39c12}
+.graf-lienzo{position:relative;height:300px}
+.graf-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:16px}
+.graf-kpi{background:rgba(243,156,18,.06);border:1px solid var(--border-subtle);border-radius:12px;padding:10px 14px}
+.graf-kpi span{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)}
+.graf-kpi strong{font-size:19px;color:var(--text-primary)}
+.graf-leyenda{display:flex;flex-direction:column;gap:4px}
+.graf-item{display:flex;align-items:center;gap:10px;background:transparent;border:0;border-radius:10px;padding:7px 10px;text-align:left;color:var(--text-secondary);font-size:14px;cursor:pointer;transition:background .2s}
+.graf-item:hover{background:rgba(243,156,18,.08)}
+.graf-punto{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.graf-item .nombre{flex:1}
+.graf-item .valor{font-weight:700;color:var(--text-primary)}
+.graf-item .pct{color:var(--text-muted);font-size:12px;min-width:46px;text-align:right}
+.graf-actualizado{font-size:12px;color:var(--text-muted)}
+.graf-error{color:#ff4d4d;font-size:13px;margin:10px 0 0}
+.graf-vacio{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:14px;pointer-events:none}
+.graf-extra{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:18px}
+.graf-extra-card{border:1px solid var(--border-subtle);border-radius:12px;padding:14px 16px;background:rgba(243,156,18,.04)}
+.graf-extra-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+.graf-extra-head h6{margin:0;font-size:13px;font-weight:700;color:var(--text-primary);text-transform:uppercase;letter-spacing:.4px}
+.graf-extra-head h6 i{color:#f39c12}
+.graf-ver{font-size:12px;color:#f39c12;text-decoration:none;font-weight:600}
+.graf-ver:hover{text-decoration:underline}
+.graf-pagos-extremos{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.graf-extremo{display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:1px solid var(--border-subtle);border-radius:10px;background:transparent;padding:8px 10px;text-align:left;color:var(--text-muted);cursor:pointer;transition:border-color .2s}
+.graf-extremo:hover:enabled{border-color:#f39c12}
+.graf-extremo:disabled{cursor:default;opacity:.7}
+.graf-extremo span{font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+.graf-extremo strong{font-size:16px;color:var(--text-primary)}
+.graf-extremo small{font-size:11px;color:var(--text-muted)}
+.graf-pagos{display:flex;flex-direction:column;gap:7px}
+.graf-pago-fila{display:grid;grid-template-columns:92px 1fr 62px;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary)}
+.graf-pago-barra{height:7px;border-radius:4px;background:rgba(128,128,128,.18);overflow:hidden}
+.graf-pago-barra span{display:block;height:100%;border-radius:4px;background:#f39c12}
+.graf-pago-fila b{text-align:right;color:var(--text-primary);font-size:12px}
+.graf-reclamos{display:flex;align-items:baseline;gap:8px;margin:2px 0 10px}
+.graf-reclamos strong{font-size:30px;line-height:1;color:var(--text-primary)}
+.graf-reclamos span{font-size:12px;color:var(--text-muted)}
+.graf-reclamos-chips{display:flex;flex-wrap:wrap;gap:6px}
+.graf-reclamo-chip{font-size:11px;padding:4px 9px;border-radius:20px;border:1px solid var(--border-subtle);color:var(--text-muted)}
+.graf-reclamo-chip b{color:var(--text-primary)}
+.graf-reclamo-chip.pendiente{border-color:rgba(241,196,15,.55)}
+.graf-reclamo-chip.vencida{border-color:rgba(231,76,60,.55);color:#e74c3c}
+.graf-reclamo-chip.vencida b{color:#e74c3c}
+.graf-reclamo-chip.respondida{border-color:rgba(0,200,83,.55)}
 </style>
 
 <div class="container-fluid px-4">
@@ -95,6 +150,103 @@
         <div class="dash-card">
             <div class="icon-box icon-reclamaciones"><i class="bi bi-journal-text"></i></div>
             <div class="info"><h3>{{ reclamaciones_pendientes }}</h3><p>Reclamaciones Pendientes</p></div>
+        </div>
+    </div>
+
+    <!-- REPORTE CIRCULAR EN TIEMPO REAL -->
+    <div class="dash-section" id="graficoVentas"
+         data-url="{{ url_for('dashboard_grafico') }}">
+        <div class="sec-header">
+            <h5><i class="bi bi-pie-chart"></i> Reporte de ventas en tiempo real</h5>
+            <span class="graf-actualizado" id="grafActualizado">Cargando…</span>
+        </div>
+        <div class="sec-body">
+            <div class="graf-controles">
+                <div class="graf-chips" role="group" aria-label="Periodo del reporte">
+                    <button type="button" class="graf-chip" data-graf-rango="hoy">Hoy</button>
+                    <button type="button" class="graf-chip" data-graf-rango="7d">7 días</button>
+                    <button type="button" class="graf-chip activo" data-graf-rango="30d">30 días</button>
+                    <button type="button" class="graf-chip" data-graf-rango="mes">Este mes</button>
+                    <button type="button" class="graf-chip" data-graf-rango="todo">Todo</button>
+                </div>
+                <div class="graf-derecha">
+                    <select id="grafPor" class="form-select form-select-sm" aria-label="Agrupar el gráfico por">
+                        <option value="estado">Estado del pedido</option>
+                        <option value="motivo">Motivo de cancelación</option>
+                        <option value="pago">Método de pago</option>
+                        <option value="entrega">Tipo de entrega</option>
+                        <option value="distrito">Distrito</option>
+                        <option value="categoria">Categoría de producto</option>
+                    </select>
+                    <div class="graf-chips" role="group" aria-label="Medida del gráfico">
+                        <button type="button" class="graf-chip activo" data-graf-medida="pedidos">Pedidos</button>
+                        <button type="button" class="graf-chip" data-graf-medida="soles">Soles</button>
+                    </div>
+                    <button type="button" class="btn btn-sm graf-refrescar" id="grafRefrescar"
+                            title="Actualizar ahora" aria-label="Actualizar ahora">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="row align-items-center g-4">
+                <div class="col-lg-5">
+                    <div class="graf-lienzo">
+                        <canvas id="lienzoGraficoVentas" aria-label="Gráfico circular de ventas" role="img"></canvas>
+                        <div class="graf-vacio" id="grafVacio" hidden>Sin datos en este periodo</div>
+                    </div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="graf-kpis">
+                        <div class="graf-kpi"><span>Pedidos</span><strong id="grafKpiTotal">—</strong></div>
+                        <div class="graf-kpi"><span>Monto</span><strong id="grafKpiMonto">—</strong></div>
+                        <div class="graf-kpi"><span>Ticket promedio</span><strong id="grafKpiTicket">—</strong></div>
+                        <div class="graf-kpi"><span>% cancelación</span><strong id="grafKpiCancel">—</strong></div>
+                    </div>
+                    <div class="graf-leyenda" id="grafLeyenda"></div>
+                    <p class="graf-error" id="grafError" hidden>
+                        No se pudo cargar el reporte. Se reintentará en el próximo refresco.
+                    </p>
+                </div>
+            </div>
+
+            <!-- MÉTODOS DE PAGO Y RECLAMACIONES DEL PERIODO -->
+            <div class="graf-extra">
+                <div class="graf-extra-card">
+                    <div class="graf-extra-head">
+                        <h6><i class="bi bi-credit-card"></i> Métodos de pago</h6>
+                        <span class="graf-actualizado">Compras del periodo</span>
+                    </div>
+                    <div class="graf-pagos-extremos">
+                        <button type="button" class="graf-extremo" id="grafPagoTopCaja">
+                            <span>Más usado</span>
+                            <strong id="grafPagoTop">—</strong>
+                            <small id="grafPagoTopDetalle">Sin ventas en el periodo</small>
+                        </button>
+                        <button type="button" class="graf-extremo" id="grafPagoBajoCaja">
+                            <span>Menos usado</span>
+                            <strong id="grafPagoBajo">—</strong>
+                            <small id="grafPagoBajoDetalle">Sin ventas en el periodo</small>
+                        </button>
+                    </div>
+                    <div class="graf-pagos" id="grafPagos"></div>
+                </div>
+                <div class="graf-extra-card">
+                    <div class="graf-extra-head">
+                        <h6><i class="bi bi-journal-text"></i> Reclamaciones</h6>
+                        <a href="/reclamaciones" class="graf-ver">Ver bandeja</a>
+                    </div>
+                    <div class="graf-reclamos">
+                        <strong id="grafReclamosTotal">—</strong>
+                        <span>reclamaciones en el periodo</span>
+                    </div>
+                    <div class="graf-reclamos-chips">
+                        <span class="graf-reclamo-chip pendiente"><b id="grafReclamosPendientes">0</b> pendientes</span>
+                        <span class="graf-reclamo-chip vencida"><b id="grafReclamosVencidas">0</b> vencidas</span>
+                        <span class="graf-reclamo-chip respondida"><b id="grafReclamosRespondidas">0</b> respondidas</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -239,4 +391,9 @@
     </div>
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard-grafico.js') }}"></script>
 {% endblock %}
