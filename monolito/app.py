@@ -2480,6 +2480,11 @@ def registro():
         h = bcrypt.generate_password_hash(password).decode('utf-8')
         cur.execute("INSERT INTO usuarios (correo, password, rol, documento_tipo, documento_numero, nombre, apellido, telefono) VALUES (%s,%s,'cliente',%s,%s,%s,%s,%s)",
                     (correo, h, documento_tipo, documento_numero, nombres, apellidos, telefono))
+        # Cuenta recién creada: nunca debe heredar productos. `carrito.usuario_id`
+        # es un VARCHAR y en datos antiguos había filas con números sueltos; si el
+        # id nuevo chocara con alguna de esas, el contador mostraría carrito ajeno.
+        nuevo_id = cur.lastrowid
+        cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (str(nuevo_id),))
         mysql.connection.commit()
         flash('¡Registro exitoso! Ya puedes iniciar sesión.', 'success')
         return redirect('/login')
@@ -3535,13 +3540,203 @@ def historial_compras():
         conteo_motivos = {r['motivo_codigo']: r['n'] for r in cur.fetchall()}
     except Exception:
         conteo_motivos = {}
+    # Datos del selector de periodo del PDF (mismos que usa /ingresos).
+    anios = _anios_ventas(cur)
+    periodos = _mapa_periodos_ventas(cur)
     cur.close()
     return render_template('historial_compras_admin.html', historial=historial, buscar=buscar,
                            motivo_filtro=motivo_filtro, conteo_motivos=conteo_motivos,
                            mostrar_ocultas=mostrar_ocultas, n_ocultas=n_ocultas,
                            gran_total=gran_total, monto_en_espera=monto_en_espera,
                            page=page, total_pages=total_pages,
-                           total=total, has_prev=page > 1, has_next=page < total_pages)
+                           total=total, has_prev=page > 1, has_next=page < total_pages,
+                           meses=MESES_ES, anios=anios, periodos=periodos,
+                           mes_actual=_ahora_lima().month,
+                           anio_actual=_ahora_lima().year,
+                           dia_actual=_ahora_lima().day)
+
+
+def _anios_ventas(cur):
+    """Años que ofrece el selector de PDF de historial: del actual al de la primera venta."""
+    actual = _ahora_lima().year
+    cur.execute("SELECT MIN(YEAR(fecha)) AS minimo FROM ventas")
+    fila = cur.fetchone()
+    minimo = int((fila or {}).get('minimo') or actual)
+    minimo = min(minimo, actual)
+    return list(range(actual, minimo - 1, -1))
+
+
+def _mapa_periodos_ventas(cur):
+    """Ventas existentes por año, mes y semana, para el selector de PDF.
+
+    Mismo formato que `_mapa_periodos_ingresos`: {anio: {'meses': {mes: n},
+    'semanas': {mes: [n,...]}}}. Las semanas se numeran igual que en el PDF
+    (lunes a domingo recortadas al mes).
+    """
+    cur.execute("SELECT DATE(fecha) AS dia FROM ventas")
+    mapa = {}
+    for fila in cur.fetchall():
+        dia = fila['dia']
+        if not dia:
+            continue
+        dia = dia.date() if isinstance(dia, datetime) else dia
+        anio, mes = dia.year, dia.month
+        datos = mapa.setdefault(str(anio), {'meses': {}, 'semanas': {}})
+        datos['meses'][str(mes)] = datos['meses'].get(str(mes), 0) + 1
+        bloques = _bloques_semana_mes(anio, mes)
+        for indice, (desde, hasta) in enumerate(bloques):
+            if desde <= dia <= hasta:
+                cuenta = datos['semanas'].setdefault(str(mes), [0] * len(bloques))
+                cuenta[indice] += 1
+                break
+    return mapa
+
+
+@app.route('/historial-compras/pdf')
+def historial_compras_pdf():
+    """PDF de los registros del historial de compras (respeta los filtros de la vista).
+
+    Misma mecánica que el export de ingresos: ReportLab + `_pdf_*`, resumen con una
+    fila por venta y detalle de productos por venta.
+    """
+    if not _es_admin():
+        return redirect('/login')
+    # Periodo (mes o semana del mes), con la misma lógica que /ingresos/pdf.
+    periodo = (request.args.get('periodo') or 'mes').strip().lower()
+    if periodo != 'semana':
+        periodo = 'mes'
+    buscar = request.args.get('buscar', '')
+    motivo_filtro = request.args.get('motivo', '').strip()
+    mostrar_ocultas = request.args.get('ocultas', '0') == '1'
+
+    hoy = _ahora_lima().date()
+    anio_raw = (request.args.get('anio') or '').strip()
+    mes_raw = (request.args.get('mes') or '').strip()
+    semana_raw = (request.args.get('semana') or '').strip()
+    invalido = 'El periodo seleccionado no es válido.'
+    referencia, numero = None, None
+    if anio_raw or mes_raw:
+        try:
+            anio = int(anio_raw or hoy.year)
+            mes = int(mes_raw or hoy.month)
+            if not (1 <= mes <= 12 and 1900 <= anio <= 9999):
+                raise ValueError
+            referencia = date(anio, mes, 1)
+        except ValueError:
+            flash(invalido, 'danger')
+            return redirect('/historial-compras')
+    if semana_raw:
+        try:
+            numero = int(semana_raw)
+        except ValueError:
+            flash(invalido, 'danger')
+            return redirect('/historial-compras')
+    # Una semana que no existe en ese mes no se "ajusta": mejor no entregar un
+    # periodo que el dueño no pidió.
+    if periodo == 'semana' and referencia is not None and numero is not None:
+        if not 1 <= numero <= len(_bloques_semana_mes(referencia.year, referencia.month)):
+            flash(invalido, 'danger')
+            return redirect('/historial-compras')
+    desde, hasta, etiqueta = _periodo_ingresos(periodo, referencia, numero)
+
+    cur = mysql.connection.cursor()
+    join_cancel = "LEFT JOIN cancelaciones c ON c.venta_id=v.id"
+    ocultas_cond = "" if mostrar_ocultas else "AND COALESCE(v.oculta,0)=0"
+    where = (f"WHERE u.correo LIKE %s {ocultas_cond} "
+             "AND DATE(v.fecha) BETWEEN %s AND %s")
+    params = [f'%{buscar}%', desde, hasta]
+    if motivo_cancelacion_valido(motivo_filtro):
+        where += " AND c.motivo_codigo=%s"
+        params.append(motivo_filtro)
+    sql = f"""SELECT v.id, u.correo, v.total, v.fecha, v.documento,
+                     v.nombre AS titular, v.estado
+              FROM ventas v JOIN usuarios u ON v.cliente_id=u.id {join_cancel}
+              {where} ORDER BY v.fecha DESC"""
+    cur.execute(sql, tuple(params))
+    ventas = cur.fetchall()
+
+    if not ventas:
+        cur.close()
+        flash('No hay ventas registradas en el periodo seleccionado.', 'warning')
+        return redirect('/historial-compras')
+
+    for v in ventas:
+        cur.execute(f"""
+            SELECT p.nombre, d.cantidad, d.precio
+            FROM detalle_venta d JOIN {ALMACEN_DB}.productos p ON d.producto_id=p.id
+            WHERE d.venta_id=%s
+        """, (v['id'],))
+        v['productos'] = cur.fetchall()
+    cur.close()
+
+    styles = _pdf_estilos()
+    extra = []
+    if buscar:
+        extra.append(f'correo "{buscar}"')
+    if motivo_filtro and motivo_cancelacion_valido(motivo_filtro):
+        extra.append('motivo de cancelación')
+    if mostrar_ocultas:
+        extra.append('incluye ocultas')
+    subtitulo = etiqueta + ((' · ' + ', '.join(extra)) if extra else '')
+    total_general = sum(float(v['total'] or 0) for v in ventas)
+    elems = _pdf_encabezado(styles, 'Reporte de historial de compras', subtitulo, [
+        ('Periodo', f"{desde.strftime('%d/%m/%Y')} al {hasta.strftime('%d/%m/%Y')}"),
+        ('Registros', str(len(ventas))),
+        ('Total', f'S/ {total_general:.2f}'),
+        ('Generado', _ahora_lima().strftime('%d/%m/%Y %H:%M')),
+    ])
+
+    elems.append(Paragraph('<b>Resumen</b>', styles['TituloSeccion']))
+    data = [[Paragraph(f'<b>{c}</b>', styles['Cabecera']) for c in
+             ['#', 'Fecha', 'Titular', 'Correo', 'Estado', 'Total']]]
+    for v in ventas:
+        cancelado = (v['estado'] or '') == 'cancelado'
+        data.append([
+            str(v['id']),
+            _pdf_fecha(v['fecha'], con_hora=False),
+            Paragraph(_pdf_escapar(v['titular'] or v['correo'] or '-'), styles['Celda']),
+            Paragraph(_pdf_escapar(v['correo'] or '-'), styles['Celda']),
+            Paragraph('<b>CANCELADO</b>', styles['Anulado']) if cancelado
+            else _pdf_escapar((v['estado'] or '').capitalize()),
+            f"S/ {float(v['total'] or 0):.2f}",
+        ])
+    data.append([Paragraph('<b>Totales</b>', styles['Celda']), '', '', '', '',
+                 Paragraph(f'<b>S/ {total_general:.2f}</b>', styles['Celda'])])
+    t = Table(data, colWidths=[34, 74, 116, 150, 66, 66], repeatRows=1)
+    t.setStyle(_pdf_estilo_tabla())
+    elems.append(t)
+
+    elems.append(Spacer(1, 0.2 * inch))
+    elems.append(Paragraph('<b>Detalle por venta</b>', styles['TituloSeccion']))
+    for v in ventas:
+        enc = (f"Venta #{v['id']} · {_pdf_fecha(v['fecha'])} · "
+               + _pdf_escapar(v['titular'] or v['correo'] or '-'))
+        bloque = [Paragraph('<b>' + enc + '</b>', styles['TituloSeccion'])]
+        if (v['estado'] or '') == 'cancelado':
+            bloque.append(Paragraph('Estado: CANCELADO', styles['Anulado']))
+        pdata = [[Paragraph(f'<b>{c}</b>', styles['Cabecera']) for c in
+                  ['Producto', 'Cantidad', 'P. venta', 'Subtotal']]]
+        for it in v['productos']:
+            cant = int(it['cantidad'] or 0)
+            pv = float(it['precio'] or 0)
+            pdata.append([Paragraph(_pdf_escapar(it['nombre']), styles['Celda']),
+                          str(cant), f'S/ {pv:.2f}', f'S/ {cant * pv:.2f}'])
+        if not v['productos']:
+            pdata.append([Paragraph('Sin productos.', styles['Celda']), '', '', ''])
+        pt = Table(pdata, colWidths=[270, 70, 80, 80], repeatRows=1)
+        pt.setStyle(_pdf_estilo_tabla())
+        bloque.append(pt)
+        elems.append(KeepTogether(bloque))
+        elems.append(Spacer(1, 0.1 * inch))
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=36, rightMargin=36,
+                            topMargin=36, bottomMargin=36,
+                            title='Historial de compras', author='Multiservicios Richard')
+    doc.build(elems)
+    nombre = (f"historial_{periodo}_{desde.strftime('%Y%m%d')}_"
+              f"{hasta.strftime('%Y%m%d')}.pdf")
+    return _pdf_respuesta(buf, nombre)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -5831,13 +6026,19 @@ def entregas():
         return redirect('/login')
     filtro = request.args.get('filtro', 'todas')
     motivo_filtro = request.args.get('motivo', '').strip()
+    try:
+        page = int(request.args.get('page', 1))
+    except ValueError:
+        page = 1
     cur = mysql.connection.cursor()
-    sql = """
+    select = """
         SELECT e.id, e.venta_id, e.estado, e.direccion_envio, e.fecha_estimada,
                e.fecha_entrega, e.notas, e.created_at,
                v.total, v.nombre AS cliente_nombre, v.documento AS cliente_doc,
                u.correo AS cliente_correo,
                c.motivo_codigo, c.motivo_detalle, c.cancelado_por
+    """
+    frm = """
         FROM seguimiento_entregas e
         JOIN ventas v ON e.venta_id=v.id
         LEFT JOIN usuarios u ON v.cliente_id=u.id
@@ -5856,13 +6057,15 @@ def entregas():
     if motivo_cancelacion_valido(motivo_filtro):
         conds.append("c.motivo_codigo=%s")
         params.append(motivo_filtro)
-    if conds:
-        sql += " WHERE " + " AND ".join(conds)
-    sql += " ORDER BY e.created_at DESC"
-    cur.execute(sql, tuple(params))
-    lista = cur.fetchall()
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    sql_count = "SELECT COUNT(*) AS total " + frm + where
+    sql_data = select + frm + where + " ORDER BY e.created_at DESC"
+    lista, total, page, total_pages = paginate_query(
+        cur, sql_count, sql_data, tuple(params), page, per_page=15)
     cur.close()
-    return render_template('entregas.html', entregas=lista, filtro=filtro, motivo_filtro=motivo_filtro)
+    return render_template('entregas.html', entregas=lista, filtro=filtro,
+                           motivo_filtro=motivo_filtro, page=page,
+                           total_pages=total_pages, total=total)
 
 @app.route('/entregas/crear/<int:venta_id>', methods=['POST'])
 def crear_entrega(venta_id):
