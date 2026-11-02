@@ -1083,6 +1083,36 @@ def _backfill_entregas(cur):
     return cur.rowcount
 
 
+def _reparar_totales_cancelados(cur):
+    """Devuelve el monto real a las ventas canceladas antiguas.
+
+    Hasta antes de este arreglo, al cancelar se restaba el detalle del total de
+    la venta, así que una venta cancelada quedaba en S/ 0 (o solo con el costo
+    de envío) y no sumaba en el "Monto total cancelado" ni en "Mis pedidos
+    cancelados". El total original era `detalle_venta` + `costo_envio`.
+
+    Es idempotente: solo toca las ventas canceladas cuyo total no coincide con
+    ese cálculo (tolerancia de un céntimo).
+    """
+    try:
+        cur.execute("""
+            UPDATE ventas v
+            JOIN (
+                SELECT venta_id, SUM(cantidad * precio) AS monto
+                FROM detalle_venta
+                GROUP BY venta_id
+            ) d ON d.venta_id = v.id
+            SET v.total = d.monto + COALESCE(v.costo_envio, 0)
+            WHERE COALESCE(v.estado, '') = 'cancelado'
+              AND ABS(COALESCE(v.total, 0)
+                      - (d.monto + COALESCE(v.costo_envio, 0))) > 0.01
+        """)
+        return cur.rowcount
+    except Exception as exc:
+        app.logger.warning('[init_db] No se pudieron reparar totales cancelados: %s', exc)
+        return 0
+
+
 def _respaldar_nombres_ingresos(cur):
     """Rellena la foto de nombres que aun no tienen los ingresos antiguos.
 
@@ -1570,6 +1600,20 @@ def _init_db_inner():
         except Exception as e:
             app.logger.warning(
                 "[init_db] No se pudo sincronizar seguimiento de ventas: %s", e)
+
+        # Repara el total de las ventas canceladas antes de este arreglo: se les
+        # había restado el detalle y quedaban en S/ 0 (o solo el envío), por lo
+        # que no sumaban en el reporte de cancelaciones ni en Mis entregas.
+        try:
+            reparadas = _reparar_totales_cancelados(cur)
+            mysql.connection.commit()
+            if reparadas:
+                app.logger.info(
+                    "[init_db] Total restaurado en %s venta(s) cancelada(s)",
+                    reparadas)
+        except Exception as e:
+            app.logger.warning(
+                "[init_db] No se pudieron reparar totales cancelados: %s", e)
 
         # ── Base de datos de Gestión de Almacén ─────────────────────────
         cur = mysql.connection.cursor()
@@ -4790,14 +4834,9 @@ def actualizar_estado_venta(venta_id):
     else:
         seg_estado = {'en espera': 'pendiente', 'cancelado': 'cancelado'}.get(estado, 'pendiente')
         cur.execute("UPDATE seguimiento_entregas SET estado=%s WHERE venta_id=%s", (seg_estado, venta_id))
-    # Al cancelar como admin: devolver stock, reducir monto y registrar motivo
+    # Al cancelar como admin: devolver stock y registrar motivo. El total de la
+    # venta se conserva para que cuente en el "Monto total cancelado".
     if estado == 'cancelado' and anterior != 'cancelado':
-        cur.execute(f"SELECT COALESCE(SUM(d.cantidad * d.precio), 0) AS monto_articulos "
-                    f"FROM detalle_venta d WHERE d.venta_id=%s", (venta_id,))
-        fila = cur.fetchone()
-        monto_articulos = float(fila['monto_articulos'] or 0) if fila else 0.0
-        nuevo_total = max(0.0, float(venta['total'] or 0) - monto_articulos)
-        cur.execute("UPDATE ventas SET total=%s WHERE id=%s", (nuevo_total, venta_id))
         restaurar_stock_venta(cur, venta_id)
         registrar_cancelacion(cur, venta_id, 'otro', 'Cancelado por administrador', 'admin')
     mysql.connection.commit()
@@ -6801,14 +6840,10 @@ def actualizar_entrega(id):
     venta_estado = {'pendiente': 'en espera', 'en camino': 'en espera',
                     'entregado': 'entregado', 'cancelado': 'cancelado'}.get(nuevo_estado, 'en espera')
     cur.execute("UPDATE ventas SET estado=%s WHERE id=%s", (venta_estado, venta_id))
-    # Al cancelar como admin: devolver stock (una sola vez), reducir monto y registrar motivo
+    # Al cancelar como admin: devolver stock (una sola vez) y registrar motivo.
+    # El total de la venta se conserva: es el monto cancelado que debe verse en
+    # el reporte de cancelaciones (antes se reducía a cero y no sumaba).
     if nuevo_estado == 'cancelado' and venta_anterior != 'cancelado':
-        cur.execute(f"SELECT COALESCE(SUM(d.cantidad * d.precio), 0) AS monto_articulos "
-                    f"FROM detalle_venta d WHERE d.venta_id=%s", (venta_id,))
-        fila2 = cur.fetchone()
-        monto_articulos = float(fila2['monto_articulos'] or 0) if fila2 else 0.0
-        nuevo_total = max(0.0, float(venta['total'] or 0) - monto_articulos)
-        cur.execute("UPDATE ventas SET total=%s WHERE id=%s", (nuevo_total, venta_id))
         restaurar_stock_venta(cur, venta_id)
         registrar_cancelacion(cur, venta_id, 'otro', 'Cancelado por administrador', 'admin')
     mysql.connection.commit()
@@ -8422,14 +8457,13 @@ def cancelar_pedido(venta_id):
         cur.close()
         flash('Ya no se puede cancelar (pedido entregado). Contacta al administrador.', 'warning')
         return redirect('/mis-entregas')
-    # Calcular monto de los artículos a cancelar y reducir el total de la venta
-    cur.execute(f"SELECT COALESCE(SUM(d.cantidad * d.precio), 0) AS monto_articulos "
-                f"FROM detalle_venta d WHERE d.venta_id=%s", (venta_id,))
-    fila = cur.fetchone()
-    monto_articulos = float(fila['monto_articulos'] or 0) if fila else 0.0
-    nuevo_total = max(0.0, float(venta['total'] or 0) - monto_articulos)
-    # Cambiar estado de venta y seguimiento a cancelado
-    cur.execute("UPDATE ventas SET estado='cancelado', total=%s WHERE id=%s", (nuevo_total, venta_id))
+    # El total NO se modifica: ese es justamente el monto que se cancela y el
+    # que debe sumar en "Monto total cancelado" (admin) y en "Mis pedidos
+    # cancelados" (cliente). Antes se restaba el detalle y la venta quedaba en
+    # S/ 0 (o solo con el costo de envío), así que los reportes mostraban cero.
+    # Las consultas de ingresos ya excluyen estado='cancelado', por lo que
+    # conservar el total no infla las ventas válidas.
+    cur.execute("UPDATE ventas SET estado='cancelado' WHERE id=%s", (venta_id,))
     cur.execute("UPDATE seguimiento_entregas SET estado='cancelado' WHERE venta_id=%s", (venta_id,))
     # Reponer stock de los artículos
     restaurar_stock_venta(cur, venta_id)
@@ -8438,7 +8472,7 @@ def cancelar_pedido(venta_id):
     mysql.connection.commit()
     _invalidar_cache_kpi()
     cur.close()
-    flash(f'Pedido #{venta_id} cancelado. El stock fue devuelto y el monto actualizado.', 'success')
+    flash(f'Pedido #{venta_id} cancelado. El stock fue devuelto y el monto quedó registrado en tus cancelaciones.', 'success')
     return redirect('/mis-entregas')
 
 @app.route('/api/mis-entregas-estados')
