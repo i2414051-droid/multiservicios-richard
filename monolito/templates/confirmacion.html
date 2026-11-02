@@ -66,6 +66,22 @@
       {% if venta.direccion_envio %}
       <div class="mt-2" style="color:var(--text-muted);font-size:13px">
         <i class="bi bi-geo-alt me-1" style="color:#f39c12"></i> {{ venta.direccion_envio }}
+        {% if venta.tipo_entrega == 'recojo' %}
+        <span class="badge bg-secondary ms-1">Recojo en tienda</span>
+        {% elif venta.tipo_entrega == 'delivery' %}
+        <span class="badge bg-warning text-dark ms-1">Delivery · {{ venta.distrito or '—' }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if venta.tipo_entrega == 'delivery' %}
+      <div class="mt-2" style="color:var(--text-muted);font-size:13px">
+        <i class="bi bi-truck me-1" style="color:#f39c12"></i>
+        {% if venta.costo_envio %}
+        Envío: S/ {{ "%.2f"|format(venta.costo_envio) }}
+        {% else %}
+        Envío: Gratis
+        {% endif %}
+        {% if venta.total %} (total pagado: S/ {{ "%.2f"|format(venta.total|float) }}){% endif %}
       </div>
       {% endif %}
 

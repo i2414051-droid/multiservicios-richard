@@ -50,9 +50,19 @@
             {% if e.cliente_doc %} ({{ e.cliente_doc }}){% endif %}
             {% if e.cliente_correo %} — {{ e.cliente_correo }}{% endif %}
           </div>
-          {% if e.direccion_envio %}
+          {% if e.tipo_entrega %}
           <div style="color:var(--text-muted);font-size:13px;margin-top:4px">
-            <i class="bi bi-geo-alt me-1"></i> {{ e.direccion_envio }}
+            <i class="bi bi-geo-alt me-1"></i> {{ e.direccion_envio or '—' }}
+            {% if e.tipo_entrega == 'recojo' %}
+            <span class="badge bg-secondary ms-1">Recojo en tienda</span>
+            {% elif e.tipo_entrega == 'delivery' %}
+            <span class="badge bg-warning text-dark ms-1">Delivery · {{ e.distrito or '—' }}</span>
+            {% if e.costo_envio %}<span class="badge bg-success ms-1">Envío S/ {{ "%.2f"|format(e.costo_envio) }}</span>{% else %}<span class="badge bg-success ms-1">Envío Gratis</span>{% endif %}
+            {% if e.latitud and e.longitud %}
+            · <a href="https://www.openstreetmap.org/?mlat={{ e.latitud }}&mlon={{ e.longitud }}#map=18/{{ e.latitud }}/{{ e.longitud }}"
+                 target="_blank" rel="noopener">Ver en el mapa</a>
+            {% endif %}
+            {% endif %}
           </div>
           {% endif %}
           {% if e.fecha_estimada %}

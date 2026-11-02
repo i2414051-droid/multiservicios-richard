@@ -6,7 +6,7 @@
   {% if not culqi_public_key %}
   <div class="alert alert-warning">
     <i class="bi bi-exclamation-triangle me-1"></i>
-    El pago con tarjeta aún no está configurado. Puedes usar <strong>transferencia bancaria</strong>.
+    El pago con tarjeta aún no está configurado. Contacta a la tienda para realizar tu compra.
   </div>
   {% endif %}
 
@@ -126,44 +126,283 @@
           </div>
         </div>
 
-        <!-- DIRECCIÓN -->
+        <!-- ENTREGA: recojo en tienda o delivery (con mapa) -->
         <div class="card mb-4 tc">
           <div class="card-body">
-            <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-geo-alt me-2"></i>Dirección de envío</h5>
-            <p style="color:var(--text-muted);font-size:13px;margin:6px 0 0">
+            <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-truck me-2"></i>Entrega</h5>
+            <p style="color:var(--text-muted);font-size:13px;margin:6px 0 10px">
               <i class="bi bi-info-circle me-1"></i>
-              Selecciona una dirección guardada o escribe una.
+              Elige recojo en tienda (gratis) o delivery en Chilca, El Tambo o Huancayo.
             </p>
-            {% if direcciones %}
-            {% for d in direcciones %}
-            <label class="d-flex align-items-start gap-3 p-3 mb-2 checkout-address-option"
-                   onclick="seleccionarDireccion(this, '{{ d.direccion|e }}{% if d.distrito %}, {{ d.distrito|e }}{% endif %}')">
-              <input type="radio" name="direccion_envio_select" value="{{ d.direccion }}{% if d.distrito %}, {{ d.distrito }}{% endif %}"
-                     class="form-check-input mt-1" {% if loop.first %}checked{% endif %}>
-              <div>
-                <span style="color:var(--text-primary);font-weight:600">{{ d.direccion }}</span>
-                {% if d.distrito %}<br><small style="color:var(--text-muted)">{{ d.distrito }}</small>{% endif %}
-                {% if d.predeterminada %}<span class="badge ms-2" style="background:#f39c12;color:#000;font-size:10px">Principal</span>{% endif %}
+
+            <div class="d-flex gap-3 flex-wrap">
+              <label class="d-flex align-items-center gap-2 p-3 flex-grow-1 entrega-opcion" id="opRecojo"
+                     onclick="elegirEntrega('recojo')">
+                <input type="radio" name="tipo_entrega" value="recojo" class="form-check-input mt-1"
+                       {% if tipo != 'delivery' %}checked{% endif %}>
+                <div>
+                  <span style="color:var(--text-primary);font-weight:600">Recojo en tienda</span>
+                  <br><small style="color:var(--text-muted)">Gratis · {{ tienda_direccion }}</small>
+                </div>
+              </label>
+              <label class="d-flex align-items-center gap-2 p-3 flex-grow-1 entrega-opcion"
+                     id="opDelivery"{% if not delivery_permitido %} style="opacity:.55;cursor:not-allowed"{% endif %}>
+                <input type="radio" name="tipo_entrega" value="delivery" class="form-check-input mt-1"
+                       {% if tipo == 'delivery' and delivery_permitido %}checked{% endif %}
+                       {% if not delivery_permitido %}disabled{% endif %}
+                       {% if delivery_permitido %}onclick="elegirEntrega('delivery')"{% endif %}>
+                <div>
+                  <span style="color:var(--text-primary);font-weight:600">Delivery</span>
+                  <br><small style="color:var(--text-muted)">
+                    {% if delivery_permitido %}
+                    A tu dirección en Chilca, El Tambo o Huancayo
+                    {% else %}
+                    No disponible en compras menores a S/ {{ "%.2f"|format(delivery_minimo) }}
+                    {% endif %}
+                  </small>
+                </div>
+              </label>
+            </div>
+
+            <!-- RECOJO EN TIENDA: solo se ve la ubicación -->
+            <div id="bloqueRecojo" class="mt-3">
+              <div class="mapa-contenedor" id="mapaTienda" style="height:280px;border-radius:14px"></div>
+              <p class="mt-2 mb-0" style="color:var(--text-primary);font-weight:600">
+                <i class="bi bi-geo-alt me-1" style="color:#f39c12"></i>{{ tienda_direccion }}
+              </p>
+              <small style="color:var(--text-muted)">Recoge tu pedido en nuestro local.</small>
+            </div>
+
+            <!-- DELIVERY: sin selector de distrito; el distrito sale del punto
+                 que marca el cliente en el mapa. -->
+            <div id="bloqueDelivery" class="mt-3" style="display:none">
+              <div class="p-2 mb-2" style="background:rgba(243,156,18,.1);border-radius:10px;font-size:13px">
+                <i class="bi bi-truck me-1" style="color:#f39c12"></i>
+                <strong>Delivery disponible para El Tambo, Huancayo y Chilca.</strong>
+                {% if envio_delivery %}Envío de S/ {{ "%.2f"|format(envio_delivery) }}{% if envio_gratis_desde %} · Gratis desde S/ {{ "%.2f"|format(envio_gratis_desde) }}{% endif %}{% endif %}
+                {% if delivery_minimo %} · Compra mínima S/ {{ "%.2f"|format(delivery_minimo) }}{% endif %}
               </div>
-            </label>
-            {% endfor %}
-            {% endif %}
-            <div class="mt-3">
-              <label class="form-label">Dirección de entrega <span class="campo-obligatorio">*</span></label>
-              <input type="text" class="form-control" name="direccion_envio" id="direccionEnvio" required>
-              <div class="form-text"></div>
+              <input type="hidden" name="distrito" id="distritoEntrega" value="{{ distrito_valor }}">
+
+              {% if direcciones %}
+              <div class="mt-3">
+                {% for d in direcciones %}
+                <label class="d-flex align-items-start gap-3 p-2 mb-1 checkout-address-option"
+                       onclick="seleccionarDireccion('{{ d.direccion|e }}', '{{ d.distrito|e }}')">
+                  <input type="radio" name="direccion_envio_select" value="{{ d.direccion }}" class="form-check-input mt-1">
+                  <div>
+                    <span style="color:var(--text-primary);font-weight:600">{{ d.direccion }}</span>
+                    {% if d.distrito %}<br><small style="color:var(--text-muted)">{{ d.distrito }}</small>{% endif %}
+                    {% if d.predeterminada %}<span class="badge ms-1" style="background:#f39c12;color:#000;font-size:10px">Principal</span>{% endif %}
+                  </div>
+                </label>
+                {% endfor %}
+              </div>
+              {% endif %}
+
+              <div class="mapa-contenedor mt-3" id="mapaCliente" style="height:320px;border-radius:14px"></div>
+              <input type="hidden" name="lat" id="latEntrega">
+              <input type="hidden" name="lon" id="lonEntrega">
+
+              <label class="form-label mt-3">Dirección de entrega <span class="campo-obligatorio">*</span></label>
+              <input type="text" class="form-control" name="direccion_envio" id="direccionEnvio"
+                     placeholder="Haz clic o arrastra el punto en el mapa" readonly required
+                     style="background:rgba(243,156,18,.07);cursor:not-allowed">
+              <div class="form-text" id="avisoMapa">Elige el punto exacto de tu dirección en el mapa.</div>
+              <small style="color:var(--text-muted)">
+                <i class="bi bi-info-circle me-1"></i>
+                Al continuar compartirás tu ubicación exacta con el vendedor.
+              </small>
             </div>
-            <div class="mt-2">
-              <button type="button" class="btn btn-sm btn-outline-warning" onclick="obtenerUbicacion()">
-                <i class="bi bi-geo-alt-fill me-1"></i> Mi ubicación
-              </button>
+
+            <!-- COSTO DE ENVÍO -->
+            <div class="mt-3 p-3" style="background:rgba(243,156,18,.08);border-radius:12px">
+              <div class="d-flex justify-content-between">
+                <span style="color:var(--text-muted)">Productos</span>
+                <strong style="color:var(--text-primary)">S/ {{ "%.2f"|format(total) }}</strong>
+              </div>
+              <div class="d-flex justify-content-between mt-1">
+                <span style="color:var(--text-muted)">Envío</span>
+                <strong style="color:var(--text-primary)" id="montoEnvio">S/ 0.00</strong>
+              </div>
+              <div class="d-flex justify-content-between mt-2 pt-2" style="border-top:1px dashed rgba(243,156,18,.4)">
+                <span style="color:var(--text-primary);font-weight:700">Total</span>
+                <strong style="color:#27ae60;font-size:18px" id="totalConEnvio">S/ {{ "%.2f"|format(total) }}</strong>
+              </div>
             </div>
+
             <div class="mt-3">
               <label class="form-label">Notas de entrega <small style="color:var(--text-muted)">(opcional)</small></label>
               <textarea name="notas_entrega" class="form-control" rows="2"></textarea>
             </div>
           </div>
         </div>
+
+<!-- LEAFLET: solo en checkout, y con defer para que no frene el resto -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+<style>.mapa-contenedor{width:100%;border:1px solid var(--border-card)}</style>
+<script>
+/* ── Mapa del checkout: tienda (fija) y cliente (arrastrable) ──
+   La caja del mapa es Chilca + El Tambo + Huancayo: el punto no puede salir
+   de ahí (ni en el navegador ni en el servidor). */
+window.__envio = 0;
+var DELIVERY_LIMITE = {{ limites|tojson }};
+var TIENDA = { lat: {{ tienda_lat }}, lon: {{ tienda_lon }}, dir: {{ tienda_direccion|tojson }} };
+window.__tarifaEnvio = {{ envio_delivery }};
+window.__envioGratisDesde = {{ envio_gratis_desde }};
+window.__deliveryPermitido = {{ 'true' if delivery_permitido else 'false' }};
+var GRATIS_DESDE = {{ envio_gratis_desde }};
+var DELIVERY_MINIMO = {{ delivery_minimo }};
+var SUBTOTAL = Number('{{ "%.2f"|format(total) }}');
+var mapaTienda=null, mapaCliente=null, pinCliente=null, cajaCliente=null;
+
+function cajaDelDelivery(){ return [[DELIVERY_LIMITE.sur, DELIVERY_LIMITE.oeste],[DELIVERY_LIMITE.norte, DELIVERY_LIMITE.este]]; }
+
+function montarMapaTienda(){
+  if(!window.L || mapaTienda) return;
+  mapaTienda = L.map('mapaTienda', {scrollWheelZoom:false}).setView([TIENDA.lat, TIENDA.lon], 17);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              {maxZoom:19, attribution:'© OpenStreetMap'}).addTo(mapaTienda);
+  L.marker([TIENDA.lat, TIENDA.lon]).addTo(mapaTienda).bindPopup('<b>Tienda</b><br>'+TIENDA.dir);
+}
+
+function montarMapaCliente(){
+  if(!window.L || mapaCliente) return;
+  mapaCliente = L.map('mapaCliente').setView([TIENDA.lat, TIENDA.lon], 15);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              {maxZoom:19, attribution:'© OpenStreetMap'}).addTo(mapaCliente);
+  mapaCliente.fitBounds(cajaDelDelivery());
+  mapaCliente.setMaxBounds(cajaDelDelivery());
+  pinCliente = L.marker([TIENDA.lat, TIENDA.lon], {draggable:true}).addTo(mapaCliente);
+  pinCliente.on('dragend', function(){
+    var p=pinCliente.getLatLng();
+    if(!dentroDelDelivery(p.lat, p.lng)){
+      alert('Ese punto queda fuera de Chilca, El Tambo o Huancayo.');
+      pinCliente.setLatLng(mapaCliente.getCenter());
+      return;
+    }
+    document.getElementById('latEntrega').value=p.lat.toFixed(7);
+    document.getElementById('lonEntrega').value=p.lng.toFixed(7);
+    inverso(p.lat, p.lng);
+  });
+  mapaCliente.on('click', function(e){ pinCliente.setLatLng(e.latlng); pinCliente.fire('dragend'); });
+}
+
+function dentroDelDelivery(lat, lon){
+  var L_=DELIVERY_LIMITE;
+  return lat>=L_.sur && lat<=L_.norte && lon>=L_.oeste && lon<=L_.este;
+}
+
+function moverPin(lat, lon){
+  montarMapaCliente();
+  pinCliente.setLatLng([lat, lon]);
+  mapaCliente.setView([lat, lon], 17);
+  document.getElementById('latEntrega').value=lat.toFixed(7);
+  document.getElementById('lonEntrega').value=lon.toFixed(7);
+  // La dirección NO se puede escribir: se completa sola con este punto.
+  document.getElementById('direccionEnvio').value='';
+  actualizarEnvio();
+}
+
+function inverso(lat, lon){
+  var aviso=document.getElementById('avisoMapa');
+  aviso.textContent='Fijando la dirección…'; aviso.style.color='';
+  fetch('/api/geocodificar-inverso', {
+    method:'POST', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify({lat:lat, lon:lon})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.direccion){ document.getElementById('direccionEnvio').value=d.direccion; }
+    // El distrito ya no lo elige el cliente: se toma del punto que marcó.
+    if(d.distrito){ document.getElementById('distritoEntrega').value=d.distrito; }
+    var av=document.getElementById('avisoMapa');
+    if(d.direccion){
+      av.textContent='Dirección fijada con el punto del mapa.'
+        +(d.distrito?' ('+d.distrito+')':'');
+      av.style.color='#27ae60';
+    } else {
+      av.textContent='No se pudo identificar ese punto. Muévelo un poco e inténtalo otra vez.';
+      av.style.color='#dc3545';
+    }
+  })
+  .catch(function(){
+    aviso.textContent='No se pudo identificar el punto (sin conexión). Inténtalo otra vez.';
+    aviso.style.color='#dc3545';
+  });
+}
+
+/* El distrito ya no lo elige el cliente: se toma del punto del mapa. Queda la
+   función por si se quiere avisar cuando el punto caiga fuera de los tres
+   distritos permitidos. */
+
+function elegirEntrega(tipo){
+  document.getElementById('bloqueRecojo').style.display = (tipo==='recojo')?'':'none';
+  document.getElementById('bloqueDelivery').style.display = (tipo==='delivery')?'':'none';
+  var dir=document.getElementById('direccionEnvio');
+  var lat=document.getElementById('latEntrega');
+  var lon=document.getElementById('lonEntrega');
+  if(tipo==='recojo'){ dir.value=TIENDA.dir; dir.required=false; lat.value=''; lon.value=''; }
+  else {
+    // Delivery: la dirección no se escribe, sale del punto del mapa.
+    dir.required=true;
+    if(!window.__deliveryPermitido){
+      elegirEntrega('recojo');
+      return;
+    }
+  }
+  document.getElementById('opDelivery').classList.toggle('activa', tipo==='delivery');
+  document.getElementById('opRecojo').classList.toggle('activa', tipo==='recojo');
+  actualizarEnvio();
+  if(tipo==='delivery') setTimeout(function(){ montarMapaCliente(); }, 120);
+  else setTimeout(function(){ montarMapaTienda(); }, 120);
+}
+
+function actualizarEnvio(){
+  var tipo=document.querySelector('input[name="tipo_entrega"]:checked').value;
+  var envio=0, detalle='S/ 0.00';
+  if(tipo==='delivery'){
+    envio=window.__tarifaEnvio;
+    if(window.__envioGratisDesde>0 && SUBTOTAL>=window.__envioGratisDesde){ envio=0; detalle='S/ 0.00 (gratis)'; }
+    else { detalle='S/ '+envio.toFixed(2); }
+  }
+  window.__envio=envio;
+  document.getElementById('montoEnvio').textContent=detalle;
+  document.getElementById('totalConEnvio').textContent='S/ '+(SUBTOTAL+envio).toFixed(2);
+}
+
+/* Dirección escrita -> ya no existe: el campo es de solo lectura y la
+   dirección la fija el punto del mapa. */
+document.addEventListener('DOMContentLoaded', function(){
+  elegirEntrega(document.querySelector('input[name="tipo_entrega"]:checked').value);
+  /* Al confirmar la compra: recojo no pide dirección, delivery sí y con punto. */
+  var form=document.querySelector('form[action="/procesar_compra"]');
+  if(form){
+    form.addEventListener('submit', function(ev){
+      var tipo=document.querySelector('input[name="tipo_entrega"]:checked').value;
+      var dir=document.getElementById('direccionEnvio');
+      if(tipo==='delivery'){
+        if(!window.__deliveryPermitido){
+          ev.preventDefault();
+          alert('Para envío la compra debe ser de S/ '+DELIVERY_MINIMO.toFixed(2)+' o más.');
+          return;
+        }
+        if(!document.getElementById('latEntrega').value){
+          ev.preventDefault(); alert('Fija tu dirección en el mapa (haz clic o arrastra el punto).'); return;
+        }
+        if(dir.value.trim().length<8){
+          ev.preventDefault(); alert('No se pudo identificar tu dirección. Muévelo un poco el punto e inténtalo otra vez.'); return;
+        }
+      } else {
+        dir.value=TIENDA.dir;
+      }
+    }, true);
+  }
+});
+</script>
 
         <!-- MÉTODO DE PAGO -->
         <div class="card mb-4 tc">
@@ -175,13 +414,6 @@
                   <input type="radio" name="metodo_radio" value="tarjeta" checked class="d-none" onchange="cambiarMetodo('tarjeta')">
                   <i class="bi bi-credit-card" style="font-size:24px;color:#e74c3c"></i>
                   <div><strong style="color:var(--text-primary)">Pagar con Culqi</strong><br><small style="color:var(--text-muted)">Tarjeta de crédito/débito o Yape</small></div>
-                </label>
-              </div>
-              <div class="col-md-6">
-                <label class="metodo-pago" data-metodo="transferencia">
-                  <input type="radio" name="metodo_radio" value="transferencia" class="d-none" onchange="cambiarMetodo('transferencia')">
-                  <i class="bi bi-bank" style="font-size:24px;color:#f39c12"></i>
-                  <div><strong style="color:var(--text-primary)">Transferencia bancaria</strong><br><small style="color:var(--text-muted)">Depósito o transferencia</small></div>
                 </label>
               </div>
             </div>
@@ -443,7 +675,25 @@ function onDocTipoChange(){
   rs.required=esRuc;
 }
 function cambiarMetodo(metodo){ document.getElementById('metodoPagoHidden').value=metodo; document.querySelectorAll('.metodo-pago').forEach(function(m){m.classList.remove('active');}); var el=document.querySelector('[data-metodo="'+metodo+'"]'); if(el) el.classList.add('active'); }
-function seleccionarDireccion(label, valor){ document.getElementById('direccionEnvio').value=valor; }
+function seleccionarDireccion(valor, distrito){
+  // Dirección guardada del cliente: la usa como texto para geocodificar y el
+  // punto aparece en el mapa (el campo de dirección es de solo lectura).
+  var aviso=document.getElementById('avisoMapa');
+  var dir=document.getElementById('direccionEnvio');
+  dir.value='';
+  aviso.textContent='Buscando la dirección en el mapa…'; aviso.style.color='';
+  fetch('/api/geocodificar', {
+    method:'POST', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify({q: valor})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(!d.ok || d.dentro===false){ aviso.textContent=d.error||'No se pudo ubicar esa dirección en el mapa.'; return; }
+    moverPin(d.lat, d.lon);
+    inverso(d.lat, d.lon);
+  })
+  .catch(function(){ aviso.textContent='No se pudo conectar con el mapa.'; });
+}
 function mostrarResumen(){
   var tipo=docTipoActual(), docNum=document.getElementById('docNumero'), tel=document.getElementById('telefono'), dir=document.getElementById('direccionEnvio');
   var vacio=null;
@@ -481,7 +731,8 @@ function mostrarResumen(){
   document.getElementById('resNotas').textContent=document.querySelector('[name="notas_entrega"]').value||'Sin notas';
   var mp=document.getElementById('metodoPagoHidden').value;
   document.getElementById('resPago').textContent=(mp==='tarjeta')?'Culqi (tarjeta o Yape)':(mp.charAt(0).toUpperCase()+mp.slice(1));
-  document.getElementById('resTotal').textContent='S/ {{ "%.2f"|format(total) }}';
+  var totalConEnvio = Number('{{ "%.2f"|format(total) }}') + window.__envio;
+  document.getElementById('resTotal').textContent='S/ '+totalConEnvio.toFixed(2);
   document.getElementById('resumenCard').style.display='block';
   document.getElementById('btnConfirmar').style.display='none';
   document.getElementById('btnComprar').style.display='block';
@@ -489,14 +740,31 @@ function mostrarResumen(){
   document.getElementById('confirmarDatos').onchange=function(){ document.getElementById('btnComprar').disabled=!this.checked; };
   document.getElementById('btnComprar').disabled=!document.getElementById('confirmarDatos').checked;
 }
-function obtenerUbicacion(){
-  if(!navigator.geolocation){ alert('Tu navegador no soporta geolocalización.'); return; }
-  navigator.geolocation.getCurrentPosition(function(pos){
-    fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat='+pos.coords.latitude+'&lon='+pos.coords.longitude)
-      .then(function(r){return r.json();})
-      .then(function(data){ if(data.display_name){ document.getElementById('direccionEnvio').value=data.display_name; }})
-      .catch(function(){ document.getElementById('direccionEnvio').value=pos.coords.latitude.toFixed(6)+', '+pos.coords.longitude.toFixed(6); });
-  }, function(){ alert('No se pudo obtener tu ubicación.'); });
+/* "Mi ubicación" se quitó a pedido del dueño: el punto ahora solo se elige
+   en el mapa. La geolocalización del navegador queda disponible por si se
+   quiere reactivar más adelante. */
+/* "Buscar en el mapa" se quitó: el campo de dirección es de solo lectura y
+   la dirección la fija el punto. Queda la búsqueda de texto por si se quiere
+   reactivar (el servidor la conserva en /api/geocodificar). */
+function buscarDireccionEnMapa(){
+  var dir=document.getElementById('direccionEnvio').value.trim();
+  var aviso=document.getElementById('avisoMapa');
+  if(dir.length<5){ aviso.textContent='Escribe tu dirección primero (calle y número).'; return; }
+  aviso.textContent='Buscando en el mapa…'; aviso.style.color='';
+  fetch('/api/geocodificar', {
+    method:'POST', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify({q: dir})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(!d.ok){ aviso.textContent=d.error||'No se pudo ubicar la dirección.'; return; }
+    if(d.dentro===false){ aviso.textContent=d.error; return; }
+    moverPin(d.lat, d.lon);
+    if(d.direccion) document.getElementById('direccionEnvio').value=d.direccion;
+    aviso.textContent='Dirección ubicada en el mapa. Arrastra el punto si queda mal.';
+    aviso.style.color='#27ae60';
+  })
+  .catch(function(){ aviso.textContent='No se pudo conectar con el mapa. Revisa tu conexión.'; });
 }
 var culqiTimer = null;
 var culqiCancelado = false;
@@ -589,7 +857,7 @@ window.confirmarCompra=function(){
   if(metodo==='tarjeta'){
     var pk='{{ culqi_public_key or "" }}';
     if(!pk){
-      alert('El pago con tarjeta no está disponible en este momento (Culqi no está configurado). Usa transferencia bancaria o contacta a la tienda.');
+      alert('El pago con tarjeta no está disponible en este momento (Culqi no está configurado). Contacta a la tienda.');
       return;
     }
     if(!window.Culqi || typeof Culqi.open!=='function'){

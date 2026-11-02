@@ -17,6 +17,26 @@
             <tr><td style="color:var(--text-muted)">Venta N°</td><td style="color:var(--text-primary)">#{{ entrega.venta_id }}</td></tr>
             <tr><td style="color:var(--text-muted)">Fecha venta</td><td style="color:var(--text-primary)">{{ entrega.venta_fecha.strftime('%d/%m/%Y') if entrega.venta_fecha else '-' }}</td></tr>
             <tr><td style="color:var(--text-muted)">Dirección</td><td style="color:var(--text-primary)">{{ entrega.direccion_envio or 'No especificada' }}</td></tr>
+            {% if entrega.tipo_entrega == 'recojo' %}
+            <tr><td style="color:var(--text-muted)">Entrega</td><td>
+              <span class="badge bg-secondary">Recojo en tienda</span>
+            </td></tr>
+            {% elif entrega.tipo_entrega == 'delivery' %}
+            <tr><td style="color:var(--text-muted)">Entrega</td><td>
+              <span class="badge bg-warning text-dark">Delivery · {{ entrega.distrito or '—' }}</span>
+              {% if entrega.costo_envio %}<span class="badge bg-success ms-1">Envío S/ {{ "%.2f"|format(entrega.costo_envio) }}</span>{% else %}<span class="badge bg-success ms-1">Envío Gratis</span>{% endif %}
+            </td></tr>
+            {% if entrega.latitud and entrega.longitud %}
+            <tr><td style="color:var(--text-muted)">Ubicación</td><td>
+              <a class="btn btn-sm btn-outline-warning"
+                 href="https://www.openstreetmap.org/?mlat={{ entrega.latitud }}&mlon={{ entrega.longitud }}#map=18/{{ entrega.latitud }}/{{ entrega.longitud }}"
+                 target="_blank" rel="noopener">
+                <i class="bi bi-map me-1"></i>Ver en el mapa
+              </a>
+              <small class="text-muted ms-1">{{ "%.5f"|format(entrega.latitud) }}, {{ "%.5f"|format(entrega.longitud) }}</small>
+            </td></tr>
+            {% endif %}
+            {% endif %}
             <tr><td style="color:var(--text-muted)">Fecha estimada</td><td style="color:var(--text-primary)">{{ entrega.fecha_estimada.strftime('%d/%m/%Y') if entrega.fecha_estimada else 'No definida' }}</td></tr>
             <tr><td style="color:var(--text-muted)">Fecha entrega</td><td style="color:var(--text-primary)">{{ entrega.fecha_entrega.strftime('%d/%m/%Y %H:%M') if entrega.fecha_entrega else 'Pendiente' }}</td></tr>
             {% if entrega.notas %}

@@ -747,6 +747,224 @@ DIAS_RESPUESTA_RECLAMO = int(os.environ.get('DIAS_RESPUESTA_RECLAMO', '15'))
 app.jinja_env.globals['empresa_info'] = EMPRESA_INFO
 app.jinja_env.globals['dias_respuesta_reclamo'] = DIAS_RESPUESTA_RECLAMO
 
+# ─────────────────────────────────────────────
+# MAPA Y DELIVERY (Leaflet + geocodificador OSM)
+# ─────────────────────────────────────────────
+# Los ajustes (coordenadas de la tienda, costo de envío por distrito...) se
+# guardan en la tabla `ajustes` y se editan desde /ajustes, así el dueño los
+# cambia sin tocar código ni reiniciar. Empiezan con valores por defecto.
+AJUSTES_SEMILLA = {
+    # Ubicación de la tienda: Av. Leoncio Prado 1499 - Chilca, Huancayo.
+    # Coordenadas obtenidas con Photon/OSM (el número exacto se ajusta arrastrando el pin).
+    'empresa_lat': '-12.0728939',
+    'empresa_lon': '-75.1904488',
+    'empresa_direccion': 'Av. Leoncio Prado 1499 - Chilca, Huancayo.',
+    # Envío: tarifa plana a los tres distritos y monto mínimo para que la
+    # compra sea elegible a delivery (por debajo solo hay recojo en tienda).
+    'envio_delivery': '15',
+    'envio_gratis_desde': '300',
+    'delivery_minimo': '50',
+}
+
+# Los tres únicos distritos con delivery, de más cerca a más lejos.
+DISTRITOS_DELIVERY = ('Chilca', 'El Tambo', 'Huancayo')
+
+# Caja que contiene a los tres distritos. El pin del cliente no puede salir de
+# ella (ni en el mapa ni en el servidor, por si alguien manda el form a mano).
+DELIVERY_LIMITES = {'sur': -12.16, 'norte': -11.92, 'oeste': -75.33, 'este': -75.08}
+
+# Ajustes cargados en memoria al arrancar y refrescados al guardar.
+AJUSTES = {}
+
+
+def _cargar_ajustes(cur):
+    try:
+        cur.execute("SELECT clave, valor FROM ajustes")
+        AJUSTES.clear()
+        for fila in cur.fetchall():
+            AJUSTES[fila['clave']] = fila['valor']
+    except Exception:
+        pass
+
+
+def _sembrar_ajustes(cur):
+    """Crea los ajustes que falten. Idempotente: nunca pisa el valor guardado."""
+    for clave, valor in AJUSTES_SEMILLA.items():
+        try:
+            cur.execute("INSERT IGNORE INTO ajustes (clave, valor) VALUES (%s, %s)",
+                        (clave, valor))
+        except Exception:
+            pass
+
+
+def ajuste(clave, por_defecto=''):
+    return (AJUSTES.get(clave) or por_defecto).strip()
+
+
+def ajuste_float(clave, por_defecto=0.0):
+    try:
+        return float(ajuste(clave) or por_defecto)
+    except (TypeError, ValueError):
+        return por_defecto
+
+
+def guardar_ajustes(valores):
+    """Guarda ajustes en la BD y los refresca en memoria."""
+    cur = mysql.connection.cursor()
+    try:
+        for clave, valor in valores.items():
+            cur.execute("""INSERT INTO ajustes (clave, valor) VALUES (%s, %s)
+                           ON DUPLICATE KEY UPDATE valor=VALUES(valor)""", (clave, str(valor)))
+        mysql.connection.commit()
+        _cargar_ajustes(cur)
+    finally:
+        cur.close()
+    # La dirección impresa (comprobantes, reclamaciones) sigue a lo guardado.
+    EMPRESA_INFO['domicilio'] = ajuste('empresa_direccion', EMPRESA_INFO['domicilio'])
+
+
+def costo_envio(subtotal):
+    """Costo de envío del pedido: tarifa plana, gratis desde el monto mínimo.
+
+    Aplica solo a delivery; el recojo en tienda siempre es 0.
+    """
+    gratis_desde = ajuste_float('envio_gratis_desde', 0)
+    if gratis_desde > 0 and float(subtotal or 0) >= gratis_desde:
+        return 0.0
+    return round(ajuste_float('envio_delivery', 15), 2)
+
+
+def minimo_delivery():
+    """Monto mínimo del carrito para poder elegir delivery (por debajo solo recojo)."""
+    return ajuste_float('delivery_minimo', 50)
+
+
+def distrito_desde_punto(lat, lon):
+    """Distrito aproximado a partir del punto del mapa.
+
+    El geocodificador puede no devolver un distrito reconocible; con estas
+    cajas (aproximadas, no son límites oficiales) el repartidor igual ve a qué
+    zona pertenece el pedido. El orden importa: El Tambo es la franja norte,
+    Chilca la del sur y Huancayo el resto dentro de la caja.
+    """
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return ''
+    if not _dentro_de_delivery(lat, lon):
+        return ''
+    if lat >= -12.055:
+        return 'El Tambo'
+    # Chilca ocupa la franja suroeste (desde ~Av. San Carlos hacia el sur);
+    # entre esa zona y El Tambo queda Huancayo. Es solo un aproximado: el
+    # checkout prefiere el distrito que devuelve el geocodificador y aquí
+    # únicamente se usa como respaldo cuando no llega ninguno reconocible.
+    if lat <= -12.072:
+        return 'Chilca'
+    return 'Huancayo'
+
+
+def _dentro_de_delivery(lat, lon):
+    """True si el punto cae dentro de Chilca, El Tambo o Huancayo."""
+    try:
+        lat, lon = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return False
+    return (DELIVERY_LIMITES['sur'] <= lat <= DELIVERY_LIMITES['norte']
+            and DELIVERY_LIMITES['oeste'] <= lon <= DELIVERY_LIMITES['este'])
+
+
+def _normalizar_clave(texto):
+    """Clave de caché: minúsculas, sin acentos y con espacios simples."""
+    texto = ' '.join((texto or '').strip().lower().split())
+    return texto.replace('á', 'a').replace('é', 'e').replace('í', 'i') \
+                .replace('ó', 'o').replace('ú', 'u').replace('ñ', 'n')
+
+
+def _geocoder_buscar(texto):
+    """Dirección -> (lat, lon, etiqueta). Photon y Nominatim de respaldo."""
+    cabeceras = {'User-Agent': 'MultiserviciosRichard/1.0 (mapa de entrega)'}
+    url, params = ('https://photon.komoot.io/api/',
+                   {'q': texto, 'limit': 1, 'lang': 'es'})
+    try:
+        r = requests.get(url, params=params, headers=cabeceras, timeout=8)
+        if r.status_code == 200 and r.json().get('features'):
+            item = r.json()['features'][0]
+            lon, lat = item['geometry']['coordinates'][:2]
+            p = item.get('properties', {})
+            partes = [p.get('name') or p.get('street'), p.get('housenumber'),
+                      p.get('district'), p.get('city'), p.get('state')]
+            etiqueta = ', '.join(str(x) for x in partes if x) or texto
+            return float(lat), float(lon), etiqueta
+    except Exception:
+        pass
+    url = 'https://nominatim.openstreetmap.org/search'
+    params = {'q': texto, 'format': 'json', 'limit': 1, 'countrycodes': 'pe',
+              'accept-language': 'es'}
+    try:
+        r = requests.get(url, params=params, headers=cabeceras, timeout=8)
+        if r.status_code == 200 and r.json():
+            item = r.json()[0]
+            return float(item['lat']), float(item['lon']), item.get('display_name') or texto
+    except Exception:
+        pass
+    return None
+
+
+def _geocoder_inverso(lat, lon):
+    """(lat, lon) -> (dirección, distrito). Photon y Nominatim de respaldo.
+
+    El distrito se deriva de la etiqueta devuelta (primer segmento); si no se
+    reconoce, se devuelve vacío y el servidor lo completa con el punto.
+    """
+    cabeceras = {'User-Agent': 'MultiserviciosRichard/1.0 (mapa de entrega)'}
+    for url, params in (
+        ('https://photon.komoot.io/reverse', {'lat': lat, 'lon': lon, 'lang': 'es'}),
+        ('https://nominatim.openstreetmap.org/reverse',
+         {'lat': lat, 'lon': lon, 'format': 'json', 'accept-language': 'es'}),
+    ):
+        try:
+            r = requests.get(url, params=params, headers=cabeceras, timeout=8)
+            if r.status_code != 200:
+                continue
+            datos = r.json()
+            if 'features' in datos:   # photon
+                if not datos['features']:
+                    continue
+                p = datos['features'][0].get('properties', {})
+                partes = [p.get('name') or p.get('street'), p.get('housenumber'),
+                          p.get('district'), p.get('city')]
+                etiqueta = ', '.join(str(x) for x in partes if x)
+            elif datos.get('display_name'):   # nominatim
+                etiqueta = datos['display_name']
+            else:
+                continue
+            if etiqueta:
+                return etiqueta
+        except Exception:
+            continue
+    return None
+
+
+def _cache_geo(cur, clave):
+    """Lectura de la caché de geocodificación (devuelve la fila o None)."""
+    try:
+        cur.execute("SELECT lat, lon, direccion FROM geocache WHERE clave=%s", (clave,))
+        return cur.fetchone()
+    except Exception:
+        return None
+
+
+def _cache_geo_guardar(cur, clave, lat, lon, direccion):
+    try:
+        cur.execute("""INSERT INTO geocache (clave, lat, lon, direccion)
+                       VALUES (%s,%s,%s,%s)
+                       ON DUPLICATE KEY UPDATE lat=VALUES(lat), lon=VALUES(lon),
+                       direccion=VALUES(direccion)""",
+                    (clave, lat, lon, direccion[:300]))
+    except Exception:
+        pass
+
 
 def _fecha_legible(valor, formato='%d/%m/%Y'):
     """Formatea fechas de la BD aunque el driver devuelva texto."""
@@ -1036,11 +1254,42 @@ def _init_db_inner():
             # Evita cobros/ventas duplicadas por doble clic o reintentos.
             "ALTER TABLE ventas ADD UNIQUE INDEX ux_ventas_culqi_token (culqi_token)",
             "ALTER TABLE ventas ADD UNIQUE INDEX ux_ventas_culqi_charge (culqi_charge_id)",
+            # Delivery: tipo de entrega (recojo/delivery), distrito, coordenadas
+            # del punto del cliente y costo de envío cobrado.
+            "ALTER TABLE ventas ADD COLUMN tipo_entrega VARCHAR(20) DEFAULT 'recojo'",
+            "ALTER TABLE ventas ADD COLUMN distrito VARCHAR(50)",
+            "ALTER TABLE ventas ADD COLUMN latitud DOUBLE NULL",
+            "ALTER TABLE ventas ADD COLUMN longitud DOUBLE NULL",
+            "ALTER TABLE ventas ADD COLUMN costo_envio DECIMAL(10,2) DEFAULT 0",
+            # El seguimiento lleva los mismos datos para que /entregas no tenga
+            # que cruzar con ventas (y sobreviva a un cambio de dirección).
+            "ALTER TABLE seguimiento_entregas ADD COLUMN tipo_entrega VARCHAR(20) DEFAULT 'recojo'",
+            "ALTER TABLE seguimiento_entregas ADD COLUMN distrito VARCHAR(50)",
+            "ALTER TABLE seguimiento_entregas ADD COLUMN latitud DOUBLE NULL",
+            "ALTER TABLE seguimiento_entregas ADD COLUMN longitud DOUBLE NULL",
+            "ALTER TABLE seguimiento_entregas ADD COLUMN costo_envio DECIMAL(10,2) DEFAULT 0",
         ):
             try:
                 cur.execute(sql)
             except Exception:
                 pass
+
+        # Ajustes (coordenadas de la tienda y costo de envío) y caché del
+        # geocodificador: se crean al arrancar y los ajustes se rellenan solos
+        # la primera vez.
+        for tabla in ("""CREATE TABLE IF NOT EXISTS ajustes (
+                clave VARCHAR(60) PRIMARY KEY,
+                valor TEXT)""",
+                      """CREATE TABLE IF NOT EXISTS geocache (
+                clave VARCHAR(120) PRIMARY KEY,
+                lat DOUBLE NULL, lon DOUBLE NULL,
+                direccion VARCHAR(300),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""):
+            cur.execute(tabla)
+        _sembrar_ajustes(cur)
+        _cargar_ajustes(cur)
+        if ajuste('empresa_direccion'):
+            EMPRESA_INFO['domicilio'] = ajuste('empresa_direccion')
 
         if not _tenia_estado_pago:
             try:
@@ -2812,6 +3061,130 @@ def _consultar_documento_api(tipo, numero):
                 _CONSULTA_CACHE.pop(next(iter(_CONSULTA_CACHE)))
         _CONSULTA_CACHE[clave] = (ahora, datos)
     return dict(datos), None
+
+
+@app.route('/ajustes')
+def ajustes_pagina():
+    """Ajustes del negocio (mapa y delivery). Solo admin."""
+    if not _es_admin():
+        return redirect('/login')
+    cur = mysql.connection.cursor()
+    _cargar_ajustes(cur)
+    cur.close()
+    return render_template('ajustes.html',
+                           a=AJUSTES_SEMILLA,
+                           guardado=AJUSTES,
+                           distritos=DISTRITOS_DELIVERY)
+
+
+@app.route('/ajustes', methods=['POST'])
+def ajustes_guardar():
+    if not _es_admin():
+        return redirect('/login')
+    if not validate_csrf():
+        flash('Token CSRF inválido.', 'danger')
+        return redirect('/ajustes')
+
+    def _num(valor, por_defecto, minimo, maximo):
+        try:
+            n = float(str(valor).replace(',', '.'))
+        except (TypeError, ValueError):
+            n = por_defecto
+        return max(minimo, min(maximo, n))
+
+    lat = _num(request.form.get('empresa_lat'), -12.0728939, -12.16, -11.92)
+    lon = _num(request.form.get('empresa_lon'), -75.1904488, -75.33, -75.08)
+    direccion = ' '.join((request.form.get('empresa_direccion') or '').strip().split())[:160]
+    if not direccion:
+        direccion = AJUSTES_SEMILLA['empresa_direccion']
+    guardar_ajustes({
+        'empresa_lat': lat,
+        'empresa_lon': lon,
+        'empresa_direccion': direccion,
+        'envio_delivery': _num(request.form.get('envio_delivery'), 15, 0, 200),
+        'envio_gratis_desde': _num(request.form.get('envio_gratis_desde'), 300, 0, 9999),
+        'delivery_minimo': _num(request.form.get('delivery_minimo'), 50, 0, 9999),
+    })
+    flash('Ajustes guardados.', 'success')
+    return redirect('/ajustes')
+
+
+@app.route('/api/geocodificar', methods=['POST'])
+def api_geocodificar():
+    """Dirección -> coordenadas (Photon, con Nominatim de respaldo).
+
+    Va por el servidor para no depender de CORS y para cachear el resultado:
+    geocodificar cada vez que alguien abre el checkout gasta la cuota de OSM.
+    """
+    if 'user_id' not in session and 'rol' not in session:
+        return jsonify({'ok': False, 'error': 'Inicia sesión para usar el mapa.'}), 401
+
+    data = request.get_json(silent=True) or {}
+    texto = ' '.join(str(data.get('q') or '').split())[:200]
+    if len(texto) < 5:
+        return jsonify({'ok': False, 'error': 'Escribe una dirección más completa.'}), 400
+
+    clave = 'q:' + _normalizar_clave(texto)
+    cur = mysql.connection.cursor()
+    fila = _cache_geo(cur, clave)
+    if fila:
+        cur.close()
+        return jsonify({'ok': True, 'lat': fila['lat'], 'lon': fila['lon'],
+                        'direccion': fila['direccion'], 'cache': True})
+
+    resultado = _geocoder_buscar(f'{texto}, Chilca, Huancayo, Junín, Perú')
+    if not resultado:
+        resultado = _geocoder_buscar(f'{texto}, Huancayo, Perú')
+    if not resultado:
+        cur.close()
+        return jsonify({'ok': False,
+                        'error': 'No se encontró esa dirección en el mapa. '
+                                 'Ubícala arrastrando el punto.'}), 200
+    lat, lon, etiqueta = resultado
+    _cache_geo_guardar(cur, clave, lat, lon, etiqueta)
+    mysql.connection.commit()
+    cur.close()
+    return jsonify({'ok': True, 'lat': lat, 'lon': lon, 'direccion': etiqueta})
+
+
+@app.route('/api/geocodificar-inverso', methods=['POST'])
+def api_geocodificar_inverso():
+    """Coordenadas -> dirección (al arrastrar el punto del mapa)."""
+    if 'user_id' not in session and 'rol' not in session:
+        return jsonify({'ok': False, 'error': 'Inicia sesión para usar el mapa.'}), 401
+
+    data = request.get_json(silent=True) or {}
+    try:
+        lat, lon = float(data.get('lat')), float(data.get('lon'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Coordenadas inválidas.'}), 400
+    if not _dentro_de_delivery(lat, lon):
+        return jsonify({'ok': False, 'dentro': False,
+                        'error': 'Ese punto queda fuera de Chilca, El Tambo o Huancayo.'}), 200
+
+    clave = 'r:%.6f,%.6f' % (lat, lon)
+    cur = mysql.connection.cursor()
+    fila = _cache_geo(cur, clave)
+    if fila:
+        cur.close()
+        return jsonify({'ok': True, 'dentro': True, 'direccion': fila['direccion'], 'cache': True})
+
+    etiqueta = _geocoder_inverso(lat, lon)
+    cur.close()
+    if not etiqueta:
+        return jsonify({'ok': False,
+                        'error': 'No se pudo identificar esa ubicación. '
+                                 'Mueve el punto un poco e inténtalo otra vez.'}), 200
+    # El distrito se toma del punto (ya no lo elige el cliente): el primer
+    # segmento de la etiqueta casi siempre es el distrito (Chilca/El Tambo/Huancayo).
+    distrito = ''
+    primero = (etiqueta.split(',')[0] or '').strip()
+    for d in DISTRITOS_DELIVERY:
+        if primero.lower() == d.lower() or d.lower() in primero.lower():
+            distrito = d
+            break
+    return jsonify({'ok': True, 'dentro': True, 'direccion': etiqueta,
+                    'distrito': distrito})
 
 
 @app.route('/api/consultar-documento', methods=['POST'])
@@ -6356,6 +6729,16 @@ def checkout():
     kpi_reg.sesion_compra(kpi_reg.PASO_CHECKOUT)
     return render_template('checkout.html', items=items, total=total,
                            direcciones=direcciones, usuario=usuario,
+                           distritos=DISTRITOS_DELIVERY,
+                           limites=DELIVERY_LIMITES,
+                           envio_delivery=ajuste_float('envio_delivery', 15),
+                           envio_gratis_desde=ajuste_float('envio_gratis_desde', 300),
+                           delivery_minimo=ajuste_float('delivery_minimo', 50),
+                           delivery_permitido=(total >= ajuste_float('delivery_minimo', 50)),
+                           distrito_valor='',
+                           tienda_lat=ajuste('empresa_lat', '-12.0728939'),
+                           tienda_lon=ajuste('empresa_lon', '-75.1904488'),
+                           tienda_direccion=ajuste('empresa_direccion'),
                            culqi_public_key=CULQI_PUBLIC_KEY,
                            culqi_rsa_id=CULQI_RSA_ID,
                            culqi_rsa_public_key=CULQI_RSA_PUBLIC_KEY,
@@ -6395,8 +6778,55 @@ def procesar_compra():
     direccion_envio = request.form.get('direccion_envio', '')
     notas_entrega = request.form.get('notas_entrega', '').strip()
 
-    if not doc_numero or not telefono or not direccion_envio:
+    # Delivery: tipo de entrega (recojo/delivery), distrito, coordenadas del
+    # punto del cliente y costo de envío cobrado. La validez del distrito se
+    # rechaza igual en el servidor: si alguien manda el form a mano, no entra.
+    tipo_entrega = (request.form.get('tipo_entrega') or '').strip().lower()
+    if not tipo_entrega:
+        # Compatibilidad con lo que el cliente tenga abierto antes del cambio:
+        # sin distrito, por definición, no hay delivery.
+        tipo_entrega = 'recojo' if (request.form.get('distrito') or '') == '' else 'delivery'
+    distrito = (request.form.get('distrito') or '').strip()
+    lat_form = (request.form.get('lat') or '').strip()
+    lon_form = (request.form.get('lon') or '').strip()
+
+    if not doc_numero or not telefono:
         return _chk_error('Todos los campos son obligatorios.')
+    if tipo_entrega not in ('recojo', 'delivery'):
+        return _chk_error('Elige recojo en tienda o delivery.')
+    if tipo_entrega == 'recojo':
+        # El texto de la tienda se guarda tal cual para que el comprobante y el
+        # ticket lo muestren igual que en el checkout.
+        direccion_envio = ajuste('empresa_direccion')
+        distrito, latitud, longitud = 'Chilca', None, None
+        envio_costo = 0.0
+    elif tipo_entrega == 'delivery':
+        if not _dentro_de_delivery(lat_form or 0, lon_form or 0) and not lat_form and not lon_form:
+            return _chk_error('Ubica el punto de tu dirección en el mapa.')
+        direccion_envio = ' '.join(str(direccion_envio or '').split())
+        if len(direccion_envio) < 8:
+            return _chk_error('No se pudo identificar tu dirección. Muévelo un poco el punto '
+                              'e inténtalo otra vez.')
+        latitud = longitud = None
+        if lat_form or lon_form:
+            if not _dentro_de_delivery(lat_form, lon_form):
+                return _chk_error('El punto del mapa queda fuera de Chilca, '
+                                  'El Tambo o Huancayo.')
+            try:
+                latitud, longitud = float(lat_form), float(lon_form)
+            except (TypeError, ValueError):
+                return _chk_error('Las coordenadas del punto no son válidas.')
+        # El distrito ya no lo elige el cliente: sale del punto que marcó (la
+        # geocodificación inversa lo devuelve) o se calcula con el punto.
+        distrito = distrito or distrito_desde_punto(latitud, longitud)
+        envio_costo = 0.0
+    else:
+        # tipo_entrega llegó con un valor que no conocemos (form viejo abierto):
+        # no se bloquea la compra, se trata como recojo.
+        tipo_entrega = 'recojo'
+        direccion_envio = ajuste('empresa_direccion')
+        distrito, latitud, longitud = 'Chilca', None, None
+        envio_costo = 0.0
     if doc_tipo not in ('dni', 'ruc'):
         return _chk_error('Tipo de documento inválido.')
     if not doc_numero.isdigit():
@@ -6534,6 +6964,16 @@ def procesar_compra():
                 return _chk_error(f'Stock insuficiente para: {item["nombre"]}. Solo quedan {stock} unidad(es).', '/carrito')
             total += item['precio'] * item['cantidad']
 
+        # Envío: tarifa plana, gratis desde el monto mínimo. Si el carrito está
+        # por debajo del mínimo para delivery, solo queda el recojo en tienda.
+        if tipo_entrega == 'delivery':
+            if float(total) < minimo_delivery():
+                return _chk_error('Para envío la compra debe ser de S/ %.2f o más. '
+                                  'Si es menor, elige recojo en tienda.'
+                                  % minimo_delivery())
+            envio_costo = float(costo_envio(total))
+        total = float(total) + envio_costo
+
         total_centimos = int(round(float(total) * 100))
 
         if metodo_pago in ('tarjeta', 'yape') and total_centimos < CULQI_MONTO_MINIMO:
@@ -6591,13 +7031,17 @@ def procesar_compra():
 
         # 2) Con el cobro aprobado (o con transferencia pendiente) se registra
         #    la venta. Todo va en la misma transacción.
+        #    El monto ya incluye el envío (total = productos + costo_envio),
+        #    así que lo que cobra Culqi y lo que guarda la venta coinciden.
         cur.execute("""INSERT INTO ventas
             (cliente_id, total, metodo_pago, direccion_envio, documento, doc_tipo,
              nombre, apellido, telefono, correo, notas_entrega, estado_pago,
+             tipo_entrega, distrito, latitud, longitud, costo_envio,
              culqi_charge_id, culqi_token, culqi_respuesta, pagado_en)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo,
              nombres, apellidos, telefono, correo, notas_entrega, estado_pago,
+             tipo_entrega, distrito, latitud, longitud, envio_costo,
              charge_id, culqi_token or None,
              json.dumps(cargo, ensure_ascii=False) if cargo else None,
              datetime.now() if estado_pago == 'pagado' else None))
@@ -6605,10 +7049,12 @@ def procesar_compra():
         # Toda venta nace con seguimiento para que /entregas y el KPI de la
         # seccion 1 lean exactamente la misma fuente desde el primer minuto.
         cur.execute("""INSERT INTO seguimiento_entregas
-            (venta_id, estado, direccion_envio, notas)
-            VALUES(%s, 'pendiente', %s, %s)""",
+            (venta_id, estado, direccion_envio, notas,
+             tipo_entrega, distrito, latitud, longitud, costo_envio)
+            VALUES(%s, 'pendiente', %s, %s, %s, %s, %s, %s, %s)""",
             (venta_id, direccion_envio,
-             'Seguimiento creado automaticamente al registrar la venta.'))
+             'Seguimiento creado automaticamente al registrar la venta.',
+             tipo_entrega, distrito, latitud, longitud, envio_costo))
         for item in items:
             cur.execute("INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio) VALUES(%s,%s,%s,%s)",
                         (venta_id, item['id'], item['cantidad'], item['precio']))

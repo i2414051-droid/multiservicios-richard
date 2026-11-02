@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+  <h2 style="color:#f39c12;font-weight:800"><i class="bi bi-gear-wide-connected me-2"></i>Ajustes</h2>
+  <p class="text-muted">Ubicación de la tienda (mapa) y costo de envío por distrito.</p>
+
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="card border-0 shadow tc">
+        <div class="card-body">
+          <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-geo-alt me-2"></i>Ubicación de la tienda</h5>
+          <form method="POST" action="/ajustes" id="formAjustes">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+              <label class="form-label fw-bold">Dirección (la que ven los clientes)</label>
+              <input type="text" name="empresa_direccion" class="form-control bg-dark text-white border-secondary"
+                     maxlength="160" required
+                     value="{{ guardado.get('empresa_direccion') or a['empresa_direccion'] }}"
+                     placeholder="Av. Leoncio Prado 1499 - Chilca, Huancayo.">
+            </div>            <div class="row g-2">
+              <div class="col-md-6 mb-3">
+                <label class="form-label fw-bold">Latitud</label>
+                <input type="text" name="empresa_lat" id="ajusteLat" class="form-control bg-dark text-white border-secondary"
+                       value="{{ guardado.get('empresa_lat') or a['empresa_lat'] }}">
+              </div>
+              <div class="col-md-6 mb-3">
+                <label class="form-label fw-bold">Longitud</label>
+                <input type="text" name="empresa_lon" id="ajusteLon" class="form-control bg-dark text-white border-secondary"
+                       value="{{ guardado.get('empresa_lon') or a['empresa_lon'] }}">
+              </div>
+            </div>            <div class="mapa-contenedor border-0" id="mapaAjuste" style="height:320px;border-radius:14px"></div>
+            <p class="small text-muted mt-2 mb-0">
+              <i class="bi bi-info-circle me-1"></i>
+              Mueve el pin hasta la puerta de la tienda y guarda. El punto no puede salir de Chilca, El Tambo o Huancayo.
+            </p>
+
+            <h5 class="mt-4" style="color:#f39c12;font-weight:700"><i class="bi bi-truck me-2"></i>Envío</h5>
+            <div class="row g-2">
+              <div class="col-md-4 mb-3">
+                <label class="form-label fw-bold">Tarifa de envío (S/)</label>
+                <div class="input-group">
+                  <span class="input-group-text bg-dark text-white border-secondary">S/</span>
+                  <input type="number" name="envio_delivery" class="form-control bg-dark text-white border-secondary"
+                         min="0" max="200" step="0.5" value="{{ guardado.get('envio_delivery') or a['envio_delivery'] }}">
+                </div>
+                <small class="text-muted">A Chilca, El Tambo y Huancayo.</small>
+              </div>
+              <div class="col-md-4 mb-3">
+                <label class="form-label fw-bold">Envío gratis desde (S/)</label>
+                <input type="number" name="envio_gratis_desde" class="form-control bg-dark text-white border-secondary"
+                       min="0" step="10" value="{{ guardado.get('envio_gratis_desde') or a['envio_gratis_desde'] }}">
+                <small class="text-muted">0 = nunca gratis.</small>
+              </div>
+              <div class="col-md-4 mb-3">
+                <label class="form-label fw-bold">Compra mínima para envío (S/)</label>
+                <input type="number" name="delivery_minimo" class="form-control bg-dark text-white border-secondary"
+                       min="0" step="10" value="{{ guardado.get('delivery_minimo') or a['delivery_minimo'] }}">
+                <small class="text-muted">Por debajo solo hay recojo en tienda.</small>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-warning fw-bold">
+              <i class="bi bi-save me-1"></i> Guardar ajustes
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card border-0 shadow tc">
+        <div class="card-body">
+          <h5 style="color:#f39c12;font-weight:700"><i class="bi bi-cart-check me-2"></i>Cómo lo verá el cliente</h5>
+      <p class="text-muted small mb-2">Con estos ajustes, un pedido de S/ 100 cuesta:</p>
+      <ul class="list-group list-group-flush bg-transparent">
+        <li class="list-group-item bg-transparent d-flex justify-content-between text-white border-bottom-secondary">
+          <span>Recojo en tienda</span><strong>S/ 0.00</strong>
+        </li>
+        <li class="list-group-item bg-transparent d-flex justify-content-between text-white border-bottom-secondary">
+          <span>Envío (Chilca, El Tambo o Huancayo)</span>
+          <strong>S/ {{ "%.2f"|format((guardado.get('envio_delivery') or a['envio_delivery'])|float) }}</strong>
+        </li>
+        <li class="list-group-item bg-transparent d-flex justify-content-between text-white border-bottom-secondary">
+          <span>Envío gratis desde</span>
+          <strong>S/ {{ "%.2f"|format((guardado.get('envio_gratis_desde') or a['envio_gratis_desde'])|float) }}</strong>
+        </li>
+        <li class="list-group-item bg-transparent d-flex justify-content-between text-white border-bottom-secondary">
+          <span>Compra mínima para delivery</span>
+          <strong>S/ {{ "%.2f"|format((guardado.get('delivery_minimo') or a['delivery_minimo'])|float) }}</strong>
+        </li>
+      </ul>
+      <p class="small text-muted mt-3 mb-0">
+        <i class="bi bi-pin-map me-1"></i>También cambia el domicilio que se imprime en el
+        <a href="/libro-de-reclamaciones">Libro de Reclamaciones</a>.
+      </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block head %}
+<style>.mapa-contenedor{width:100%;border:1px solid var(--border-card)}</style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+<script>
+/* El mapa de los ajustes: el dueño mueve el pin hasta la puerta de la tienda. */
+window.addEventListener('DOMContentLoaded', function(){
+  var div = document.getElementById('mapaAjuste');
+  if (!div || !window.L) return;
+  var lat = parseFloat(document.getElementById('ajusteLat').value);
+  var lon = parseFloat(document.getElementById('ajusteLon').value);
+  var limite = {{ limites|tojson if limites is defined else '{"sur":-12.16,"norte":-11.92,"oeste":-75.33,"este":-75.08}' }};
+  var caja = [[limite.sur, limite.oeste], [limite.norte, limite.este]];
+  var mapa = L.map(div, {zoomControl: true, scrollWheelZoom: true})
+             .setView([lat, lon], 15);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap'
+  }).addTo(mapa);
+  mapa.fitBounds(caja);
+  mapa.setMaxBounds(caja);
+  var pin = L.marker([lat, lon], {draggable: true}).addTo(mapa);
+  pin.on('dragend', function(){
+    var p = pin.getLatLng();
+    document.getElementById('ajusteLat').value = p.lat.toFixed(7);
+    document.getElementById('ajusteLon').value = p.lng.toFixed(7);
+  });
+  mapa.on('click', function(e){ pin.setLatLng(e.latlng); pin.fire('dragend'); });
+});
+</script>
+{% endblock %}
