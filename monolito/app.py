@@ -1734,11 +1734,20 @@ def _password_valida(password):
 
     bcrypt 5 rechaza (ValueError) las cadenas de mas de 72 bytes, asi que se
     valida aqui: si no, un registro con una clave larga terminaba en error 500.
+    Ademas exige complejidad: mayuscula, minuscula, numero y caracter especial.
     """
     if len(password) < 8:
         return False, 'La contraseña debe tener al menos 8 caracteres.'
     if len(password.encode('utf-8')) > 72:
         return False, 'La contraseña no puede superar los 72 caracteres.'
+    if not re.search(r'[A-Z]', password):
+        return False, 'La contraseña debe tener al menos una letra mayúscula.'
+    if not re.search(r'[a-z]', password):
+        return False, 'La contraseña debe tener al menos una letra minúscula.'
+    if not re.search(r'[0-9]', password):
+        return False, 'La contraseña debe tener al menos un número.'
+    if not re.search(r'[^A-Za-z0-9]', password):
+        return False, 'La contraseña debe tener al menos un carácter especial (por ejemplo @, #, $, !).'
     return True, ''
 
 
@@ -2462,6 +2471,14 @@ def registro():
         documento_tipo   = request.form.get('documento_tipo', 'dni')
         documento_numero = request.form.get('documento_numero', '').strip()
         telefono         = request.form.get('telefono', '').strip()
+        # Nombres y apellidos mínimos de 4 caracteres (coherente con el resto
+        # del formulario: no se crean cuentas con datos incompletos).
+        if len(nombres) < 4:
+            flash('El nombre debe tener al menos 4 caracteres.', 'danger')
+            return redirect('/registro')
+        if len(apellidos) < 4:
+            flash('Los apellidos deben tener al menos 4 caracteres.', 'danger')
+            return redirect('/registro')
         if password != confirmar:
             flash('Las contraseñas no coinciden.', 'danger')
             return redirect('/registro')
@@ -2535,7 +2552,7 @@ def dashboard():
 
     cur.execute("""
         SELECT v.id, v.total, v.fecha, v.estado, v.nombre, v.documento
-        FROM ventas v ORDER BY v.fecha DESC LIMIT 5
+        FROM ventas v ORDER BY v.id DESC LIMIT 5
     """)
     ultimas_ventas = cur.fetchall()
 
@@ -2901,6 +2918,27 @@ def editar_producto(id):
                            categorias=CATEGORIAS, extras=extras,
                            max_imagenes=MAX_IMAGENES_PRODUCTO)
 
+def _destino_seguro(destino):
+    """Ruta interna a la que volver tras una acción de producto.
+
+    Evita un open redirect: solo se aceptan rutas relativas de la propia app.
+    """
+    if destino and destino.startswith('/') and not destino.startswith('//'):
+        return destino
+    return '/admin'
+
+
+def _tras_compra(venta_id):
+    """A dónde va el usuario tras comprar.
+
+    El administrador va directo a /historial-compras (solo él ve esa página y
+    quiere ver la venta registrada); el cliente a su pantalla de confirmación.
+    """
+    if session.get('rol') in ('admin', 'administrador'):
+        return '/historial-compras'
+    return f'/confirmacion/{venta_id}'
+
+
 @app.route('/eliminar_producto/<int:id>')
 def eliminar_producto(id):
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
@@ -2909,7 +2947,7 @@ def eliminar_producto(id):
     cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='inactivo' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
-    return redirect('/admin')
+    return redirect(_destino_seguro(request.args.get('desde')))
 
 @app.route('/activar_producto/<int:id>')
 def activar_producto(id):
@@ -2919,7 +2957,7 @@ def activar_producto(id):
     cur.execute(f"UPDATE {ALMACEN_DB}.productos SET estado='activo' WHERE id=%s", (id,))
     mysql.connection.commit()
     cur.close()
-    return redirect('/admin')
+    return redirect(_destino_seguro(request.args.get('desde')))
 
 @app.route('/eliminar_producto_definitivo/<int:id>')
 def eliminar_producto_definitivo(id):
@@ -2931,7 +2969,7 @@ def eliminar_producto_definitivo(id):
     mysql.connection.commit()
     cur.close()
     flash('Producto eliminado permanentemente.', 'success')
-    return redirect('/admin')
+    return redirect(_destino_seguro(request.args.get('desde')))
 
 # ─────────────────────────────────────────────
 # CONSULTAR DNI/RUC
@@ -3277,7 +3315,19 @@ def ver_carrito():
         """)
     sugeridos = cur.fetchall()
     cur.close()
-    return render_template('carrito.html', productos=productos, total=total, sugeridos=sugeridos)
+    # Total a pagar en el carrito: suma el delivery (S/ 15) cuando el subtotal
+    # está entre el mínimo y el umbral de gratis; fuera de ese rango no suma.
+    # El checkout repite la misma lógica para que coincidan.
+    sub = float(total or 0)
+    d_min = ajuste_float('delivery_minimo', 50)
+    d_tarifa = ajuste_float('envio_delivery', 15)
+    d_gratis = ajuste_float('envio_gratis_desde', 300)
+    envio_monto = 0.0
+    if d_min <= sub and (d_gratis <= 0 or sub < d_gratis):
+        envio_monto = d_tarifa
+    return render_template('carrito.html', productos=productos, total=total, sugeridos=sugeridos,
+                           envio_delivery=d_tarifa, envio_gratis_desde=d_gratis,
+                           delivery_minimo=d_min, total_pagar=round(sub + envio_monto, 2))
 
 
 # Tope de unidades por linea de carrito. Si el stock es menor, manda el stock:
@@ -3472,7 +3522,7 @@ def historial():
     cur.execute("""
         SELECT v.id, v.total, v.fecha, v.estado, c.motivo_codigo, c.motivo_detalle
         FROM ventas v LEFT JOIN cancelaciones c ON c.venta_id=v.id
-        WHERE v.cliente_id=%s ORDER BY v.fecha DESC
+        WHERE v.cliente_id=%s ORDER BY v.id DESC
     """, (user_id,))
     ventas = cur.fetchall()
     hist = []
@@ -3519,7 +3569,7 @@ def historial_compras():
     sql_data = f"""SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular, v.estado,
         COALESCE(v.oculta,0) AS oculta, c.motivo_codigo, c.motivo_detalle, c.cancelado_por
         FROM ventas v JOIN usuarios u ON v.cliente_id=u.id {join_cancel}
-        {where} ORDER BY v.fecha DESC"""
+        {where} ORDER BY v.id DESC"""
     items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
     historial = []
     for v in items:
@@ -3651,7 +3701,7 @@ def historial_compras_pdf():
     sql = f"""SELECT v.id, u.correo, v.total, v.fecha, v.documento,
                      v.nombre AS titular, v.estado
               FROM ventas v JOIN usuarios u ON v.cliente_id=u.id {join_cancel}
-              {where} ORDER BY v.fecha DESC"""
+              {where} ORDER BY v.id DESC"""
     cur.execute(sql, tuple(params))
     ventas = cur.fetchall()
 
@@ -4132,7 +4182,8 @@ def actualizar_estado_venta(venta_id):
     cur.execute("UPDATE ventas SET estado=%s WHERE id=%s", (estado, venta_id))
     # Replicar al seguimiento de entregas si existe (para que se comuniquen)
     if estado == 'entregado':
-        cur.execute("UPDATE seguimiento_entregas SET estado='entregado', fecha_entrega=NOW() WHERE venta_id=%s", (venta_id,))
+        cur.execute("UPDATE seguimiento_entregas SET estado='entregado', fecha_entrega=%s WHERE venta_id=%s",
+                    (_ahora_lima(), venta_id))
     else:
         seg_estado = {'en espera': 'pendiente', 'cancelado': 'cancelado'}.get(estado, 'pendiente')
         cur.execute("UPDATE seguimiento_entregas SET estado=%s WHERE venta_id=%s", (seg_estado, venta_id))
@@ -6080,8 +6131,8 @@ def crear_entrega(venta_id):
     direccion = request.form.get('direccion_envio', '')
     fecha_est = request.form.get('fecha_estimada') or None
     notas = request.form.get('notas', '')
-    cur.execute("INSERT INTO seguimiento_entregas (venta_id, estado, direccion_envio, fecha_estimada, notas) VALUES (%s,'pendiente',%s,%s,%s)",
-                (venta_id, direccion, fecha_est, notas))
+    cur.execute("INSERT INTO seguimiento_entregas (created_at, venta_id, estado, direccion_envio, fecha_estimada, notas) VALUES (%s,%s,'pendiente',%s,%s,%s)",
+                (_ahora_lima(), venta_id, direccion, fecha_est, notas))
     mysql.connection.commit()
     _invalidar_cache_kpi()
     cur.close()
@@ -6119,8 +6170,8 @@ def actualizar_entrega(id):
         flash(f'Venta #{venta_id} ya está cancelada. Motivo no editable.', 'warning')
         return redirect('/entregas')
     if nuevo_estado == 'entregado':
-        cur.execute("UPDATE seguimiento_entregas SET estado=%s, notas=%s, fecha_entrega=NOW() WHERE id=%s",
-                    (nuevo_estado, notas, id))
+        cur.execute("UPDATE seguimiento_entregas SET estado=%s, notas=%s, fecha_entrega=%s WHERE id=%s",
+                    (nuevo_estado, notas, _ahora_lima(), id))
     else:
         cur.execute("UPDATE seguimiento_entregas SET estado=%s, notas=%s WHERE id=%s",
                     (nuevo_estado, notas, id))
@@ -6385,12 +6436,15 @@ def verificar_inventario():
     cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos "
                 f"WHERE estado='activo' AND stock >= %s", (STOCK_NORMAL,))
     normal = cur.fetchone()['n']
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.productos")
+    todos = cur.fetchone()['n']
     cur.close()
     return render_template('verificar_inventario.html',
                            productos=items, filtro=filtro, buscar=buscar,
                            page=page, total_pages=total_pages, total=total,
                            has_prev=page > 1, has_next=page < total_pages,
-                           sin_stock=sin_stock, critico=critico, bajo=bajo, normal=normal)
+                           sin_stock=sin_stock, critico=critico, bajo=bajo, normal=normal,
+                           todos=todos)
 
 # ─────────────────────────────────────────────
 # PRO20: AGREGAR PRODUCTOS PARA ENVÍO Y ENTREGA
@@ -6468,9 +6522,9 @@ def asignar_entrega(venta_id):
             accion = 'actualizada'
         else:
             cur.execute("""INSERT INTO seguimiento_entregas
-                           (venta_id, estado, direccion_envio, fecha_estimada, notas)
-                           VALUES (%s,'pendiente',%s,%s,%s)""",
-                        (venta_id, direccion, fecha_est, notas))
+                           (created_at, venta_id, estado, direccion_envio, fecha_estimada, notas)
+                           VALUES (%s,%s,'pendiente',%s,%s,%s)""",
+                        (_ahora_lima(), venta_id, direccion, fecha_est, notas))
             entrega_id = cur.lastrowid
             accion = 'creada'
         producto_ids = request.form.getlist('producto_id[]')
@@ -6558,7 +6612,7 @@ def verificar_registros():
 def informe_diario():
     if 'rol' not in session or session['rol'] not in ['admin','administrador']:
         return redirect('/login')
-    hoy = datetime.now().strftime('%Y-%m-%d')
+    hoy = _ahora_lima().strftime('%Y-%m-%d')
     fecha_str = request.args.get('fecha', hoy)
     cur = mysql.connection.cursor()
 
@@ -6574,7 +6628,11 @@ def informe_diario():
     cur.execute(f"""
         SELECT i.id, i.fecha,
                COALESCE(NULLIF(i.proveedor_nombre,''), p.nombre) AS proveedor_nombre,
-               (SELECT SUM(di.cantidad) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS items,
+               (SELECT GROUP_CONCAT(CONCAT(COALESCE(NULLIF(di.producto_nombre,''), pr.nombre),
+                        ' ×', di.cantidad) SEPARATOR ', ')
+                FROM {ALMACEN_DB}.detalle_ingreso di
+                LEFT JOIN {ALMACEN_DB}.productos pr ON di.producto_id=pr.id
+                WHERE di.ingreso_id=i.id) AS productos,
                (SELECT COALESCE(SUM(di.cantidad*di.precio_compra),0) FROM {ALMACEN_DB}.detalle_ingreso di WHERE di.ingreso_id=i.id) AS costo
         FROM {ALMACEN_DB}.ingresos i LEFT JOIN {ALMACEN_DB}.proveedores p ON i.proveedor_id=p.id
         WHERE DATE(i.fecha)=%s AND COALESCE(i.estado,'vigente') <> 'anulado'
@@ -6612,6 +6670,77 @@ def informe_diario():
                            ingresos_dia=ingresos_dia, num_ingresos=num_ingresos,
                            salidas_dia=salidas_dia, num_salidas=num_salidas,
                            entregas_dia=entregas_dia, num_entregadas=num_entregadas, num_pendientes=num_pendientes)
+
+
+@app.route('/informe-diario/pdf')
+def informe_diario_pdf():
+    """PDF del informe de UN día específico (la exportación es solo por día)."""
+    if not _es_admin():
+        return redirect('/login')
+    fecha_raw = (request.args.get('fecha') or '').strip()
+    try:
+        fecha_d = (datetime.strptime(fecha_raw, '%Y-%m-%d').date()
+                   if fecha_raw else _ahora_lima().date())
+    except ValueError:
+        flash('La fecha seleccionada no es válida.', 'danger')
+        return redirect('/informe-diario')
+    fecha_str = fecha_d.strftime('%Y-%m-%d')
+
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT id, total, fecha, estado, nombre, documento FROM ventas "
+                "WHERE DATE(fecha)=%s ORDER BY fecha", (fecha_str,))
+    ventas = cur.fetchall()
+    cur.execute("SELECT COALESCE(SUM(total),0) AS total, COUNT(*) AS n FROM ventas "
+                "WHERE DATE(fecha)=%s AND COALESCE(estado,'') <> 'cancelado'", (fecha_str,))
+    r = cur.fetchone()
+    ingresos_ventas, num_ventas = float(r['total'] or 0), int(r['n'] or 0)
+    cur.execute(f"SELECT COUNT(*) AS n FROM {ALMACEN_DB}.ingresos "
+                f"WHERE DATE(fecha)=%s AND COALESCE(estado,'vigente') <> 'anulado'",
+                (fecha_str,))
+    num_ingresos = cur.fetchone()['n']
+    cur.execute("SELECT COUNT(*) AS n FROM seguimiento_entregas "
+                "WHERE DATE(created_at)=%s OR DATE(fecha_entrega)=%s",
+                (fecha_str, fecha_str))
+    num_entregas = cur.fetchone()['n']
+    cur.close()
+
+    if not ventas:
+        flash('No hay ventas registradas ese día.', 'warning')
+        return redirect(f'/informe-diario?fecha={fecha_str}')
+
+    styles = _pdf_estilos()
+    elems = _pdf_encabezado(styles, 'Informe del día', fecha_d.strftime('%d/%m/%Y'), [
+        ('Ventas', f"{num_ventas} · S/ {ingresos_ventas:.2f}"),
+        ('Ingresos de productos', str(num_ingresos)),
+        ('Entregas', str(num_entregas)),
+        ('Generado', _ahora_lima().strftime('%d/%m/%Y %H:%M')),
+    ])
+
+    elems.append(Paragraph('<b>Ventas del día</b>', styles['TituloSeccion']))
+    data = [[Paragraph(f'<b>{c}</b>', styles['Cabecera']) for c in
+             ['#', 'Cliente', 'Documento', 'Total', 'Estado', 'Hora']]]
+    for v in ventas:
+        estado = (v['estado'] or '')
+        cancelado = estado == 'cancelado'
+        data.append([
+            str(v['id']),
+            Paragraph(_pdf_escapar(v['nombre'] or '—'), styles['Celda']),
+            _pdf_escapar(v['documento'] or '—'),
+            f"S/ {float(v['total'] or 0):.2f}",
+            Paragraph('<b>CANCELADO</b>', styles['Anulado']) if cancelado
+            else _pdf_escapar(estado.capitalize() or '—'),
+            _pdf_fecha(v['fecha']),
+        ])
+    t = Table(data, colWidths=[40, 150, 90, 80, 80, 83], repeatRows=1)
+    t.setStyle(_pdf_estilo_tabla())
+    elems.append(t)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=36, rightMargin=36,
+                            topMargin=36, bottomMargin=36,
+                            title='Informe del día', author='Multiservicios Richard')
+    doc.build(elems)
+    return _pdf_respuesta(buf, f"informe_{fecha_str}.pdf")
 
 # ─────────────────────────────────────────────
 # PRO02: DETALLE DE PRODUCTO
@@ -6938,6 +7067,7 @@ def checkout():
                            envio_gratis_desde=ajuste_float('envio_gratis_desde', 300),
                            delivery_minimo=ajuste_float('delivery_minimo', 50),
                            delivery_permitido=(total >= ajuste_float('delivery_minimo', 50)),
+                           tipo='delivery' if (total >= ajuste_float('delivery_minimo', 50)) else 'recojo',
                            distrito_valor='',
                            tienda_lat=ajuste('empresa_lat', '-12.0728939'),
                            tienda_lon=ajuste('empresa_lon', '-75.1904488'),
@@ -7130,8 +7260,8 @@ def procesar_compra():
             if venta_token:
                 if es_ajax:
                     return jsonify({'ok': True,
-                                    'redirect': f'/confirmacion/{venta_token["id"]}'})
-                return redirect(f'/confirmacion/{venta_token["id"]}')
+                                    'redirect': _tras_compra(venta_token["id"])})
+                return redirect(_tras_compra(venta_token["id"]))
 
         cur.execute("SELECT id FROM ventas WHERE cliente_id=%s AND fecha > NOW() - INTERVAL 30 SECOND ORDER BY id DESC LIMIT 1", (user_id,))
         venta_reciente = cur.fetchone()
@@ -7139,8 +7269,8 @@ def procesar_compra():
             # Reintento de una compra ya registrada: devolver su confirmación/boleta
             if es_ajax:
                 return jsonify({'ok': True,
-                                'redirect': f'/confirmacion/{venta_reciente["id"]}'})
-            return redirect(f'/confirmacion/{venta_reciente["id"]}')
+                                'redirect': _tras_compra(venta_reciente["id"])})
+            return redirect(_tras_compra(venta_reciente["id"]))
 
         cur.execute(f"""
             SELECT p.id, p.nombre, p.precio, c.cantidad
@@ -7155,8 +7285,8 @@ def procesar_compra():
             if ultima:
                 if es_ajax:
                     return jsonify({'ok': True,
-                                    'redirect': f'/confirmacion/{ultima["id"]}'})
-                return redirect(f'/confirmacion/{ultima["id"]}')
+                                    'redirect': _tras_compra(ultima["id"])})
+                return redirect(_tras_compra(ultima["id"]))
             return _chk_error('Tu carrito está vacío.', '/carrito')
         total = 0
         for item in items:
@@ -7237,25 +7367,25 @@ def procesar_compra():
         #    El monto ya incluye el envío (total = productos + costo_envio),
         #    así que lo que cobra Culqi y lo que guarda la venta coinciden.
         cur.execute("""INSERT INTO ventas
-            (cliente_id, total, metodo_pago, direccion_envio, documento, doc_tipo,
+            (fecha, cliente_id, total, metodo_pago, direccion_envio, documento, doc_tipo,
              nombre, apellido, telefono, correo, notas_entrega, estado_pago,
              tipo_entrega, distrito, latitud, longitud, costo_envio,
              culqi_charge_id, culqi_token, culqi_respuesta, pagado_en)
-            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo,
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (_ahora_lima(), user_id, total, metodo_pago, direccion_envio, doc_numero, doc_tipo,
              nombres, apellidos, telefono, correo, notas_entrega, estado_pago,
              tipo_entrega, distrito, latitud, longitud, envio_costo,
              charge_id, culqi_token or None,
              json.dumps(cargo, ensure_ascii=False) if cargo else None,
-             datetime.now() if estado_pago == 'pagado' else None))
+             _ahora_lima() if estado_pago == 'pagado' else None))
         venta_id = cur.lastrowid
         # Toda venta nace con seguimiento para que /entregas y el KPI de la
         # seccion 1 lean exactamente la misma fuente desde el primer minuto.
         cur.execute("""INSERT INTO seguimiento_entregas
-            (venta_id, estado, direccion_envio, notas,
+            (created_at, venta_id, estado, direccion_envio, notas,
              tipo_entrega, distrito, latitud, longitud, costo_envio)
-            VALUES(%s, 'pendiente', %s, %s, %s, %s, %s, %s, %s)""",
-            (venta_id, direccion_envio,
+            VALUES(%s, %s, 'pendiente', %s, %s, %s, %s, %s, %s, %s)""",
+            (_ahora_lima(), venta_id, direccion_envio,
              'Seguimiento creado automaticamente al registrar la venta.',
              tipo_entrega, distrito, latitud, longitud, envio_costo))
         for item in items:
@@ -7298,8 +7428,8 @@ def procesar_compra():
 
         if es_ajax:
             return jsonify({'ok': True,
-                            'redirect': f'/confirmacion/{venta_id}'})
-        return redirect(f'/confirmacion/{venta_id}')
+                            'redirect': _tras_compra(venta_id)})
+        return redirect(_tras_compra(venta_id))
     except _SinStock as exc:
         # Otro cliente se quedó con las unidades: no se guarda nada. Si el
         # cargo ya se había aprobado, se devuelve el dinero automáticamente.
@@ -7308,8 +7438,8 @@ def procesar_compra():
         if ya:
             if es_ajax:
                 return jsonify({'ok': True,
-                                'redirect': f'/confirmacion/{ya["id"]}'})
-            return redirect(f'/confirmacion/{ya["id"]}')
+                                'redirect': _tras_compra(ya["id"])})
+            return redirect(_tras_compra(ya["id"]))
         if charge_id and not (cargo or {}).get('duplicated'):
             _culqi_reembolsar(charge_id, total_centimos)
         return _chk_error(str(exc), '/carrito')
@@ -7321,8 +7451,8 @@ def procesar_compra():
         if ya:
             if es_ajax:
                 return jsonify({'ok': True,
-                                'redirect': f'/confirmacion/{ya["id"]}'})
-            return redirect(f'/confirmacion/{ya["id"]}')
+                                'redirect': _tras_compra(ya["id"])})
+            return redirect(_tras_compra(ya["id"]))
         if charge_id and (cargo or {}).get('duplicated'):
             # El cargo ya existía (mismo token). No se reembolsa: pertenece a
             # la venta que la otra petición está terminando de guardar.

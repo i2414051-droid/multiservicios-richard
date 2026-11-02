@@ -366,6 +366,10 @@ function bloquearBotones(){
   // Formularios
   document.addEventListener('submit', function(e){
     var f = e.target;
+    // Si la validación del propio formulario ya canceló el envío (contraseña
+    // que no coincide, campos cortos, etc.), NO se muestra el loader ni se
+    // bloquean campos: si no, el botón queda cargando para siempre.
+    if (e.defaultPrevented) return;
     if (f.hasAttribute('data-sin-carga')) return;
     window.mostrarCarga();
     var btn = f.querySelector('button[type="submit"], input[type="submit"], button:not([type])');

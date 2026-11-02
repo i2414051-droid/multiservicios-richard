@@ -7,6 +7,14 @@
   <!-- RESUMEN RÁPIDO -->
   <div class="row g-3 mt-3 mb-4">
     <div class="col-6 col-md-3">
+      <a href="/verificar-inventario?filtro=todos" class="text-decoration-none">
+        <div class="card text-center p-3 {% if filtro=='todos' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
+          <h4 style="color:#f39c12;font-weight:800">{{ todos }}</h4>
+          <small style="color:var(--text-muted)">Todos los productos</small>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md-3">
       <a href="/verificar-inventario?filtro=sin_stock" class="text-decoration-none">
         <div class="card text-center p-3 {% if filtro=='sin_stock' %}selected-card{% else %}stat-card{% endif %}" style="border-radius:18px;cursor:pointer">
           <h4 style="color:{% if sin_stock>0 %}#e74c3c{% else %}#27ae60{% endif %};font-weight:800">{{ sin_stock }}</h4>
@@ -74,6 +82,7 @@
               <th>Precio</th>
               <th>Categoría</th>
               <th>Estado</th>
+              <th class="text-end">Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -82,7 +91,7 @@
               <td>
                 <div class="d-flex align-items-center gap-2">
                   {% if p.imagen %}
-                  <img loading="lazy" decoding="async" src="{{ p.imagen|thumb }}" style="width:36px;height:36px;object-fit:cover;border-radius:8px" alt="">
+                  <img loading="lazy" decoding="async" src="{{ url_for('static', filename=(p.imagen|thumb)) }}" style="width:36px;height:36px;object-fit:cover;border-radius:8px" alt="">
                   {% endif %}
                   <span>{{ p.nombre }}</span>
                 </div>
@@ -106,6 +115,27 @@
                 {% else %}
                   <span class="badge bg-secondary">Inactivo</span>
                 {% endif %}
+              </td>
+              <td class="text-end">
+                {% set volver = ('/verificar-inventario?filtro=' ~ filtro ~ '&buscar=' ~ buscar)|urlencode %}
+                <div class="d-flex gap-1 justify-content-end flex-nowrap">
+                  <a href="/editar_producto/{{ p.id }}" class="btn btn-sm btn-outline-warning" title="Editar producto">
+                    <i class="bi bi-pencil"></i>
+                  </a>
+                  {% if p.estado == 'activo' %}
+                  <a href="/eliminar_producto/{{ p.id }}?desde={{ volver }}" class="btn btn-sm btn-outline-secondary" title="Ocultar producto">
+                    <i class="bi bi-eye-slash"></i>
+                  </a>
+                  {% else %}
+                  <a href="/activar_producto/{{ p.id }}?desde={{ volver }}" class="btn btn-sm btn-outline-success" title="Quitar oculto">
+                    <i class="bi bi-eye"></i>
+                  </a>
+                  {% endif %}
+                  <a href="/eliminar_producto_definitivo/{{ p.id }}?desde={{ volver }}" class="btn btn-sm btn-outline-danger"
+                     title="Eliminar producto" onclick="return confirm('¿Eliminar este producto permanentemente? Esta acción no se puede deshacer.')">
+                    <i class="bi bi-trash"></i>
+                  </a>
+                </div>
               </td>
             </tr>
             {% endfor %}

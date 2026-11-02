@@ -30,13 +30,13 @@
                 <!-- NOMBRES -->
                 <div class="mb-3">
                     <label class="form-label">Nombres</label>
-                    <input type="text" name="nombres" id="regNombres" class="form-control" required>
+                    <input type="text" name="nombres" id="regNombres" class="form-control" minlength="4" required>
                 </div>
 
                 <!-- APELLIDOS -->
                 <div class="mb-3">
                     <label class="form-label">Apellidos</label>
-                    <input type="text" name="apellidos" id="regApellidos" class="form-control" required>
+                    <input type="text" name="apellidos" id="regApellidos" class="form-control" minlength="4" required>
                 </div>
 
                 <!-- CORREO -->
@@ -73,6 +73,7 @@
                             <i id="eye-icon" class="bi bi-eye" style="color: var(--color-ojo);"></i>
                         </button>
                     </div>
+                    <small class="text-muted">Mínimo 8 caracteres: una mayúscula, una minúscula, un número y un carácter especial.</small>
                 </div>
 
                 <!-- CONFIRMAR CONTRASEÑA CON OJO -->
@@ -183,6 +184,13 @@ document.getElementById('registroForm').addEventListener('submit', function(e) {
         e.preventDefault();
         mostrarAviso('avisoPaso2', 'Las contraseñas no coinciden.');
         document.getElementById('confirmar').focus();
+        return;
+    }
+    if (pass.length < 8 || !/[A-Z]/.test(pass) || !/[a-z]/.test(pass) ||
+        !/[0-9]/.test(pass) || !/[^A-Za-z0-9]/.test(pass)) {
+        e.preventDefault();
+        mostrarAviso('avisoPaso2', 'La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula, un número y un carácter especial.');
+        document.getElementById('password').focus();
     }
 });
 
