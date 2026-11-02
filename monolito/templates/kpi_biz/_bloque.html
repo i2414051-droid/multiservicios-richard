@@ -236,62 +236,168 @@
   {# ── 2. GESTION DE ALMACEN E INVENTARIO ── #}
   <div class="kpi-biz-section">
     <div class="kpi-biz-sec-header">
-      <h5><i class="bi bi-box-seam text-warning"></i> 2. Gestion de Almacen e Inventario</h5>
-      <span class="kpi-biz-periodo-nota mb-0">Quiebres de stock, cobertura y devoluciones por incompatibilidad</span>
+      <h5><i class="bi bi-box-seam text-warning"></i> 2. Gestión de Almacén e Inventario</h5>
+      <span class="kpi-biz-periodo-nota mb-0">Rotación del catálogo, proveedores y productos sin ventas</span>
     </div>
     <div class="kpi-biz-sec-body">
+      {% set pmv = s2.productos_mas_vendidos|default({}, true) %}
+      {% set prov = s2.proveedores_disponibles|default({}, true) %}
+      {% set pnv = s2.productos_no_vendidos|default({}, true) %}
+      {% set pact = s2.productos_activos|default({}, true) %}
+
       <div class="kpi-biz-grid">
         {{ tarjeta({
-            'titulo': 'Quiebre de Stock (alta demanda)',
-            'icono': 'bi-exclamation-triangle',
-            'valor': s2.quiebre_repuestos.valor,
-            'unidad': '%',
-            'pie': s2.quiebre_repuestos.pie,
-            'variacion': s2.quiebre_repuestos.variacion,
-            'mejor_si_sube': s2.quiebre_repuestos.mejor_si_sube,
-            'semaforo': s2.quiebre_repuestos.semaforo,
+            'titulo': 'Productos más vendidos',
+            'icono': 'bi-trophy',
+            'valor': pmv.get('valor') if pmv else none,
+            'unidad': 'u.',
+            'pie': pmv.get('pie', '') if pmv else '',
+            'variacion': none,
+            'mejor_si_sube': pmv.get('mejor_si_sube', true) if pmv else true,
+            'semaforo': pmv.get('semaforo', 'sin_datos') if pmv else 'sin_datos',
         }) }}
         {{ tarjeta({
-            'titulo': 'Dias de Inventario — Accesorios',
-            'icono': 'bi-calendar-event',
-            'valor': s2.doh_accesorios.valor,
-            'unidad': 'dias',
-            'pie': s2.doh_accesorios.pie,
-            'variacion': s2.doh_accesorios.variacion,
-            'mejor_si_sube': s2.doh_accesorios.mejor_si_sube,
-            'semaforo': s2.doh_accesorios.semaforo,
+            'titulo': 'Proveedores disponibles',
+            'icono': 'bi-truck',
+            'valor': prov.get('valor') if prov else none,
+            'pie': prov.get('pie', '') if prov else '',
+            'variacion': none,
+            'mejor_si_sube': prov.get('mejor_si_sube', true) if prov else true,
+            'semaforo': prov.get('semaforo', 'sin_datos') if prov else 'sin_datos',
         }) }}
         {{ tarjeta({
-            'titulo': 'Dias de Inventario — Repuestos',
-            'icono': 'bi-calendar-event',
-            'valor': s2.doh_repuestos.valor,
-            'unidad': 'dias',
-            'pie': s2.doh_repuestos.pie,
-            'variacion': s2.doh_repuestos.variacion,
-            'mejor_si_sube': s2.doh_repuestos.mejor_si_sube,
-            'semaforo': s2.doh_repuestos.semaforo,
+            'titulo': 'Productos no vendidos',
+            'icono': 'bi-box',
+            'valor': pnv.get('valor') if pnv else none,
+            'pie': pnv.get('pie', '') if pnv else '',
+            'variacion': none,
+            'mejor_si_sube': pnv.get('mejor_si_sube', false) if pnv else false,
+            'semaforo': pnv.get('semaforo', 'sin_datos') if pnv else 'sin_datos',
         }) }}
         {{ tarjeta({
-            'titulo': 'Devoluciones por Incompatibilidad',
-            'icono': 'bi-arrow-counterclockwise',
-            'valor': s2.devoluciones_incompat.valor,
-            'unidad': '%',
-            'pie': s2.devoluciones_incompat.pie,
-            'variacion': s2.devoluciones_incompat.variacion,
-            'mejor_si_sube': s2.devoluciones_incompat.mejor_si_sube,
-            'semaforo': s2.devoluciones_incompat.semaforo,
+            'titulo': 'Productos activos',
+            'icono': 'bi-check2-square',
+            'valor': pact.get('valor') if pact else none,
+            'pie': pact.get('pie', '') if pact else '',
+            'variacion': none,
+            'mejor_si_sube': pact.get('mejor_si_sube', true) if pact else true,
+            'semaforo': pact.get('semaforo', 'sin_datos') if pact else 'sin_datos',
         }) }}
       </div>
 
+      {# Quiebre de stock: se conserva como alerta, no como tarjeta. #}
+      {% set q = s2.quiebre_repuestos|default({}, true) %}
+      {% if q %}
+      {% set qsem = (q.get('semaforo') or 'sin_datos')|replace('_', '-') %}
+      <div class="kpi-biz-alerta is-{{ qsem }}">
+        <i class="bi {{ 'bi-check-circle' if qsem == 'ok' else 'bi-exclamation-triangle' }}"></i>
+        <div class="kpi-biz-alerta-texto">
+          <strong>Quiebre de stock en repuestos de alta demanda:
+            {% if q.get('valor') is not none %}{{ q.get('valor') }}%{% else %}sin datos{% endif %}
+          </strong>
+          <span>{{ q.get('pie', '') }}</span>
+        </div>
+      </div>
+      {{ tabla_detalle('Detalle de quiebre de stock', q.get('detalle') or []) }}
+      {% endif %}
+
+      {# ── Top de productos vendidos ── #}
+      {% if s2.top_productos %}
+      {% call detalle_desplegable('Top 5 productos más vendidos', true, 'bi-trophy') %}
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead>
+              <tr>
+                <th>#</th><th>Producto</th><th>Categoría</th>
+                <th class="num">Unidades</th><th class="num">Monto</th>
+                <th class="num">Stock</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in s2.top_productos %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ p.nombre or '—' }}</td>
+                <td>{{ p.categoria or '—' }}</td>
+                <td class="num">{{ p.unidades }}</td>
+                <td class="num">S/ {{ p.monto_txt }}</td>
+                <td class="num">
+                  <span class="kpi-biz-stock {{ 'is-critico' if p.stock <= 0 else 'is-aviso' }}">{{ p.stock }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endcall %}
+      {% else %}
+        {{ vacio('bi-graph-down', 'Sin ventas de productos en el periodo seleccionado') }}
+      {% endif %}
+
+      {# ── Proveedores registrados ── #}
+      {% if s2.proveedores_lista %}
+      {% call detalle_desplegable('Proveedores registrados', false, 'bi-truck') %}
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead>
+              <tr><th>Proveedor</th><th>Categoría</th><th>Celular</th></tr>
+            </thead>
+            <tbody>
+              {% for p in s2.proveedores_lista %}
+              <tr>
+                <td>{{ p.nombre or '—' }}</td>
+                <td>{{ p.categoria or '—' }}</td>
+                <td>{{ p.celular or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endcall %}
+      {% else %}
+        {{ vacio('bi-truck', 'Sin proveedores registrados') }}
+      {% endif %}
+
+      {# ── Productos activos sin ventas en el periodo ── #}
+      {% if s2.no_vendidos_lista %}
+      {% call detalle_desplegable('Productos sin ventas en el periodo', false, 'bi-box') %}
+        <div class="table-responsive">
+          <table class="kpi-biz-tabla">
+            <thead>
+              <tr><th>Producto</th><th>Categoría</th><th class="num">Stock</th></tr>
+            </thead>
+            <tbody>
+              {% for p in s2.no_vendidos_lista %}
+              <tr>
+                <td>{{ p.nombre or '—' }}</td>
+                <td>{{ p.categoria or '—' }}</td>
+                <td class="num">
+                  <span class="kpi-biz-stock {{ 'is-critico' if p.stock <= 0 else 'is-aviso' }}">{{ p.stock }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endcall %}
+      {% else %}
+        {{ vacio('bi-check-circle', 'Todo el catalogo activo tuvo ventas en el periodo') }}
+      {% endif %}
+
+      {{ tabla_detalle('Productos activos por categoría', s2.activos_por_categoria) }}
+      {{ tabla_detalle('Rotación y cobertura de inventario', s2.rotacion_detalle) }}
+      {{ tabla_detalle('Devoluciones por incompatibilidad', s2.devoluciones_incompat.detalle) }}
+      {{ tabla_motivos('Motivos de devolución registrados', s2.devoluciones_incompat.motivos) }}
+
       {% set inv = s2.resumen_inventario|default({}, true) %}
       {% if inv %}
-      {% call detalle_desplegable('Resumen de inventario y stock bajo', true, 'bi-box-seam') %}
+      {% call detalle_desplegable('Alertas de stock bajo y agotados', false, 'bi-exclamation-diamond') %}
         <div class="table-responsive">
           <table class="kpi-biz-tabla">
             <thead><tr><th>Indicador</th><th class="num">Valor</th></tr></thead>
             <tbody>
               <tr><td>Productos activos</td><td class="num">{{ inv.activos }}</td></tr>
-              <tr><td>Productos con stock bajo (stock &le; 5)</td><td class="num">{{ inv.bajo_stock }}</td></tr>
+              <tr><td>Productos con stock bajo</td><td class="num">{{ inv.bajo_stock }}</td></tr>
               <tr><td>Productos agotados (stock &le; 0)</td><td class="num">{{ inv.agotados }}</td></tr>
               <tr><td>Unidades devueltas registradas</td><td class="num">{{ inv.devoluciones_unidades }}</td></tr>
               <tr><td>Casos de devolucion registrados</td><td class="num">{{ inv.devoluciones_casos }}</td></tr>
@@ -304,7 +410,7 @@
         <div class="table-responsive">
           <table class="kpi-biz-tabla">
             <thead>
-              <tr><th>Producto</th><th>Categoria</th><th class="num">Stock</th></tr>
+              <tr><th>Producto</th><th>Categoría</th><th class="num">Stock</th></tr>
             </thead>
             <tbody>
               {% for p in s2.bajo_stock_lista %}
@@ -324,10 +430,6 @@
         {% endif %}
       {% endcall %}
       {% endif %}
-
-      {{ tabla_detalle('Detalle de quiebre de repuestos', s2.quiebre_repuestos.detalle) }}
-      {{ tabla_detalle('Detalle de dias de inventario', (s2.doh_accesorios.detalle or []) + (s2.doh_repuestos.detalle or [])) }}
-      {{ tabla_motivos('Motivos de devolucion registrados', s2.devoluciones_incompat.motivos) }}
     </div>
   </div>
 

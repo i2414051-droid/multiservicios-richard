@@ -122,19 +122,22 @@ def _variacion(actual, anterior):
     return round((actual - anterior) / abs(anterior) * 100.0, 2)
 
 
-def _indicador(clave, valor, pie='', variacion=None, detalle=None, motivos=None):
+def _indicador(clave, valor, pie='', variacion=None, detalle=None, motivos=None,
+               semaforo=None):
     """
     Envoltura comun de todos los indicadores.
 
     Centraliza el semaforo y el sentido "bueno" para que ninguna tarjeta quede
-    con el color equivocado: ambos salen de settings.UMBRALES.
+    con el color equivocado: ambos salen de settings.UMBRALES. `semaforo`
+    permite que la tarjeta muestre un conteo pero el color se calcule con otro
+    valor (por ejemplo, el porcentaje de productos sin ventas).
     """
     return {
         'clave': clave,
         'valor': valor,
         'pie': pie,
         'variacion': variacion,
-        'semaforo': settings.semaforo(clave, valor),
+        'semaforo': semaforo if semaforo is not None else settings.semaforo(clave, valor),
         'mejor_si_sube': settings.mejor_si_sube(clave),
         'umbral': settings.UMBRALES.get(clave, {}).get('ok'),
         'detalle': detalle or [],
@@ -179,6 +182,13 @@ def build_snapshot(periodo):
         # El inventario se calcula una sola vez: es una foto del catalogo, no
         # un agregado del periodo actual ni del anterior.
         actual['inventario'] = datos.get('inventario') or {}
+        actual['catalogo'] = datos.get('catalogo') or []
+        # Los proveedores tampoco dependen del periodo: se leen una vez.
+        try:
+            actual['proveedores'] = repository.fetch_proveedores()
+        except Exception as exc:
+            current_app.logger.warning('KPI proveedores fallo: %s', exc)
+            actual['proveedores'] = []
         generado = datos.get('ahora')
     except Exception as exc:
         current_app.logger.warning(
@@ -244,6 +254,8 @@ def _collect(desde, hasta, dias):
         'compras_cliente': lambda: repository.fetch_compras_por_cliente(desde, hasta),
         'entregas': lambda: repository.fetch_entregas_periodo(desde, hasta),
         'inventario': lambda: repository.fetch_inventario_resumen(),
+        'catalogo': lambda: repository.fetch_catalogo_ventas(desde, hasta),
+        'proveedores': lambda: repository.fetch_proveedores(),
         'repuestos': lambda: repository.fetch_repuestos_demanda(desde, hasta),
         'doh': lambda: repository.fetch_doh_categorias(desde, hasta),
         'categorias': lambda: repository.categorias_existentes(),
@@ -474,7 +486,8 @@ def _frecuencia_compra(actual):
 # 2. GESTION DE ALMACEN E INVENTARIO
 # ─────────────────────────────────────────────
 def _seccion_almacen(actual, anterior):
-    # Quiebre de stock en repuestos de alta demanda
+    # Quiebre de stock en repuestos de alta demanda. Se muestra como alerta,
+    # no como tarjeta: la seccion ahora prioriza rotacion y catalogo.
     repuestos = actual.get('repuestos') or []
     demanda = [r for r in repuestos if (r.get('unidades') or 0) > 0]
     umbral = _percentil([r['unidades'] for r in demanda], 80)
@@ -499,7 +512,7 @@ def _seccion_almacen(actual, anterior):
         motivos=[{'etiqueta': r['nombre'], 'n': r['stock']} for r in agotados[:8]],
     )
 
-    # Dias de inventario por categoria
+    # Dias de inventario por categoria (se conserva como detalle de rotacion)
     doh = actual.get('doh') or {}
     dias = max(1, int((actual.get('dias') or 30)))
     acc = _doh(doh, settings.CATEGORIA_ACCESORIOS, dias)
@@ -507,16 +520,29 @@ def _seccion_almacen(actual, anterior):
 
     doh_acc = _indicador(
         'doh_accesorios', acc[0],
-        pie='dias de stock al ritmo de venta actual',
+        pie='días de stock al ritmo de venta actual',
         detalle=acc[1],
     )
     doh_rep = _indicador(
         'doh_repuestos', rep[0],
-        pie='dias de stock al ritmo de venta actual',
+        pie='días de stock al ritmo de venta actual',
         detalle=rep[1],
     )
 
-    # Devoluciones por incompatibilidad (motivo registrado)
+    rotacion_detalle = []
+    for etiqueta, valor_dias, detalle in (
+            ('Accesorios', acc[0], acc[1]),
+            ('Repuestos', rep[0], rep[1])):
+        dias_txt = f"{valor_dias:.1f}" if isinstance(valor_dias, (int, float)) else '—'
+        rotacion_detalle.append((f"{etiqueta} · Días de cobertura", dias_txt))
+        for fila in (detalle or []):
+            nombre_fila = str(fila[0])
+            if nombre_fila.lower().startswith(('categoria', 'aviso')):
+                continue
+            rotacion_detalle.append((f"{etiqueta} · {nombre_fila}", fila[1]))
+
+    # Devoluciones por incompatibilidad (motivo registrado). Se mantiene aqui
+    # hasta que la seccion de incidencias tenga sus propias tarjetas.
     incidencias = actual.get('incidencias') or []
     devol = [i for i in incidencias if i['tipo'] == 'devolucion']
     incompat = sum(i['n'] for i in devol
@@ -526,19 +552,129 @@ def _seccion_almacen(actual, anterior):
 
     dev_inc = _indicador(
         'devoluciones_incompat', _ratio(incompat, validas_n),
-        pie=f"{incompat} de {validas_n} pedidos validos",
+        pie=f"{incompat} de {validas_n} pedidos válidos",
         detalle=[
             ('Devoluciones por incompatibilidad', str(incompat)),
             ('Devoluciones totales', str(total_devol)),
-            ('Pedidos validos', str(validas_n)),
+            ('Pedidos válidos', str(validas_n)),
         ],
         motivos=[{'etiqueta': _etiqueta(i['motivo'], settings.ETIQUETAS_MOTIVO),
                   'n': i['n']} for i in devol],
     )
 
+    # ── Catalogo del periodo: productos mas vendidos y sin ventas ──
+    inventario = actual.get('inventario') or {}
+    catalogo = actual.get('catalogo') or []
+    proveedores = actual.get('proveedores') or []
+
+    activos = [p for p in catalogo
+               if (p.get('estado') or '').strip().lower() == 'activo']
+    total_catalogo = len(catalogo) or _i(inventario.get('total'))
+    activos_n = len(activos) or _i(inventario.get('activos'))
+
+    vendidos = [p for p in catalogo if (p.get('unidades') or 0) > 0]
+    vendidos.sort(key=lambda p: (-(p.get('unidades') or 0),
+                                 -(p.get('monto') or 0),
+                                 (p.get('nombre') or '').casefold()))
+    top_productos = vendidos[:5]
+    for p in top_productos:
+        p['monto_txt'] = f"{p.get('monto') or 0:,.2f}"
+    top1 = top_productos[0] if top_productos else None
+    unidades_vendidas = sum((p.get('unidades') or 0) for p in vendidos) or 0
+
+    if top1:
+        nombre_top = top1.get('nombre') or 'Producto sin nombre'
+        pie_top = (f"{nombre_top[:43] + '...' if len(nombre_top) > 46 else nombre_top}"
+                   f" · S/ {top1.get('monto', 0.0):,.2f}")
+        valor_top = top1.get('unidades')
+        detalle_top = [
+            ('Producto', nombre_top),
+            ('Unidades vendidas', str(top1.get('unidades') or 0)),
+            ('Monto vendido', f"S/ {top1.get('monto', 0.0):,.2f}"),
+            ('Participación en unidades',
+             f"{_pct(top1.get('unidades') or 0, unidades_vendidas):.2f}%"),
+            ('Productos con ventas', f"{len(vendidos)} de {activos_n} activos"),
+        ]
+    else:
+        pie_top = 'Sin ventas en el periodo'
+        valor_top = None
+        detalle_top = [
+            ('Productos vendidos', '0'),
+            ('Productos activos', str(activos_n)),
+        ]
+
+    mas_vendidos = _indicador(
+        'productos_mas_vendidos', valor_top,
+        pie=pie_top,
+        detalle=detalle_top,
+    )
+
+    sin_ventas = [p for p in activos if (p.get('unidades') or 0) <= 0]
+    sin_ventas.sort(key=lambda p: (-(p.get('stock') or 0),
+                                   (p.get('nombre') or '').casefold()))
+    pct_sin_ventas = _pct(len(sin_ventas), activos_n)
+
+    no_vendidos = _indicador(
+        'productos_no_vendidos', len(sin_ventas),
+        pie=(f"{len(sin_ventas)} de {activos_n} activos "
+             f"({pct_sin_ventas:.2f}%) · {dias} días"),
+        semaforo=(settings.semaforo('productos_no_vendidos', pct_sin_ventas)
+                  if activos_n else 'sin_datos'),
+        detalle=[
+            ('Productos sin ventas', str(len(sin_ventas))),
+            ('Productos activos', str(activos_n)),
+            ('Porcentaje del catálogo activo', f"{pct_sin_ventas:.2f}%"),
+            ('Periodo analizado', f"{dias} día(s)"),
+        ],
+    )
+
+    # ── Proveedores registrados ──
+    categorias_prov = sorted({p.get('categoria') for p in proveedores
+                              if p.get('categoria')})
+    categorias_catalogo = sorted({p.get('categoria') for p in catalogo
+                                  if p.get('categoria')})
+    total_categorias = len(categorias_catalogo) or len(categorias_prov)
+    n_prov = len(categorias_prov)
+    pie_prov = (f"{n_prov} categoría cubierta" if n_prov == 1
+                else f"{n_prov} categorías cubiertas") if n_prov else 'Sin categorías asignadas'
+
+    proveedores_ind = _indicador(
+        'proveedores_disponibles', len(proveedores),
+        pie=pie_prov,
+        detalle=[
+            ('Proveedores registrados', str(len(proveedores))),
+            ('Categorías cubiertas',
+             f"{n_prov} de {total_categorias}"
+             if total_categorias else str(n_prov)),
+            ('Sin categoría',
+             str(sum(1 for p in proveedores if not p.get('categoria')))),
+        ],
+    )
+
+    # ── Productos activos y su distribucion por categoria ──
+    por_categoria = {}
+    for p in activos:
+        categoria = p.get('categoria') or 'Sin categoría'
+        datos = por_categoria.setdefault(categoria, {'n': 0, 'stock': 0})
+        datos['n'] += 1
+        datos['stock'] += p.get('stock') or 0
+
+    activos_por_categoria = [
+        (categoria, f"{datos['n']} producto(s) · {datos['stock']:,} u. en stock")
+        for categoria, datos in sorted(por_categoria.items())
+    ]
+
+    activos_ind = _indicador(
+        'productos_activos', activos_n,
+        pie=f"{activos_n} de {total_catalogo} del catalogo",
+        detalle=activos_por_categoria or [
+            ('Activos', str(activos_n)),
+            ('Total del catalogo', str(total_catalogo)),
+        ],
+    )
+
     # Resumen actual del catalogo. No depende del periodo: stock es una foto
     # del momento. Las devoluciones si salen de las incidencias del periodo.
-    inventario = actual.get('inventario') or {}
     unidades_devol = sum((i.get('unidades') or 0) for i in devol)
     resumen_inventario = {
         'total': inventario.get('total', 0),
@@ -551,6 +687,15 @@ def _seccion_almacen(actual, anterior):
     bajo_stock_lista = inventario.get('bajo_stock_lista') or []
 
     return {
+        'productos_mas_vendidos': mas_vendidos,
+        'proveedores_disponibles': proveedores_ind,
+        'productos_no_vendidos': no_vendidos,
+        'productos_activos': activos_ind,
+        'top_productos': top_productos,
+        'proveedores_lista': proveedores,
+        'no_vendidos_lista': sin_ventas[:10],
+        'activos_por_categoria': activos_por_categoria,
+        'rotacion_detalle': rotacion_detalle,
         'quiebre_repuestos': quiebre,
         'doh_accesorios': doh_acc,
         'doh_repuestos': doh_rep,
@@ -570,7 +715,7 @@ def _doh(doh, categorias, dias):
     """
     categorias = tuple(categorias or ())
     if not categorias:
-        return None, [('Sin categorias configuradas', '')]
+        return None, [('Sin categorías configuradas', '')]
 
     stock = 0
     unidades = 0
@@ -583,13 +728,13 @@ def _doh(doh, categorias, dias):
             existentes.append(categoria)
 
     detalle = [
-        ('Categorias', ', '.join(categorias)),
+        ('Categorías', ', '.join(categorias)),
         ('Stock actual (unidades)', str(stock)),
         ('Vendidas en el periodo', str(unidades)),
     ]
     if not existentes:
         detalle.append(('Aviso',
-                        'Ningun producto activo tiene esas categorias'))
+                        'Ningún producto activo tiene esas categorías'))
         return None, detalle
     if not unidades:
         detalle.append(('Nota', 'sin ventas en el periodo'))
@@ -611,8 +756,8 @@ def _aviso_categorias(categorias, existentes):
     faltan = [c for c in categorias if c not in existentes]
     if not faltan:
         return ''
-    return (f"Sin productos en la categoria '{', '.join(faltan)}'. "
-            f"Categorias del catalogo: {', '.join(existentes) or 'ninguna'}")
+    return (f"Sin productos en la categoría '{', '.join(faltan)}'. "
+            f"Categorías del catálogo: {', '.join(existentes) or 'ninguna'}")
 
 
 # ─────────────────────────────────────────────

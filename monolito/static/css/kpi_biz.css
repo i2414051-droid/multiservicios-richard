@@ -195,6 +195,47 @@
 .kpi-biz-card.is-critico { --kpi-estado: var(--kpi-rojo); }
 .kpi-biz-card.is-sin-datos { --kpi-estado: var(--text-muted); }
 
+/* ── Alerta compacta (quiebre de stock) ── */
+.kpi-biz-alerta {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  padding: .8rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--kpi-estado, var(--kpi-naranja));
+  border-radius: 12px;
+  background: rgba(243, 156, 18, .07);
+  --kpi-estado: var(--kpi-naranja);
+}
+
+.kpi-biz-alerta.is-ok { --kpi-estado: var(--kpi-verde); }
+.kpi-biz-alerta.is-aviso { --kpi-estado: var(--kpi-amarillo); }
+.kpi-biz-alerta.is-critico { --kpi-estado: var(--kpi-rojo); }
+.kpi-biz-alerta.is-sin-datos { --kpi-estado: var(--text-muted); }
+
+.kpi-biz-alerta > .bi {
+  font-size: 1.1rem;
+  line-height: 1.4;
+  color: var(--kpi-estado, var(--kpi-naranja));
+}
+
+.kpi-biz-alerta-texto {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  font-size: .84rem;
+}
+
+.kpi-biz-alerta-texto strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.kpi-biz-alerta-texto span {
+  color: var(--kpi-muted-txt);
+}
+
 .kpi-biz-card .kpi-biz-cab {
   display: flex;
   align-items: center;

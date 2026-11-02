@@ -643,6 +643,55 @@ RECAPTCHA_ACTIVO = bool(RECAPTCHA_SITE_KEY and RECAPTCHA_SECRET_KEY)
 # de un context_processor: es un valor fijo del proceso, no depende del request.
 app.jinja_env.globals['recaptcha_site_key'] = RECAPTCHA_SITE_KEY
 
+# ─────────────────────────────────────────────
+# GOOGLE OAuth 2.0 — "Iniciar sesión con Google"
+# ─────────────────────────────────────────────
+# Flujo Authorization Code contra accounts.google.com. Las credenciales se
+# crean en Google Cloud Console -> APIs y servicios -> Credenciales ->
+# ID de cliente OAuth (tipo Aplicación web). El SECRET solo vive en el
+# servidor (.env en local, Render -> Environment en produccion); nunca se
+# renderiza en las plantillas.
+#
+# Con las dos claves ausentes el boton de Google no se dibuja y /auth/google
+# responde 404: un entorno sin credenciales no queda roto ni ofrece un login
+# que no puede completar.
+GOOGLE_CLIENT_ID     = os.environ.get('GOOGLE_CLIENT_ID', '').strip()
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '').strip()
+GOOGLE_AUTH_URL      = 'https://accounts.google.com/o/oauth2/v2/auth'
+GOOGLE_TOKEN_URL     = 'https://oauth2.googleapis.com/token'
+GOOGLE_USERINFO_URL  = 'https://openidconnect.googleapis.com/v1/userinfo'
+GOOGLE_SCOPES        = 'openid email profile'
+GOOGLE_TIMEOUT       = float(os.environ.get('GOOGLE_TIMEOUT', '10'))
+GOOGLE_ACTIVO = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+
+# Dominios aceptados al crear cuentas. Una sola lista para /registro y para
+# el alta via Google: si manana se suma otro proveedor, se cambia aqui.
+DOMINIOS_CORREO = ('gmail.com', 'hotmail.com')
+
+
+def _google_redirect_uri():
+    """URI de callback que Google tiene registrada, segun el entorno.
+
+    GOOGLE_REDIRECT_URI (si existe) manda: permite apuntar a un entorno de
+    pruebas propio sin tocar codigo. Si no, en Render/PROD se usa el dominio
+    publico y en local el de localhost. Google exige coincidencia EXACTA con
+    lo registrado en la consola, por eso no se arma desde request.url_root.
+    """
+    explicita = os.environ.get('GOOGLE_REDIRECT_URI', '').strip()
+    if explicita:
+        return explicita
+    if os.environ.get('RENDER') or os.environ.get('GOOGLE_ENTORNO') == 'prod':
+        return os.environ.get(
+            'GOOGLE_REDIRECT_URI_PROD',
+            'https://multiserviciosrichard.com/auth/google/callback').strip()
+    return os.environ.get(
+        'GOOGLE_REDIRECT_URI_LOCAL',
+        'http://localhost:5000/auth/google/callback').strip()
+
+# Solo la client id es publica; el navegador la necesita para armar el enlace.
+app.jinja_env.globals['google_client_id'] = GOOGLE_CLIENT_ID
+app.jinja_env.globals['google_activo']    = GOOGLE_ACTIVO
+
 CATEGORIAS = ['Herramientas', 'Electricos', 'Accesorios', 'Repuestos', 'Otros']
 
 # ─────────────────────────────────────────────
@@ -2454,6 +2503,153 @@ def logout():
     session.clear()
     return redirect('/')
 
+# ─────────────────────────────────────────────
+# GOOGLE OAUTH 2.0 — "Iniciar sesión con Google"
+# ─────────────────────────────────────────────
+# Flujo Authorization Code + OpenID Connect:
+#   1. /auth/google  -> redirige a la pantalla de Google (con `state`).
+#   2. Google vuelve a /auth/google/callback con ?code&state.
+#   3. El servidor cambia el code por un access_token y pide el perfil.
+#   4. Se reutiliza la cuenta por correo o se crea como cliente.
+#
+# Sin GOOGLE_CLIENT_ID/SECRET ambas rutas responden 404: el boton no se dibuja
+# y no queda un login a medio configurar.
+@app.route('/auth/google')
+def google_login():
+    if not GOOGLE_ACTIVO:
+        abort(404)
+    # `state` es el anti-CSRF del flujo: se compara al volver. Sin el, un
+    # enlace externo podria completar un login en nombre del usuario.
+    estado = secrets.token_urlsafe(32)
+    session['google_state'] = estado
+    params = {
+        'client_id': GOOGLE_CLIENT_ID,
+        'redirect_uri': _google_redirect_uri(),
+        'response_type': 'code',
+        'scope': GOOGLE_SCOPES,
+        'state': estado,
+        # select_account: siempre pregunta con que cuenta entrar, sin reusar
+        # en silencio la sesion de Google del navegador.
+        'prompt': 'select_account',
+    }
+    return redirect(GOOGLE_AUTH_URL + '?' + urlencode(params))
+
+
+@app.route('/auth/google/callback')
+def google_callback():
+    if not GOOGLE_ACTIVO:
+        abort(404)
+
+    # El usuario cancelo en Google (o Google devolvio un error).
+    if request.args.get('error'):
+        session.pop('google_state', None)
+        flash('Inicio de sesión con Google cancelado.', 'warning')
+        return redirect('/login')
+
+    esperado = session.pop('google_state', None)
+    recibido = request.args.get('state', '')
+    if not esperado or not recibido or not secrets.compare_digest(esperado, recibido):
+        flash('La sesión de Google venció. Intenta de nuevo.', 'danger')
+        return redirect('/login')
+
+    codigo = request.args.get('code', '')
+    if not codigo:
+        flash('Google no devolvió un código de autorización.', 'danger')
+        return redirect('/login')
+
+    # 1) code -> tokens. El secret solo viaja en esta llamada servidor-servidor.
+    try:
+        resp = requests.post(GOOGLE_TOKEN_URL, data={
+            'code': codigo,
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'redirect_uri': _google_redirect_uri(),
+            'grant_type': 'authorization_code',
+        }, timeout=GOOGLE_TIMEOUT)
+        tokens = resp.json()
+    except Exception:
+        app.logger.exception('Google: fallo al cambiar el codigo por tokens')
+        flash('No se pudo validar la cuenta de Google. Intenta de nuevo.', 'danger')
+        return redirect('/login')
+
+    if not isinstance(tokens, dict):
+        tokens = {}
+
+    if resp.status_code != 200 or not tokens.get('access_token'):
+        # No se registra el cuerpo completo: puede traer datos del intercambio.
+        app.logger.warning('Google: token rechazado (HTTP %s)', resp.status_code)
+        flash('No se pudo validar la cuenta de Google. Intenta de nuevo.', 'danger')
+        return redirect('/login')
+
+    # 2) access_token -> perfil verificado por Google.
+    try:
+        resp = requests.get(GOOGLE_USERINFO_URL, headers={
+            'Authorization': 'Bearer ' + tokens['access_token'],
+        }, timeout=GOOGLE_TIMEOUT)
+        perfil = resp.json()
+    except Exception:
+        app.logger.exception('Google: fallo al leer el perfil')
+        flash('No se pudo leer tu cuenta de Google. Intenta de nuevo.', 'danger')
+        return redirect('/login')
+
+    if not isinstance(perfil, dict):
+        perfil = {}
+
+    correo = (perfil.get('email') or '').strip().lower()
+    if resp.status_code != 200 or not correo:
+        flash('No se pudo leer tu cuenta de Google. Intenta de nuevo.', 'danger')
+        return redirect('/login')
+    if perfil.get('email_verified') is False:
+        flash('Tu correo de Google no está verificado.', 'danger')
+        return redirect('/login')
+    if correo.rsplit('@', 1)[-1] not in DOMINIOS_CORREO:
+        flash('Solo se permiten correos @gmail.com o @hotmail.com.', 'danger')
+        return redirect('/login')
+
+    # 3) Cuenta existente (se enlaza por correo) o alta nueva como cliente.
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT * FROM usuarios WHERE correo=%s", (correo,))
+    usuario = cur.fetchone()
+
+    if usuario:
+        # Mismas reglas que el login con clave: una cuenta bloqueada no entra.
+        if (usuario.get('estado') or '') in ('bloqueado', 'inactivo'):
+            cur.close()
+            flash('Tu cuenta está %s. Contacta al administrador.' % usuario.get('estado'), 'danger')
+            return redirect('/login')
+        cur.close()
+    else:
+        nombre = (perfil.get('given_name') or '').strip()
+        apellido = (perfil.get('family_name') or '').strip()
+        if not nombre:
+            nombre = (perfil.get('name') or correo.split('@')[0]).strip() or 'Cliente'
+        # Clave aleatoria: la cuenta nace para entrar con Google. Si el usuario
+        # quiere una clave propia, puede usar "¿Olvidaste tu contraseña?".
+        clave = bcrypt.generate_password_hash(secrets.token_urlsafe(32)).decode('utf-8')
+        cur.execute(
+            "INSERT INTO usuarios (correo, password, rol, nombre, apellido) "
+            "VALUES (%s,%s,'cliente',%s,%s)",
+            (correo, clave, nombre[:100], apellido[:50]))
+        nuevo_id = cur.lastrowid
+        # Igual que en /registro: una cuenta nueva nunca hereda carrito ajeno.
+        cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (str(nuevo_id),))
+        mysql.connection.commit()
+        cur.execute("SELECT * FROM usuarios WHERE id=%s", (nuevo_id,))
+        usuario = cur.fetchone()
+        cur.close()
+        flash('¡Cuenta creada con Google! Bienvenido.', 'success')
+
+    # 4) Sesion identica a la del login con clave.
+    session['user_id'] = usuario['id']
+    session['correo'] = usuario['correo']
+    session['rol'] = (usuario['rol'] or 'cliente').lower()
+    session['nombre'] = (usuario.get('nombre') or '').strip()
+    session['apellido'] = (usuario.get('apellido') or '').strip()
+
+    if session['rol'] in ('admin', 'administrador'):
+        return redirect('/dashboard')
+    return redirect('/')
+
 @app.route('/registro', methods=['GET','POST'])
 def registro():
     if request.method == 'POST':
@@ -2487,6 +2683,11 @@ def registro():
             return redirect('/registro')
         if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo):
             flash('Ingresa un correo electrónico válido.', 'danger')
+            return redirect('/registro')
+        # Solo se aceptan dominios Gmail y Hotmail para crear cuentas.
+        dominio = correo.rsplit('@', 1)[-1].lower()
+        if dominio not in DOMINIOS_CORREO:
+            flash('Solo se permiten correos @gmail.com o @hotmail.com.', 'danger')
             return redirect('/registro')
         ok, msg = _password_valida(password)
         if not ok:
@@ -2581,6 +2782,384 @@ def dashboard():
                            reclamaciones_pendientes=reclamaciones_pendientes,
                            ultimas_ventas=ultimas_ventas,
                            productos_stock_bajo=productos_stock_bajo)
+
+# ─────────────────────────────────────────────
+# GRÁFICO CIRCULAR DEL DASHBOARD (reporte en tiempo real)
+# ─────────────────────────────────────────────
+# Un solo endpoint entrega el agregado ya listo para Chart.js: el navegador
+# solo pinta. Se evita mandar filas de ventas al cliente y se calcula todo
+# con GROUP BY en la base.
+_RANGOS_GRAFICO = ('hoy', '7d', '30d', 'mes', 'todo')
+_DIMENSIONES_GRAFICO = ('estado', 'motivo', 'pago', 'entrega', 'distrito', 'categoria')
+
+_ETIQUETAS_ESTADO = {
+    'entregado': 'Ventas exitosas',
+    'pendiente': 'Entregas pendientes',
+    'en_camino': 'En camino',
+    'cancelado': 'Canceladas',
+}
+_ETIQUETAS_METODO = {
+    'tarjeta': 'Tarjeta',
+    'yape': 'Yape',
+    'transferencia': 'Transferencia',
+    'efectivo': 'Efectivo',
+    'plin': 'Plin',
+    'sin_dato': 'Sin dato',
+}
+_ETIQUETAS_ENTREGA = {
+    'delivery': 'Delivery',
+    'recojo': 'Recojo',
+    'sin_dato': 'Sin dato',
+}
+_GRAFICO_COLORES = {
+    'Ventas exitosas': '#00c853',
+    'Entregas pendientes': '#f1c40f',
+    'En camino': '#3498db',
+    'Canceladas': '#e74c3c',
+    'Delivery': '#9b59b6',
+    'Recojo': '#1abc9c',
+    'Sin distrito': '#95a5a6',
+    'Tarjeta': '#3498db',
+    'Yape': '#9b59b6',
+    'Transferencia': '#1abc9c',
+    'Efectivo': '#f39c12',
+    'Plin': '#e67e22',
+    'Sin dato': '#95a5a6',
+    'Sin motivo registrado': '#95a5a6',
+}
+_GRAFICO_PALETA = ('#f39c12', '#3498db', '#00c853', '#9b59b6', '#e74c3c',
+                   '#1abc9c', '#f1c40f', '#e67e22', '#2ecc71', '#34495e')
+
+# El dashboard puede estar abierto en varias pestañas a la vez. Una cache de
+# pocos segundos evita repetir el GROUP BY en cada refresco sin dejar de ser
+# "en tiempo real". GRAFICO_CACHE_TTL=0 la desactiva.
+_GRAFICO_CACHE = {}
+_GRAFICO_CACHE_TTL = float(os.environ.get('GRAFICO_CACHE_TTL', '15') or 0)
+
+
+def _grafico_rango(rango):
+    """Fechas (Lima) del periodo pedido. (None, None) = todo el historico."""
+    hoy = _ahora_lima().date()
+    if rango == 'hoy':
+        return hoy, hoy
+    if rango == '7d':
+        return hoy - timedelta(days=6), hoy
+    if rango == '30d':
+        return hoy - timedelta(days=29), hoy
+    if rango == 'mes':
+        return hoy.replace(day=1), hoy
+    return None, None
+
+
+def _grafico_condiciones(rango):
+    """WHERE comun a todas las dimensiones (ocultas fuera, periodo aplicado)."""
+    conds = ["COALESCE(v.oculta,0)=0"]
+    params = []
+    desde, hasta = _grafico_rango(rango)
+    if desde:
+        conds.append("DATE(v.fecha) BETWEEN %s AND %s")
+        params.extend([desde, hasta])
+    return " AND ".join(conds), params
+
+
+def _grafico_filas(cur, por, where, params):
+    """Filas (clave, cantidad, monto) de la dimension elegida."""
+    p = tuple(params)
+
+    if por == 'estado':
+        # 'en camino' vive en seguimiento_entregas, no en ventas.estado.
+        # EXISTS evita duplicar la venta si tuviera mas de un seguimiento.
+        cur.execute(f"""
+            SELECT CASE
+                     WHEN v.estado='entregado' THEN 'entregado'
+                     WHEN v.estado='cancelado' THEN 'cancelado'
+                     WHEN EXISTS (SELECT 1 FROM seguimiento_entregas e
+                                  WHERE e.venta_id=v.id AND e.estado='en camino')
+                          THEN 'en_camino'
+                     ELSE 'pendiente'
+                   END AS clave,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(v.total), 0) AS monto
+            FROM ventas v
+            WHERE {where}
+            GROUP BY clave
+        """, p)
+        return cur.fetchall()
+
+    if por == 'motivo':
+        cur.execute(f"""
+            SELECT COALESCE(c.motivo_codigo, 'sin_motivo') AS clave,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(v.total), 0) AS monto
+            FROM ventas v
+            LEFT JOIN cancelaciones c ON c.venta_id=v.id
+            WHERE {where} AND v.estado='cancelado'
+            GROUP BY clave
+        """, p)
+        return cur.fetchall()
+
+    if por == 'pago':
+        cur.execute(f"""
+            SELECT COALESCE(NULLIF(v.metodo_pago, ''), 'sin_dato') AS clave,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(v.total), 0) AS monto
+            FROM ventas v
+            WHERE {where}
+            GROUP BY clave
+        """, p)
+        return cur.fetchall()
+
+    if por == 'entrega':
+        cur.execute(f"""
+            SELECT COALESCE(NULLIF(v.tipo_entrega, ''), 'sin_dato') AS clave,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(v.total), 0) AS monto
+            FROM ventas v
+            WHERE {where}
+            GROUP BY clave
+        """, p)
+        return cur.fetchall()
+
+    if por == 'distrito':
+        cur.execute(f"""
+            SELECT COALESCE(NULLIF(v.distrito, ''), 'Sin distrito') AS clave,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(v.total), 0) AS monto
+            FROM ventas v
+            WHERE {where}
+            GROUP BY clave
+        """, p)
+        return cur.fetchall()
+
+    # Categoria: una venta puede tener productos de varias categorias, por eso
+    # la cantidad se cuenta con DISTINCT y el monto sale del detalle.
+    cur.execute(f"""
+        SELECT COALESCE(NULLIF(pr.categoria, ''), 'Otros') AS clave,
+               COUNT(DISTINCT v.id) AS n,
+               COALESCE(SUM(d.cantidad * d.precio), 0) AS monto,
+               COALESCE(SUM(d.cantidad), 0) AS unidades
+        FROM detalle_venta d
+        JOIN ventas v ON v.id=d.venta_id
+        JOIN {ALMACEN_DB}.productos pr ON pr.id=d.producto_id
+        WHERE {where}
+        GROUP BY clave
+    """, p)
+    return cur.fetchall()
+
+
+def _grafico_etiqueta(por, clave):
+    if por == 'estado':
+        return _ETIQUETAS_ESTADO.get(clave, str(clave))
+    if por == 'motivo':
+        if clave == MOTIVO_SIN_REGISTRO:
+            return 'Sin motivo registrado'
+        return MOTIVOS_CANCELACION.get(clave, str(clave).replace('_', ' ').capitalize())
+    if por == 'pago':
+        return _ETIQUETAS_METODO.get(clave, str(clave).capitalize())
+    if por == 'entrega':
+        return _ETIQUETAS_ENTREGA.get(clave, str(clave).capitalize())
+    return str(clave)
+
+
+def _grafico_url(por, clave):
+    """A donde lleva hacer clic en una porcion (historial o entregas ya filtrados)."""
+    clave = str(clave)
+    if por == 'estado':
+        if clave == 'en_camino':
+            return '/entregas?filtro=en_camino'
+        if clave == 'pendiente':
+            return '/entregas?filtro=pendientes'
+        return '/historial-compras?estado=' + quote(clave)
+    if por == 'motivo':
+        return '/historial-compras?motivo=' + quote(clave)
+    if por == 'pago':
+        return '/historial-compras?pago=' + quote(clave)
+    if por == 'entrega':
+        return '/historial-compras?entrega=' + quote(clave)
+    if por == 'distrito':
+        return '/historial-compras?distrito=' + quote(clave)
+    if por == 'categoria':
+        return '/historial-compras?categoria=' + quote(clave)
+    return ''
+
+
+def _grafico_pagos(cur, where, params):
+    """Ranking de metodos de pago usados en el periodo.
+
+    Devuelve la lista completa (de mayor a menor), el mas usado y el menos
+    usado. Se excluye 'sin dato' porque no es un metodo real de pago.
+    """
+    cur.execute(f"""
+        SELECT COALESCE(NULLIF(v.metodo_pago, ''), 'sin_dato') AS clave,
+               COUNT(*) AS n,
+               COALESCE(SUM(v.total), 0) AS monto
+        FROM ventas v
+        WHERE {where}
+        GROUP BY clave
+    """, tuple(params))
+
+    lista = []
+    for fila in cur.fetchall():
+        fila = dict(fila)
+        clave = str(fila.get('clave') or '').strip()
+        cantidad = int(fila.get('n') or 0)
+        if not clave or clave == 'sin_dato' or cantidad <= 0:
+            continue
+        etiqueta = _grafico_etiqueta('pago', clave)
+        lista.append({
+            'clave': clave,
+            'etiqueta': etiqueta,
+            'cantidad': cantidad,
+            'monto': round(float(fila.get('monto') or 0), 2),
+            'url': _grafico_url('pago', clave),
+            'color': _GRAFICO_COLORES.get(etiqueta) or _GRAFICO_PALETA[
+                len(lista) % len(_GRAFICO_PALETA)],
+        })
+
+    lista.sort(key=lambda i: i['cantidad'], reverse=True)
+    return {
+        'lista': lista,
+        'top': lista[0] if lista else None,
+        # Con un solo metodo no hay "menos usado" que valga la pena mostrar.
+        'bajo': lista[-1] if len(lista) > 1 else None,
+        'total': sum(i['cantidad'] for i in lista),
+    }
+
+
+def _grafico_reclamaciones(cur, rango):
+    """Cantidad de reclamaciones registradas en el periodo elegido."""
+    desde, hasta = _grafico_rango(rango)
+    where, params = '1=1', []
+    if desde:
+        where = 'DATE(fecha) BETWEEN %s AND %s'
+        params = [desde, hasta]
+    try:
+        cur.execute(f"""
+            SELECT COUNT(*) AS total,
+                   COALESCE(SUM(CASE WHEN estado='pendiente' THEN 1 ELSE 0 END), 0) AS pendientes,
+                   COALESCE(SUM(CASE WHEN estado='pendiente'
+                                      AND fecha_limite IS NOT NULL
+                                      AND fecha_limite < NOW() THEN 1 ELSE 0 END), 0) AS vencidas,
+                   COALESCE(SUM(CASE WHEN estado='respondido' THEN 1 ELSE 0 END), 0) AS respondidas
+            FROM reclamaciones
+            WHERE {where}
+        """, tuple(params))
+        fila = dict(cur.fetchone() or {})
+    except Exception:
+        # Si la tabla aun no existe en una base antigua, el reporte no se cae.
+        fila = {}
+    return {
+        'total': int(fila.get('total') or 0),
+        'pendientes': int(fila.get('pendientes') or 0),
+        'vencidas': int(fila.get('vencidas') or 0),
+        'respondidas': int(fila.get('respondidas') or 0),
+        'url': '/reclamaciones',
+    }
+
+
+@app.route('/api/dashboard/grafico')
+def dashboard_grafico():
+    """Agregados del reporte circular. Solo lectura, solo admin."""
+    if not _es_admin():
+        return jsonify(ok=False, error='No autorizado'), 403
+
+    rango = (request.args.get('rango') or '30d').strip().lower()
+    if rango not in _RANGOS_GRAFICO:
+        rango = '30d'
+    por = (request.args.get('por') or 'estado').strip().lower()
+    if por not in _DIMENSIONES_GRAFICO:
+        por = 'estado'
+    medida = (request.args.get('medida') or 'pedidos').strip().lower()
+    if medida not in ('pedidos', 'soles'):
+        medida = 'pedidos'
+
+    clave_cache = (rango, por, medida)
+    ahora = time.monotonic()
+    guardado = _GRAFICO_CACHE.get(clave_cache)
+    if guardado and _GRAFICO_CACHE_TTL > 0 and (ahora - guardado[0]) < _GRAFICO_CACHE_TTL:
+        return jsonify(guardado[1])
+
+    where, params = _grafico_condiciones(rango)
+    cur = mysql.connection.cursor()
+    try:
+        # KPIs del periodo: no dependen de la dimension elegida.
+        cur.execute(f"""
+            SELECT COUNT(*) AS total,
+                   COALESCE(SUM(v.total), 0) AS monto,
+                   COALESCE(SUM(CASE WHEN v.estado='cancelado' THEN 1 ELSE 0 END), 0) AS canceladas
+            FROM ventas v
+            WHERE {where}
+        """, tuple(params))
+        kpis = cur.fetchone() or {}
+        total = int(kpis.get('total') or 0)
+        monto = float(kpis.get('monto') or 0)
+        canceladas = int(kpis.get('canceladas') or 0)
+
+        filas = _grafico_filas(cur, por, where, params)
+        pagos = _grafico_pagos(cur, where, params)
+        reclamos = _grafico_reclamaciones(cur, rango)
+    finally:
+        cur.close()
+
+    items = []
+    for fila in filas:
+        fila = dict(fila)
+        clave = fila.get('clave')
+        cantidad = int(fila.get('n') or 0)
+        if not clave or cantidad <= 0:
+            continue
+        etiqueta = _grafico_etiqueta(por, str(clave))
+        items.append({
+            'clave': str(clave),
+            'etiqueta': etiqueta,
+            'cantidad': cantidad,
+            'monto': round(float(fila.get('monto') or 0), 2),
+            'unidades': int(fila.get('unidades') or 0),
+            'url': _grafico_url(por, clave),
+            'color': _GRAFICO_COLORES.get(etiqueta) or _GRAFICO_PALETA[
+                len(items) % len(_GRAFICO_PALETA)],
+        })
+
+    if por == 'estado':
+        orden = {'entregado': 0, 'pendiente': 1, 'en_camino': 2, 'cancelado': 3}
+        items.sort(key=lambda i: orden.get(i['clave'], 9))
+    else:
+        items.sort(key=lambda i: i['monto'] if medida == 'soles' else i['cantidad'],
+                   reverse=True)
+
+    valores = [i['cantidad'] if medida == 'pedidos' else i['monto'] for i in items]
+    base = sum(valores) or 0
+    for i, item in enumerate(items):
+        item['porcentaje'] = round((valores[i] * 100.0 / base), 1) if base else 0.0
+
+    datos = {
+        'ok': True,
+        'rango': rango,
+        'por': por,
+        'medida': medida,
+        'etiquetas': [i['etiqueta'] for i in items],
+        'valores': valores,
+        'colores': [i['color'] for i in items],
+        'detalle': items,
+        'pagos': pagos,
+        'reclamaciones': reclamos,
+        'kpis': {
+            'total': total,
+            'monto': round(monto, 2),
+            'ticket': round(monto / total, 2) if total else 0,
+            'pct_cancel': round(canceladas * 100.0 / total, 1) if total else 0.0,
+            'unidades': sum(i['unidades'] for i in items) if por == 'categoria' else 0,
+            'reclamaciones': reclamos['total'],
+        },
+        'actualizado': _ahora_lima().strftime('%H:%M:%S'),
+    }
+
+    if _GRAFICO_CACHE_TTL > 0:
+        if len(_GRAFICO_CACHE) > 32:
+            _GRAFICO_CACHE.clear()
+        _GRAFICO_CACHE[clave_cache] = (ahora, datos)
+
+    return jsonify(datos)
 
 @app.route('/admin')
 def admin():
@@ -3543,6 +4122,12 @@ def historial_compras():
         return redirect('/')
     buscar = request.args.get('buscar','')
     motivo_filtro = request.args.get('motivo','').strip()
+    # Filtros que llegan al hacer clic en una porcion del grafico del dashboard.
+    estado_filtro = (request.args.get('estado') or '').strip().lower()
+    pago_filtro = (request.args.get('pago') or '').strip().lower()
+    entrega_filtro = (request.args.get('entrega') or '').strip().lower()
+    distrito_filtro = (request.args.get('distrito') or '').strip()
+    categoria_filtro = (request.args.get('categoria') or '').strip()
     mostrar_ocultas = request.args.get('ocultas', '0') == '1'
     page = int(request.args.get('page', 1))
     cur = mysql.connection.cursor()
@@ -3562,6 +4147,27 @@ def historial_compras():
     if motivo_cancelacion_valido(motivo_filtro):
         where += " AND c.motivo_codigo=%s"
         params.append(motivo_filtro)
+    if estado_filtro in ('entregado', 'cancelado', 'espera', 'en espera'):
+        where += " AND v.estado=%s"
+        params.append('en espera' if estado_filtro in ('espera', 'en espera') else estado_filtro)
+    if pago_filtro in ('tarjeta', 'yape', 'transferencia', 'efectivo', 'plin'):
+        where += " AND v.metodo_pago=%s"
+        params.append(pago_filtro)
+    elif pago_filtro == 'sin_dato':
+        where += " AND COALESCE(NULLIF(v.metodo_pago, ''), 'sin_dato')='sin_dato'"
+    if entrega_filtro in ('recojo', 'delivery'):
+        where += " AND v.tipo_entrega=%s"
+        params.append(entrega_filtro)
+    if distrito_filtro:
+        where += " AND v.distrito=%s"
+        params.append(distrito_filtro)
+    if categoria_filtro:
+        # EXISTS y no JOIN: una venta con varios productos de la misma
+        # categoria debe seguir apareciendo una sola vez.
+        where += (f" AND EXISTS (SELECT 1 FROM detalle_venta d2 "
+                  f"JOIN {ALMACEN_DB}.productos p2 ON p2.id=d2.producto_id "
+                  f"WHERE d2.venta_id=v.id AND p2.categoria=%s)")
+        params.append(categoria_filtro)
     sql_count = f"SELECT COUNT(*) AS total FROM ventas v JOIN usuarios u ON v.cliente_id=u.id {join_cancel} {where}"
     sql_data = f"""SELECT v.id, u.correo, u.id AS cliente_id, v.total, v.fecha, v.documento, v.nombre AS titular, v.estado,
         COALESCE(v.oculta,0) AS oculta, c.motivo_codigo, c.motivo_detalle, c.cancelado_por
