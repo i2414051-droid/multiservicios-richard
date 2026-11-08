@@ -1288,6 +1288,30 @@ def _init_db_inner():
             except Exception:
                 pass
 
+        # Migracion: en instalaciones antiguas `carrito.usuario_id` quedo como
+        # INT. Los invitados usan un UUID y MySQL lo convertia a numero
+        # ("c775d316-..." -> 0), por lo que varios visitantes compartian el
+        # mismo carrito (y veian productos ajenos). Se pasa a VARCHAR(200) una
+        # sola vez; en bases nuevas ya nace asi.
+        try:
+            cur.execute("""
+                SELECT DATA_TYPE AS tipo
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA=DATABASE()
+                  AND TABLE_NAME='carrito'
+                  AND COLUMN_NAME='usuario_id'
+            """)
+            col = cur.fetchone()
+            if isinstance(col, dict):
+                tipo = col.get('tipo') or ''
+            else:
+                tipo = (col[0] if col else '') or ''
+            if tipo and str(tipo).lower() not in ('varchar', 'char', 'text'):
+                cur.execute("ALTER TABLE carrito MODIFY COLUMN usuario_id VARCHAR(200) NOT NULL")
+                print("[init_db] carrito.usuario_id migrado de INT a VARCHAR(200)")
+        except Exception as e:
+            print(f"[init_db] no se pudo migrar carrito.usuario_id: {e}")
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS ventas (
                 id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -1815,8 +1839,11 @@ def obtener_ip():
     return request.remote_addr
 
 def obtener_usuario():
+    # Siempre texto: los invitados usan un UUID y los usuarios su id. Si se
+    # devolviera un int, MySQL compararia la columna VARCHAR numericamente y
+    # un invitado con UUID "1fb1..." coincidiria con el usuario 1.
     if 'user_id' in session:
-        return session['user_id']
+        return str(session['user_id'])
     if 'guest_id' not in session:
         session['guest_id'] = str(uuid.uuid4())
     return session['guest_id']
@@ -8031,7 +8058,7 @@ def checkout():
         SELECT c.id, c.producto_id, p.nombre, p.precio, p.imagen, c.cantidad
         FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
         WHERE c.usuario_id=%s
-    """, (user_id,))
+    """, (str(user_id),))
     items = cur.fetchall()
     if not items:
         flash('Su carrito está vacío.', 'warning')
@@ -8260,7 +8287,7 @@ def procesar_compra():
             SELECT p.id, p.nombre, p.precio, c.cantidad
             FROM carrito c JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
             WHERE c.usuario_id=%s
-        """, (user_id,))
+        """, (str(user_id),))
         items = cur.fetchall()
         if not items:
             # Posible reintento: si la compra ya se registró, ir a su confirmación
@@ -8385,7 +8412,7 @@ def procesar_compra():
             if cur.rowcount != 1:
                 raise _SinStock(f'Stock insuficiente para: {item["nombre"]}.')
             sincronizar_pedido_por_stock(cur, item['id'])
-        cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (user_id,))
+        cur.execute("DELETE FROM carrito WHERE usuario_id=%s", (str(user_id),))
         _carrito_invalidar(user_id)
 
         cur.execute("""UPDATE usuarios SET
