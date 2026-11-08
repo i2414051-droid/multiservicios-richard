@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function () {
     return 'bg-warning text-dark';
   }
   function actualizarEstados() {
-    fetch('/api/mis-entregas-estados', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    return fetch('/api/mis-entregas-estados', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data || !data.ok || !data.entregas) return;
@@ -266,18 +266,22 @@ document.addEventListener('DOMContentLoaded', function () {
       })
       .catch(function () { /* sin conexión: no hacer nada */ });
   }
-  setInterval(actualizarEstados, 10000);
-  // P2: badge de mi estado en tiempo real
-  setInterval(function(){
-    fetch('/api/mi-estado', {headers:{'X-Requested-With':'XMLHttpRequest'}})
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if(!d || !d.ok) return;
+
+  function actualizarMiEstado() {
+    return fetch('/api/mi-estado', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) return;
         var b = document.getElementById('badgeMiEstado');
-        if(b){ b.style.background = d.color; b.textContent = 'Mi cuenta: ' + d.nombre; }
+        if (b) { b.style.background = d.color; b.textContent = 'Mi cuenta: ' + d.nombre; }
       })
-      .catch(function(){});
-  }, 15000);
+      .catch(function () {});
+  }
+
+  // Un unico poller por nombre: si el script se ejecutara dos veces, el
+  // anterior se detiene. No se solapan peticiones ni se acumulan timers.
+  window.crearPolling('mis-entregas-estados', actualizarEstados, 10000, true);
+  window.crearPolling('mi-estado-entregas', actualizarMiEstado, 15000, true);
 });
 </script>
 {% endblock %}

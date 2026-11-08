@@ -206,6 +206,62 @@ window.ocultarCarga = function(){
   window.__cargaVisible = false;
 };
 
+/* ── Polling seguro (fetch periódico sin bucles) ──
+   Reemplaza setInterval para refrescos con fetch. Evita los tres problemas
+   clásicos:
+     1. intervalos duplicados si el bloque se ejecuta dos veces,
+     2. peticiones encimadas cuando el servidor tarda mas que el intervalo,
+     3. timers vivos despues de salir de la pagina.
+   Uso: window.crearPolling('nombre-unico', funcionQueDevuelvePromesa, 10000);
+   La funcion debe hacer `return fetch(...)` para que se espere la respuesta. */
+window.__pollers = window.__pollers || {};
+window.crearPolling = function(nombre, fn, ms, ejecutarAhora){
+  var previo = window.__pollers[nombre];
+  if (previo && typeof previo.detener === 'function') previo.detener();
+
+  var timer = null, activo = true, enVuelo = false;
+  var espera = Math.max(1000, Number(ms) || 10000);
+
+  function programar(){
+    clearTimeout(timer);
+    if (!activo) return;
+    timer = setTimeout(ciclo, espera);
+  }
+
+  function ciclo(){
+    if (!activo) return;
+    // Con la pestaña oculta no se consulta; al volver se retoma.
+    if (document.hidden || enVuelo) { programar(); return; }
+    enVuelo = true;
+    Promise.resolve()
+      .then(fn)
+      .catch(function(){})
+      .then(function(){ enVuelo = false; programar(); });
+  }
+
+  function detener(){
+    activo = false;
+    clearTimeout(timer);
+    timer = null;
+  }
+
+  function iniciar(){
+    if (activo) return;
+    activo = true;
+    if (ejecutarAhora) ciclo(); else programar();
+  }
+
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden && activo && !enVuelo){ clearTimeout(timer); ciclo(); }
+  });
+  window.addEventListener('pageshow', function(e){ if (e.persisted) iniciar(); });
+  window.addEventListener('pagehide', detener);
+
+  window.__pollers[nombre] = { detener: detener, iniciar: iniciar };
+  if (ejecutarAhora) ciclo(); else programar();
+  return window.__pollers[nombre];
+};
+
 /* ── Bloqueo de botones y enlaces ──
    Al pulsar una accion se bloquea TODO lo interactuable (botones,
    enlaces del navbar, accesos rapidos, crear cuenta, etc.) para

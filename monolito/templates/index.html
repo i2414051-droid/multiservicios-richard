@@ -100,21 +100,21 @@ Productos destacados
 
 <div class="col-lg-3 col-md-6 mb-4">
 
-<div class="card producto-card h-100">
+<div class="card producto-card h-100" data-product-id="{{p.id}}">
 
 <div class="stock-box d-flex justify-content-between align-items-center px-2 pt-2">
   {% if p.stock is not none and p.stock > 0 %}
     {% if p.stock <= 1 %}
-      <span class="badge bg-danger">{{ p.stock }} en stock 🔔</span>
+      <span class="badge bg-danger js-stock">{{ p.stock }} en stock 🔔</span>
     {% elif p.stock < 5 %}
-      <span class="badge bg-danger">{{ p.stock }} en stock</span>
+      <span class="badge bg-danger js-stock">{{ p.stock }} en stock</span>
     {% elif p.stock < 15 %}
-      <span class="badge bg-warning text-dark">{{ p.stock }} en stock</span>
+      <span class="badge bg-warning text-dark js-stock">{{ p.stock }} en stock</span>
     {% else %}
-      <span class="badge bg-success">{{ p.stock }} en stock</span>
+      <span class="badge bg-success js-stock">{{ p.stock }} en stock</span>
     {% endif %}
   {% else %}
-    <span class="badge bg-secondary">Sin stock</span>
+    <span class="badge bg-secondary js-stock">Sin stock</span>
   {% endif %}
 </div>
 
@@ -176,7 +176,7 @@ S/. {{p.precio}}
 {% if p.stock>0 %}
 
 <a href="/agregar/{{p.id}}"
-class="btn btn-agregar">
+class="btn btn-agregar js-agregar" data-sin-carga>
 
 <i class="bi bi-cart"></i>
 
@@ -241,5 +241,108 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 });
+
+/* ── API JSON (visible en F12 → Network → Fetch/XHR) ──
+   La portada se sigue renderizando en el servidor; ademas consulta la API
+   publica para refrescar el stock y agrega al carrito sin recargar. */
+(function () {
+  function avisar(texto, tipo) {
+    var caja = document.getElementById('avisoAjax');
+    if (!caja) {
+      caja = document.createElement('div');
+      caja.id = 'avisoAjax';
+      caja.className = 'position-fixed top-0 end-0 p-3';
+      caja.style.zIndex = '2000';
+      document.body.appendChild(caja);
+    }
+    var alerta = document.createElement('div');
+    alerta.className = 'alert alert-' + (tipo || 'success') + ' shadow mb-2';
+    alerta.setAttribute('role', 'alert');
+    alerta.textContent = texto;
+    caja.appendChild(alerta);
+    setTimeout(function () { alerta.remove(); }, 3500);
+  }
+
+  function pintarContadorCarrito(cantidad) {
+    var btn = document.querySelector('.carrito-btn');
+    if (!btn) return;
+    var contador = btn.querySelector('.contador-carrito');
+    if (cantidad > 0) {
+      if (!contador) {
+        contador = document.createElement('span');
+        contador.className = 'contador-carrito';
+        btn.appendChild(contador);
+      }
+      contador.textContent = cantidad;
+    } else if (contador) {
+      contador.remove();
+    }
+  }
+
+  // 1) GET /api/productos → refresca el stock con datos JSON.
+  document.addEventListener('DOMContentLoaded', function () {
+    var params = new URLSearchParams(window.location.search);
+    fetch('/api/productos?' + params.toString(), {
+      headers: { 'Accept': 'application/json' },
+      credentials: 'same-origin'
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        var porId = {};
+        data.productos.forEach(function (p) { porId[String(p.id)] = p; });
+        document.querySelectorAll('[data-product-id]').forEach(function (card) {
+          var p = porId[String(card.dataset.productId)];
+          if (!p) return;
+          var badge = card.querySelector('.js-stock');
+          if (!badge) return;
+          badge.textContent = p.stock > 0 ? p.stock + ' en stock' : 'Sin stock';
+          badge.className = 'badge js-stock ' + (
+            p.stock <= 0 ? 'bg-secondary' :
+            p.stock < 15 ? (p.stock < 5 ? 'bg-danger' : 'bg-warning text-dark') :
+            'bg-success'
+          );
+        });
+      })
+      .catch(function () { /* la portada ya trae datos del servidor */ });
+  });
+
+  // 2) GET /agregar/<id> con X-Requested-With → respuesta JSON sin recargar.
+  document.addEventListener('click', function (e) {
+    var enlace = e.target.closest ? e.target.closest('a.js-agregar') : null;
+    if (!enlace) return;
+    e.preventDefault();
+    if (enlace.dataset.cargando === '1') return;
+    enlace.dataset.cargando = '1';
+
+    fetch(enlace.href, {
+      headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin'
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          avisar((data && data.mensaje) || 'No se pudo agregar al carrito.', 'danger');
+          return;
+        }
+        avisar(data.nombre + ' agregado. Total: S/ ' + data.total.toFixed(2), 'success');
+        // 3) GET /api/carrito → refresca el contador del navbar.
+        return fetch('/api/carrito', {
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (carrito) {
+            if (carrito && carrito.ok) pintarContadorCarrito(carrito.cantidad_items);
+          });
+      })
+      .catch(function () {
+        avisar('Error de conexion al agregar el producto.', 'danger');
+      })
+      .finally(function () {
+        enlace.dataset.cargando = '0';
+      });
+  });
+})();
 </script>
 {% endblock %}

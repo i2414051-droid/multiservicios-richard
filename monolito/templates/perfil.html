@@ -179,8 +179,8 @@ function cleanDoc(inp){
     aplicar();
   }
 })();
-setInterval(function(){
-  fetch('/api/mi-estado', {headers:{'X-Requested-With':'XMLHttpRequest'}})
+function actualizarMiEstadoPerfil(){
+  return fetch('/api/mi-estado', {headers:{'X-Requested-With':'XMLHttpRequest'}})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if(!d || !d.ok) return;
@@ -188,6 +188,8 @@ setInterval(function(){
       if(b){ b.style.background = d.color; b.textContent = d.nombre; }
     })
     .catch(function(){});
-}, 15000);
+}
+// Poller unico y limpiable: no se duplica si la pagina se vuelve a montar.
+window.crearPolling('mi-estado-perfil', actualizarMiEstadoPerfil, 15000, true);
 </script>
 {% endblock %}

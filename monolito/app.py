@@ -4066,6 +4066,333 @@ def actualizar_cantidad(id_producto):
 
 
 # ─────────────────────────────────────────────
+# API PUBLICA (JSON)
+# ─────────────────────────────────────────────
+# Endpoints de solo lectura para el frontend (fetch) y para poder explicar el
+# sistema desde F12 → Network → Fetch/XHR. Devuelven JSON puro; las rutas HTML
+# de siempre siguen funcionando igual.
+
+def _producto_a_json(p, extras=None):
+    """Convierte una fila de productos (DictCursor) en un dict serializable."""
+    extras = extras or []
+
+    def _url(ruta):
+        return url_for('static', filename=ruta) if ruta else None
+
+    imagen = p['imagen']
+    stock = int(p['stock'] or 0)
+    return {
+        'id': p['id'],
+        'nombre': p['nombre'],
+        'descripcion': p['descripcion'],
+        'precio': float(p['precio'] or 0),
+        'stock': stock,
+        'categoria': p['categoria'],
+        'disponible': stock > 0,
+        'imagen': _url(_thumb_imagen(imagen)) if imagen else None,
+        'imagen_original': _url(imagen) if imagen else None,
+        'imagenes_extra': [_url(_thumb_imagen(img)) for img in extras if img],
+    }
+
+
+@app.route('/api/productos')
+def api_productos():
+    """Lista de productos activos. Filtros: ?buscar=, ?categoria=, ?limite=."""
+    buscar = (request.args.get('buscar') or '').strip()
+    categoria = (request.args.get('categoria') or 'Todos').strip()
+    try:
+        limite = int(request.args.get('limite', 60))
+    except (TypeError, ValueError):
+        limite = 60
+    limite = min(max(limite, 1), 200)
+
+    cur = mysql.connection.cursor()
+    sql = f"SELECT {COLS_PRODUCTO} FROM {ALMACEN_DB}.productos WHERE nombre LIKE %s AND estado='activo'"
+    vals = [f'%{buscar}%']
+    if categoria and categoria != 'Todos':
+        sql += ' AND categoria=%s'
+        vals.append(categoria)
+    sql += f' ORDER BY id DESC LIMIT {limite}'
+    cur.execute(sql, tuple(vals))
+    productos = cur.fetchall()
+    extras = _imagenes_extra(cur, [p['id'] for p in productos])
+    cur.close()
+
+    data = [_producto_a_json(p, extras.get(p['id'], [])) for p in productos]
+    return jsonify({
+        'ok': True,
+        'buscar': buscar,
+        'categoria': categoria,
+        'total': len(data),
+        'productos': data,
+    })
+
+
+@app.route('/api/productos/<int:producto_id>')
+def api_producto(producto_id):
+    """Ficha de un producto activo."""
+    cur = mysql.connection.cursor()
+    cur.execute(
+        f"SELECT {COLS_PRODUCTO} FROM {ALMACEN_DB}.productos "
+        f"WHERE id=%s AND estado='activo'",
+        (producto_id,),
+    )
+    producto = cur.fetchone()
+    if not producto:
+        cur.close()
+        return jsonify({'ok': False, 'error': 'Producto no encontrado'}), 404
+    extras = _imagenes_extra(cur, [producto_id]).get(producto_id, [])
+    cur.close()
+    return jsonify({'ok': True, 'producto': _producto_a_json(producto, extras)})
+
+
+@app.route('/api/categorias')
+def api_categorias():
+    """Categorias disponibles en la tienda."""
+    return jsonify({'ok': True, 'categorias': CATEGORIAS})
+
+
+@app.route('/api/carrito')
+def api_carrito():
+    """Contenido actual del carrito (invitado o usuario logueado)."""
+    usuario = obtener_usuario()
+    cur = mysql.connection.cursor()
+    cur.execute(
+        f"""SELECT c.producto_id AS id, p.nombre, p.precio, c.cantidad, p.stock
+            FROM carrito c
+            JOIN {ALMACEN_DB}.productos p ON c.producto_id=p.id
+            WHERE c.usuario_id=%s
+            ORDER BY c.id""",
+        (usuario,),
+    )
+    filas = cur.fetchall()
+    cur.close()
+
+    items = []
+    for f in filas:
+        precio = float(f['precio'] or 0)
+        cantidad = int(f['cantidad'] or 0)
+        items.append({
+            'id': f['id'],
+            'nombre': f['nombre'],
+            'precio': precio,
+            'cantidad': cantidad,
+            'stock': int(f['stock'] or 0),
+            'subtotal': round(precio * cantidad, 2),
+        })
+    return jsonify({
+        'ok': True,
+        'items': items,
+        'cantidad_items': sum(i['cantidad'] for i in items),
+        'total': round(sum(i['subtotal'] for i in items), 2),
+    })
+
+
+@app.route('/api/health')
+def api_health():
+    """Estado del servicio y de la conexion a la base de datos."""
+    db_ok = True
+    try:
+        cur = mysql.connection.cursor()
+        cur.execute('SELECT 1')
+        cur.fetchone()
+        cur.close()
+    except Exception:
+        db_ok = False
+    return jsonify({
+        'ok': db_ok,
+        'servicio': 'multiservicios-richard',
+        'hora': _ahora_lima().isoformat(timespec='seconds'),
+        'base_datos': 'ok' if db_ok else 'error',
+    }), (200 if db_ok else 503)
+
+
+@app.route('/api/endpoints')
+def api_endpoints():
+    """Documentacion viva de los endpoints JSON del sistema.
+
+    Abrir esta URL en el navegador (o verla en F12) sirve para explicar que
+    endpoints existen, con que metodo se llaman y si requieren sesion.
+    """
+    endpoints = [
+        {'metodo': 'GET', 'ruta': '/api/productos', 'auth': 'publico',
+         'descripcion': 'Lista productos activos. Acepta ?buscar=, ?categoria= y ?limite=.'},
+        {'metodo': 'GET', 'ruta': '/api/productos/<id>', 'auth': 'publico',
+         'descripcion': 'Devuelve la ficha JSON de un producto activo.'},
+        {'metodo': 'GET', 'ruta': '/api/categorias', 'auth': 'publico',
+         'descripcion': 'Devuelve las categorias de la tienda.'},
+        {'metodo': 'GET', 'ruta': '/api/carrito', 'auth': 'publico',
+         'descripcion': 'Devuelve el carrito de la sesion actual con items y total.'},
+        {'metodo': 'GET', 'ruta': '/api/health', 'auth': 'publico',
+         'descripcion': 'Estado del servicio y de la conexion a MySQL.'},
+        {'metodo': 'GET', 'ruta': '/api/endpoints', 'auth': 'publico',
+         'descripcion': 'Este catalogo de endpoints en JSON.'},
+        {'metodo': 'GET', 'ruta': '/agregar/<id>', 'auth': 'publico',
+         'descripcion': 'Agrega al carrito. Con X-Requested-With: XMLHttpRequest responde JSON '
+                        '({ok, producto_id, nombre, precio, cantidad, subtotal, total}).'},
+        {'metodo': 'POST', 'ruta': '/actualizar-cantidad/<id>', 'auth': 'publico',
+         'descripcion': 'Actualiza una linea del carrito. Requiere JSON y token CSRF.'},
+        {'metodo': 'POST', 'ruta': '/api/consultar-documento', 'auth': 'publico',
+         'descripcion': 'Consulta DNI/RUC para el checkout. Recibe JSON {tipo, numero}.'},
+        {'metodo': 'POST', 'ruta': '/api/geocodificar', 'auth': 'cliente',
+         'descripcion': 'Convierte una direccion en latitud/longitud.'},
+        {'metodo': 'POST', 'ruta': '/api/geocodificar-inverso', 'auth': 'cliente',
+         'descripcion': 'Convierte latitud/longitud en una direccion.'},
+        {'metodo': 'GET', 'ruta': '/api/mi-estado', 'auth': 'cliente',
+         'descripcion': 'Estado de las entregas del usuario logueado.'},
+        {'metodo': 'GET', 'ruta': '/api/mis-entregas-estados', 'auth': 'cliente',
+         'descripcion': 'Lista el estado de todas las entregas del usuario.'},
+        {'metodo': 'GET', 'ruta': '/api/dashboard/grafico', 'auth': 'admin',
+         'descripcion': 'Datos del grafico del dashboard administrativo.'},
+    ]
+    # Agrupacion por flujo para poder explicar el sistema por funcionalidad.
+    # Cada entrada declara todos sus metodos; el conteo se calcula solo para
+    # que no quede desactualizado si manana se agrega una ruta.
+    def _e(metodos, ruta, auth, descripcion):
+        return {'metodos': metodos, 'ruta': ruta, 'auth': auth,
+                'descripcion': descripcion}
+
+    flujos = [
+        {
+            'nombre': 'Inicio de sesion',
+            'detalle': [
+                _e(['GET', 'POST'], '/login', 'publico',
+                   'GET muestra el formulario; POST valida correo y contrasena.'),
+                _e(['GET', 'POST'], '/Iniciar Sesion', 'publico',
+                   'Alias de /login (misma funcion, URL con espacio).'),
+                _e(['GET'], '/auth/google', 'publico',
+                   'Inicia el flujo OAuth 2.0 de Google.'),
+                _e(['GET'], '/auth/google/callback', 'publico',
+                   'Google vuelve con el code; se reutiliza o crea la cuenta.'),
+            ],
+        },
+        {
+            'nombre': 'Recuperacion de contrasena',
+            'detalle': [
+                _e(['GET', 'POST'], '/recuperar-password', 'publico',
+                   'Pide el correo y envia el enlace de recuperacion.'),
+                _e(['GET', 'POST'], '/restablecer-password/<token>', 'publico',
+                   'Valida el token y guarda la nueva contrasena.'),
+            ],
+        },
+        {
+            'nombre': 'Compra',
+            'detalle': [
+                _e(['GET'], '/', 'publico',
+                   'Catalogo: productos activos, buscador y categorias.'),
+                _e(['GET'], '/producto/<id>', 'publico',
+                   'Ficha de detalle del producto.'),
+                _e(['GET'], '/agregar/<id>', 'publico',
+                   'Agrega al carrito. Con X-Requested-With: XMLHttpRequest responde JSON.'),
+                _e(['GET'], '/carrito', 'publico',
+                   'Carrito de la sesion con items, subtotales y total.'),
+                _e(['POST'], '/actualizar-cantidad/<id>', 'publico',
+                   'Cambia la cantidad de una linea; recibe JSON y token CSRF.'),
+                _e(['GET'], '/eliminar_carrito/<id>', 'publico',
+                   'Quita un producto del carrito.'),
+                _e(['GET'], '/checkout', 'cliente',
+                   'Formulario de entrega, documento y pago.'),
+                _e(['POST'], '/procesar_compra', 'cliente',
+                   'Registra la venta, el detalle y el pago.'),
+                _e(['GET'], '/confirmacion/<id>', 'cliente',
+                   'Resumen posterior a la compra.'),
+                _e(['GET'], '/boleta/<venta_id>', 'cliente',
+                   'Boleta de la venta.'),
+                _e(['GET'], '/boleta_pdf/<venta_id>', 'cliente',
+                   'Boleta en PDF.'),
+                _e(['GET'], '/api/productos', 'publico',
+                   'Productos en JSON para la portada y el buscador.'),
+                _e(['GET'], '/api/productos/<id>', 'publico',
+                   'Producto puntual en JSON.'),
+                _e(['GET'], '/api/categorias', 'publico',
+                   'Categorias de la tienda en JSON.'),
+                _e(['GET'], '/api/carrito', 'publico',
+                   'Carrito actual en JSON (items, cantidad y total).'),
+                _e(['POST'], '/api/consultar-documento', 'publico',
+                   'Consulta DNI/RUC para el checkout.'),
+                _e(['POST'], '/api/geocodificar', 'cliente',
+                   'Convierte una direccion en latitud/longitud.'),
+                _e(['POST'], '/api/geocodificar-inverso', 'cliente',
+                   'Convierte latitud/longitud en una direccion.'),
+            ],
+        },
+        {
+            'nombre': 'Cerrar sesion',
+            'detalle': [
+                _e(['GET'], '/logout', 'cliente',
+                   'Limpia la sesion y redirige a la portada.'),
+                _e(['GET'], '/Cerrar Sesion', 'cliente',
+                   'Alias de /logout (misma funcion, URL con espacio).'),
+            ],
+        },
+        {
+            'nombre': 'Crear cuenta',
+            'detalle': [
+                _e(['GET', 'POST'], '/registro', 'publico',
+                   'GET muestra el formulario; POST crea el usuario cliente.'),
+            ],
+        },
+        {
+            'nombre': 'Mi perfil',
+            'detalle': [
+                _e(['GET', 'POST'], '/perfil', 'cliente',
+                   'GET muestra los datos personales; POST los actualiza.'),
+                _e(['POST'], '/perfil/solicitar-revision', 'cliente',
+                   'Pide revision del estado de la cuenta.'),
+                _e(['POST'], '/cambiar-password', 'cliente',
+                   'Cambia la contrasena del usuario logueado.'),
+                _e(['GET'], '/api/mi-estado', 'cliente',
+                   'Estado de la cuenta/entregas en JSON.'),
+                _e(['GET'], '/direcciones', 'cliente',
+                   'Lista las direcciones guardadas.'),
+                _e(['GET', 'POST'], '/direcciones/nueva', 'cliente',
+                   'Crea una direccion.'),
+                _e(['GET', 'POST'], '/direcciones/editar/<id>', 'cliente',
+                   'Edita una direccion existente.'),
+                _e(['GET'], '/direcciones/eliminar/<id>', 'cliente',
+                   'Elimina una direccion.'),
+            ],
+        },
+        {
+            'nombre': 'Mis compras',
+            'detalle': [
+                _e(['GET'], '/historial', 'cliente',
+                   'Lista las ventas del usuario logueado con su detalle.'),
+                _e(['GET'], '/boleta', 'cliente',
+                   'Formulario para consultar una boleta.'),
+                _e(['GET'], '/boleta/<venta_id>', 'cliente',
+                   'Muestra la boleta de una venta del usuario.'),
+                _e(['GET'], '/boleta_pdf/<venta_id>', 'cliente',
+                   'Descarga la boleta en PDF.'),
+                _e(['GET'], '/mis-entregas', 'cliente',
+                   'Seguimiento de las entregas del usuario.'),
+                _e(['POST'], '/mis-entregas/cancelar/<venta_id>', 'cliente',
+                   'Cancela un pedido propio.'),
+                _e(['GET'], '/api/mis-entregas-estados', 'cliente',
+                   'Estados de las entregas en JSON.'),
+                _e(['GET'], '/api/mi-estado', 'cliente',
+                   'Estado actual de la cuenta en JSON (compartido con perfil).'),
+            ],
+        },
+    ]
+
+    # Conteo automatico: rutas unicas y endpoints = suma de metodos.
+    for flujo in flujos:
+        flujo['total_rutas'] = len({e['ruta'] for e in flujo['detalle']})
+        flujo['total_endpoints'] = sum(len(e['metodos']) for e in flujo['detalle'])
+
+    return jsonify({
+        'ok': True,
+        'base_url': request.host_url.rstrip('/'),
+        'total': len(endpoints),
+        'endpoints': endpoints,
+        'flujos': flujos,
+        'nota': 'Los endpoints con auth=cliente/admin exigen sesion iniciada. '
+                'Los POST requieren el token CSRF del <meta name="csrf-token">.',
+    })
+
+
+# ─────────────────────────────────────────────
 # BOLETA
 # ─────────────────────────────────────────────
 @app.route('/boleta')
