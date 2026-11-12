@@ -156,6 +156,59 @@ _LIMITES = {
     'recuperar_password': (5, 60),
     'restablecer_password': (5, 60),
     'api_consultar_documento': (30, 60),
+    # API v1 (JWT). Los nombres son los endpoints del blueprint api_v1.
+    'api_v1.login': (12, 60),
+    'api_v1.register': (10, 60),
+    'api_v1.refresh': (30, 60),
+    'api_v1.forgot_password': (5, 60),
+    'api_v1.reset_password': (5, 60),
+    # Carrito: escrituras por usuario/IP. El limite general de POST sigue
+    # aplicando, pero estos son mas estrictos para evitar scripts.
+    'api_v1.agregar_item': (60, 60),
+    'api_v1.actualizar_item': (120, 60),
+    'api_v1.eliminar_item': (120, 60),
+    'api_v1.vaciar_carrito': (30, 60),
+    # Pedidos: crear cobra/descuenta stock, cancelar devuelve stock.
+    'api_v1.crear_pedido': (60, 60),
+    'api_v1.cancelar_pedido': (60, 60),
+    'api_v1.checkout_validar': (60, 60),
+    # Cuenta: direcciones y Libro de Reclamaciones.
+    'api_v1.crear_direccion': (30, 60),
+    'api_v1.actualizar_direccion': (60, 60),
+    'api_v1.eliminar_direccion': (60, 60),
+    'api_v1.predeterminar_direccion': (60, 60),
+    'api_v1.crear_reclamo': (20, 60),
+    # Admin (Fase 4): escrituras del panel.
+    'api_v1.admin_crear_producto': (30, 60),
+    'api_v1.admin_actualizar_producto': (60, 60),
+    'api_v1.admin_subir_imagen': (30, 60),
+    'api_v1.admin_eliminar_imagen': (60, 60),
+    'api_v1.admin_quitar_principal': (60, 60),
+    'api_v1.admin_activar_producto': (60, 60),
+    'api_v1.admin_eliminar_producto': (30, 60),
+    'api_v1.admin_estado_venta': (60, 60),
+    'api_v1.admin_visibilidad_venta': (120, 60),
+    'api_v1.admin_limpiar_ventas': (2, 60),
+    'api_v1.admin_estado_cliente': (60, 60),
+    'api_v1.admin_rol_usuario': (30, 60),
+    # Admin (Fase 5): proveedores, pedidos a proveedor, ingresos, salidas y
+    # entregas del panel.
+    'api_v1.admin_crear_proveedor': (30, 60),
+    'api_v1.admin_actualizar_proveedor': (60, 60),
+    'api_v1.admin_eliminar_proveedor': (30, 60),
+    'api_v1.admin_actualizar_pedido_compra': (120, 60),
+    'api_v1.admin_asignar_proveedor_pedido': (120, 60),
+    'api_v1.admin_quitar_proveedor_pedido': (120, 60),
+    'api_v1.admin_marcar_enviado_pedido': (60, 60),
+    'api_v1.admin_crear_ingreso': (30, 60),
+    'api_v1.admin_anular_ingreso': (60, 60),
+    'api_v1.admin_crear_salida': (60, 60),
+    'api_v1.admin_eliminar_salida': (60, 60),
+    'api_v1.admin_crear_entrega': (60, 60),
+    'api_v1.admin_actualizar_entrega': (120, 60),
+    'api_v1.admin_eliminar_entrega': (60, 60),
+    'api_v1.admin_productos_entrega': (120, 60),
+    'api_v1.admin_asignar_entrega': (60, 60),
 }
 _LIMITE_POST_GENERAL = (120, 60)
 
@@ -176,6 +229,12 @@ def _rate_permitido(clave, limite, ventana):
 
 
 def _respuesta_429(ventana):
+    if request.path.startswith('/api/v1/'):
+        return jsonify({'ok': False,
+                        'error': {
+                            'code': 'DEMASIADAS_SOLICITUDES',
+                            'message': 'Demasiadas solicitudes. Intenta en un minuto.',
+                        }}), 429, {'Retry-After': str(ventana)}
     if request.path.startswith('/api/') or request.is_json:
         return jsonify({'ok': False,
                         'error': 'Demasiadas solicitudes. Intenta en un minuto.'}), \
@@ -234,6 +293,10 @@ def _bloquear_get_cruzado():
 
 @app.before_request
 def _exigir_csrf():
+    # La API v1 usa JWT en Authorization y no cookies de navegador: el CSRF
+    # no aplica. El resto de /api/ (legacy) conserva su comportamiento.
+    if request.path.startswith('/api/v1/'):
+        return None
     if request.method in _METODOS_SEGUROS:
         return None
     if request.endpoint in _ENDPOINTS_SIN_CSRF:
@@ -3243,7 +3306,10 @@ def admin():
     where = "WHERE p.nombre LIKE %s"
     params = [f'%{buscar}%']
     sql_count = f"SELECT COUNT(*) AS total FROM {ALMACEN_DB}.productos p {where}"
-    sql_data = f"""SELECT p.* FROM {ALMACEN_DB}.productos p {where}
+    # No usar p.*: la tabla guarda imagen_datos (BLOB) y traerla para 15
+    # productos hace que la pagina tarde 6-15 s contra la BD remota. El listado
+    # solo necesita las columnas de COLS_PRODUCTO.
+    sql_data = f"""SELECT {COLS_PRODUCTO} FROM {ALMACEN_DB}.productos p {where}
                    ORDER BY p.id DESC"""
     items, total, page, total_pages = paginate_query(cur, sql_count, sql_data, tuple(params), page)
 
@@ -9174,8 +9240,35 @@ if _static_original is not None:
 init_kpi_biz(app)
 
 # ─────────────────────────────────────────────
+# API v1 — APP MOVIL (JWT, sin CSRF)
+# ─────────────────────────────────────────────
+# Se monta al final para que `mysql` y `bcrypt` ya existan. La web no cambia:
+# sigue usando sesion + CSRF en sus propias rutas.
+if os.environ.get('API_V1_ENABLED', '1') == '1':
+    from api import create_api
+    create_api(app, mysql, bcrypt)
+
+# ─────────────────────────────────────────────
 # RUN
 # ─────────────────────────────────────────────
+def _servir(host, port):
+    """Arranca un servidor WSGI para una familia de socket concreta."""
+    from werkzeug.serving import make_server
+    make_server(host, port, app, threaded=True).serve_forever()
+
+
 if __name__ == '__main__':
+    import threading
+
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # En Windows `localhost` resuelve primero a ::1. Werkzeug con 0.0.0.0 solo
+    # escucha IPv4, asi que algunos navegadores se quedan esperando el intento
+    # IPv6 antes de caer a 127.0.0.1. Se atienden ambas familias en el mismo
+    # puerto para que `localhost` responda de inmediato.
+    servidores = []
+    for host in ('0.0.0.0', '::1'):
+        hilo = threading.Thread(target=_servir, args=(host, port), daemon=True)
+        hilo.start()
+        servidores.append(hilo)
+    for hilo in servidores:
+        hilo.join()

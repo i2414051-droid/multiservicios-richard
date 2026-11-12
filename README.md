@@ -347,6 +347,20 @@ no tenemos: la entrada para decidir que variedad traer.
 > Ninguna de estas escrituras puede romper la tienda: todas van envueltas en
 > try/except y usan la conexion propia del modulo de KPIs.
 
+## API v1 para la app móvil (`/api/v1`)
+
+La API convive con la web: la web sigue con cookie + CSRF y `/api/v1` usa JWT
+con refresh rotativo. El diseño completo y el inventario de endpoints están en
+[`docs/API_V1.md`](docs/API_V1.md).
+
+- Swagger UI: `/api/v1/docs`
+- OpenAPI: `/api/v1/openapi.json`
+- Variables nuevas: `API_V1_ENABLED`, `JWT_SECRET_KEY`, `JWT_ACCESS_MINUTOS`,
+  `JWT_REFRESH_DIAS`, `PUBLIC_BASE_URL`.
+- Pruebas: `pytest monolito/tests/api -q`.
+- `auth_refresh_tokens` y `usuarios.token_version` se crean solas al primer
+  login; el DDL manual está en `monolito/api/schema.sql`.
+
 ## Notas
 
 - El monolito de la raíz sirve **estática + portada + tienda + admin** en un solo puerto y es lo que se ve en el enlace de Render.- Los microservicios comparten la misma BD pero cada uno corre en su propio puerto (5000/5001); la comunicacion entre ellos usa `X-Internal-Key`.

@@ -18,3 +18,7 @@ reportlab==4.5.1
 requests==2.34.2
 Pillow==12.2.0
 gunicorn==21.2.0
+# API v1 (app movil): JWT con refresh rotativo, validacion y OpenAPI.
+Flask-JWT-Extended==4.7.4
+pydantic==2.14.3
+apispec==6.10.1

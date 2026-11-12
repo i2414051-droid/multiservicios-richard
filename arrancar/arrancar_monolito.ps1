@@ -28,7 +28,7 @@ if (-not $env:PORT)             { $env:PORT             = '5000' }
 
 # Aviso si la password quedo como placeholder: la conexion va a fallar y el
 # error real se ve solo con DEBUG_ERRORS=1
-if ($env:MYSQL_PASSWORD -like 'PEGAR_AQUI*') {
+if ($env:MYSQL_PASSWORD -like 'PEGAR_AQUI*' -or $env:MYSQL_PASSWORD -eq 'tu_password_aqui') {
     Write-Host "[Monolito] MYSQL_PASSWORD sigue como placeholder en .env" -ForegroundColor Red
 }
 
